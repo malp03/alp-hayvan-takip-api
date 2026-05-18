@@ -192,6 +192,54 @@ def require_admin(kullanici: models.Kullanici = Depends(get_current_user)) -> mo
     return kullanici
 
 
+def sifre_gucu_kontrol(sifre: str) -> None:
+    if not sifre or len(sifre) < 8:
+        raise HTTPException(status_code=400, detail="Sifre en az 8 karakter olmalidir.")
+
+
+def islem_payload(kayit: models.IslemGecmisi) -> Dict[str, Any]:
+    return {
+        "id": kayit.id,
+        "zaman": kayit.zaman,
+        "detay": kayit.detay,
+        "islem_tipi": kayit.islem_tipi,
+        "kullanici_id": kayit.kullanici_id,
+        "kullanici_adi": kayit.kullanici_adi,
+        "rol": kayit.rol,
+        "ciftlik_id": kayit.ciftlik_id,
+        "hedef_tipi": kayit.hedef_tipi,
+        "hedef_id": kayit.hedef_id,
+    }
+
+
+def audit_kaydi(
+    db: Session,
+    kullanici: Optional[models.Kullanici],
+    islem_tipi: str,
+    detay: str,
+    *,
+    ciftlik_id: Optional[str] = None,
+    hedef_tipi: Optional[str] = None,
+    hedef_id: Optional[str] = None,
+) -> None:
+    if kullanici and kullanici.rol != "admin" and not ciftlik_id:
+        ciftlik_id = kullanici.ciftlik_id
+    db.add(
+        models.IslemGecmisi(
+            id=yeni_id(),
+            zaman=simdi(),
+            detay=detay,
+            islem_tipi=islem_tipi,
+            kullanici_id=kullanici.id if kullanici else None,
+            kullanici_adi=kullanici.kullanici_adi if kullanici else None,
+            rol=kullanici.rol if kullanici else None,
+            ciftlik_id=ciftlik_id,
+            hedef_tipi=hedef_tipi,
+            hedef_id=hedef_id,
+        )
+    )
+
+
 def kullanici_ciftlik_id(kullanici: models.Kullanici, requested_ciftlik_id: Optional[str] = None) -> Optional[str]:
     if kullanici.rol == "admin":
         return requested_ciftlik_id
@@ -778,6 +826,15 @@ def login(giris: schemas.LoginRequest, db: Session = Depends(get_db)):
     if not kullanici or not kullanici.aktif or not sifre_dogrula(giris.sifre, kullanici.sifre_hash):
         raise HTTPException(status_code=401, detail="Kullanıcı adı veya şifre hatalı.")
     kullanici.son_giris = simdi()
+    audit_kaydi(
+        db,
+        kullanici,
+        "giris",
+        f"Kullanici giris yapti: {kullanici.kullanici_adi}",
+        ciftlik_id=kullanici.ciftlik_id,
+        hedef_tipi="kullanici",
+        hedef_id=kullanici.id,
+    )
     db.commit()
     db.refresh(kullanici)
     return {"access_token": token_uret(kullanici), "kullanici": kullanici_payload(kullanici)}
@@ -786,6 +843,29 @@ def login(giris: schemas.LoginRequest, db: Session = Depends(get_db)):
 @app.get("/api/auth/me", response_model=schemas.KullaniciResponse)
 def me(kullanici: models.Kullanici = Depends(get_current_user)):
     return kullanici_payload(kullanici)
+
+
+@app.post("/api/auth/change-password", response_model=schemas.IslemSonucResponse)
+def change_password(
+    istek: schemas.SifreDegistirRequest,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    if not sifre_dogrula(istek.eski_sifre, kullanici.sifre_hash):
+        raise HTTPException(status_code=400, detail="Eski sifre hatali.")
+    sifre_gucu_kontrol(istek.yeni_sifre)
+    kullanici.sifre_hash = sifre_hashle(istek.yeni_sifre)
+    audit_kaydi(
+        db,
+        kullanici,
+        "sifre_degistir",
+        f"Kullanici sifresini degistirdi: {kullanici.kullanici_adi}",
+        ciftlik_id=kullanici.ciftlik_id,
+        hedef_tipi="kullanici",
+        hedef_id=kullanici.id,
+    )
+    db.commit()
+    return {"status": "ok", "message": "Sifre degistirildi.", "id": kullanici.id}
 
 
 @app.get("/api/ciftlikler", response_model=List[schemas.CiftlikResponse])
@@ -806,7 +886,7 @@ def get_ciftlikler(
 def create_ciftlik(
     ciftlik: schemas.CiftlikCreate,
     db: Session = Depends(get_db),
-    _: models.Kullanici = Depends(require_admin),
+    admin: models.Kullanici = Depends(require_admin),
 ):
     veri = model_verisi(ciftlik)
     ciftlik_id = metin(veri.get("id")) or yeni_id()
@@ -820,6 +900,15 @@ def create_ciftlik(
         olusturma_tarihi=simdi(),
     )
     db.add(db_ciftlik)
+    audit_kaydi(
+        db,
+        admin,
+        "ciftlik_olustur",
+        f"Ciftlik olusturuldu: {db_ciftlik.ad}",
+        ciftlik_id=db_ciftlik.id,
+        hedef_tipi="ciftlik",
+        hedef_id=db_ciftlik.id,
+    )
     db.commit()
     db.refresh(db_ciftlik)
     return db_ciftlik
@@ -830,16 +919,81 @@ def update_ciftlik(
     ciftlik_id: str,
     ciftlik: schemas.CiftlikUpdate,
     db: Session = Depends(get_db),
-    _: models.Kullanici = Depends(require_admin),
+    admin: models.Kullanici = Depends(require_admin),
 ):
     db_ciftlik = ciftlik_bul(db, ciftlik_id)
     veri = model_verisi(ciftlik, exclude_unset=True)
     for alan in ("ad", "aciklama", "aktif"):
         if alan in veri:
             setattr(db_ciftlik, alan, veri[alan])
+    audit_kaydi(
+        db,
+        admin,
+        "ciftlik_guncelle",
+        f"Ciftlik guncellendi: {db_ciftlik.ad}",
+        ciftlik_id=db_ciftlik.id,
+        hedef_tipi="ciftlik",
+        hedef_id=db_ciftlik.id,
+    )
     db.commit()
     db.refresh(db_ciftlik)
     return db_ciftlik
+
+
+@app.delete("/api/ciftlikler/{ciftlik_id}", response_model=schemas.IslemSonucResponse)
+def delete_ciftlik(
+    ciftlik_id: str,
+    db: Session = Depends(get_db),
+    admin: models.Kullanici = Depends(require_admin),
+):
+    db_ciftlik = ciftlik_bul(db, ciftlik_id)
+    silinen_ad = db_ciftlik.ad
+    hayvan_idleri = [
+        satir[0]
+        for satir in db.query(models.Hayvan.id).filter(models.Hayvan.ciftlik_id == ciftlik_id).all()
+    ]
+    silinen_tohumlama = 0
+    silinen_asi = 0
+    silinen_uyari = 0
+    if hayvan_idleri:
+        silinen_tohumlama = db.query(models.Tohumlama).filter(
+            models.Tohumlama.hayvan_id.in_(hayvan_idleri)
+        ).delete(synchronize_session=False)
+        silinen_asi = db.query(models.AsiProsedur).filter(
+            models.AsiProsedur.hayvan_id.in_(hayvan_idleri)
+        ).delete(synchronize_session=False)
+        silinen_uyari = db.query(models.Uyari).filter(
+            models.Uyari.hayvan_id.in_(hayvan_idleri)
+        ).delete(synchronize_session=False)
+    silinen_hayvan = db.query(models.Hayvan).filter(
+        models.Hayvan.ciftlik_id == ciftlik_id
+    ).delete(synchronize_session=False)
+    silinen_kullanici = db.query(models.Kullanici).filter(
+        models.Kullanici.ciftlik_id == ciftlik_id
+    ).delete(synchronize_session=False)
+    db.delete(db_ciftlik)
+    audit_kaydi(
+        db,
+        admin,
+        "ciftlik_sil",
+        (
+            f"Ciftlik silindi: {silinen_ad}. {silinen_hayvan} hayvan, "
+            f"{silinen_kullanici} kullanici kaldirildi."
+        ),
+        ciftlik_id=ciftlik_id,
+        hedef_tipi="ciftlik",
+        hedef_id=ciftlik_id,
+    )
+    db.commit()
+    return {
+        "status": "ok",
+        "message": (
+            f"Ciftlik silindi. {silinen_hayvan} hayvan, {silinen_kullanici} kullanici, "
+            f"{silinen_tohumlama} tohumlama, {silinen_asi} asi/prosedur ve "
+            f"{silinen_uyari} uyari kaydi kaldirildi."
+        ),
+        "id": ciftlik_id,
+    }
 
 
 @app.get("/api/kullanicilar", response_model=List[schemas.KullaniciResponse])
@@ -854,10 +1008,11 @@ def get_kullanicilar(
 def create_kullanici(
     kullanici: schemas.KullaniciCreate,
     db: Session = Depends(get_db),
-    _: models.Kullanici = Depends(require_admin),
+    admin: models.Kullanici = Depends(require_admin),
 ):
     veri = model_verisi(kullanici)
     kullanici_adi = veri["kullanici_adi"].strip().lower()
+    sifre_gucu_kontrol(veri["sifre"])
     if db.query(models.Kullanici).filter(models.Kullanici.kullanici_adi == kullanici_adi).first():
         raise HTTPException(status_code=400, detail="Bu kullanıcı adı zaten kayıtlı.")
     rol = veri.get("rol") or "ciftlik"
@@ -876,6 +1031,15 @@ def create_kullanici(
         olusturma_tarihi=simdi(),
     )
     db.add(db_kullanici)
+    audit_kaydi(
+        db,
+        admin,
+        "kullanici_olustur",
+        f"Kullanici olusturuldu: {db_kullanici.kullanici_adi}",
+        ciftlik_id=db_kullanici.ciftlik_id,
+        hedef_tipi="kullanici",
+        hedef_id=db_kullanici.id,
+    )
     db.commit()
     db.refresh(db_kullanici)
     return kullanici_payload(db_kullanici)
@@ -886,7 +1050,7 @@ def update_kullanici(
     kullanici_id: str,
     kullanici: schemas.KullaniciUpdate,
     db: Session = Depends(get_db),
-    _: models.Kullanici = Depends(require_admin),
+    admin: models.Kullanici = Depends(require_admin),
 ):
     db_kullanici = db.query(models.Kullanici).filter(models.Kullanici.id == kullanici_id).first()
     if not db_kullanici:
@@ -895,6 +1059,7 @@ def update_kullanici(
     if "kullanici_adi" in veri:
         db_kullanici.kullanici_adi = veri["kullanici_adi"].strip().lower()
     if "sifre" in veri and veri["sifre"]:
+        sifre_gucu_kontrol(veri["sifre"])
         db_kullanici.sifre_hash = sifre_hashle(veri["sifre"])
     if "rol" in veri:
         db_kullanici.rol = veri["rol"]
@@ -902,9 +1067,78 @@ def update_kullanici(
         db_kullanici.ciftlik_id = veri["ciftlik_id"] if db_kullanici.rol != "admin" else None
     if "aktif" in veri:
         db_kullanici.aktif = bool(veri["aktif"])
+    audit_kaydi(
+        db,
+        admin,
+        "kullanici_guncelle",
+        f"Kullanici guncellendi: {db_kullanici.kullanici_adi}",
+        ciftlik_id=db_kullanici.ciftlik_id,
+        hedef_tipi="kullanici",
+        hedef_id=db_kullanici.id,
+    )
     db.commit()
     db.refresh(db_kullanici)
     return kullanici_payload(db_kullanici)
+
+
+@app.post("/api/kullanicilar/{kullanici_id}/sifre-sifirla", response_model=schemas.IslemSonucResponse)
+def reset_kullanici_sifresi(
+    kullanici_id: str,
+    istek: schemas.SifreSifirlaRequest,
+    db: Session = Depends(get_db),
+    admin: models.Kullanici = Depends(require_admin),
+):
+    db_kullanici = db.query(models.Kullanici).filter(models.Kullanici.id == kullanici_id).first()
+    if not db_kullanici:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi.")
+    sifre_gucu_kontrol(istek.yeni_sifre)
+    db_kullanici.sifre_hash = sifre_hashle(istek.yeni_sifre)
+    audit_kaydi(
+        db,
+        admin,
+        "sifre_sifirla",
+        f"Kullanici sifresi sifirlandi: {db_kullanici.kullanici_adi}",
+        ciftlik_id=db_kullanici.ciftlik_id,
+        hedef_tipi="kullanici",
+        hedef_id=db_kullanici.id,
+    )
+    db.commit()
+    return {"status": "ok", "message": "Kullanici sifresi sifirlandi.", "id": kullanici_id}
+
+
+@app.delete("/api/kullanicilar/{kullanici_id}", response_model=schemas.IslemSonucResponse)
+def delete_kullanici(
+    kullanici_id: str,
+    db: Session = Depends(get_db),
+    admin: models.Kullanici = Depends(require_admin),
+):
+    db_kullanici = db.query(models.Kullanici).filter(models.Kullanici.id == kullanici_id).first()
+    if not db_kullanici:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi.")
+    if db_kullanici.id == admin.id:
+        raise HTTPException(status_code=400, detail="Kendi admin kullanicinizi silemezsiniz.")
+    if db_kullanici.rol == "admin":
+        kalan_admin = db.query(models.Kullanici).filter(
+            models.Kullanici.rol == "admin",
+            models.Kullanici.aktif.is_(True),
+            models.Kullanici.id != kullanici_id,
+        ).count()
+        if kalan_admin == 0:
+            raise HTTPException(status_code=400, detail="Son aktif admin kullanicisi silinemez.")
+    silinen_ad = db_kullanici.kullanici_adi
+    silinen_ciftlik_id = db_kullanici.ciftlik_id
+    db.delete(db_kullanici)
+    audit_kaydi(
+        db,
+        admin,
+        "kullanici_sil",
+        f"Kullanici silindi: {silinen_ad}",
+        ciftlik_id=silinen_ciftlik_id,
+        hedef_tipi="kullanici",
+        hedef_id=kullanici_id,
+    )
+    db.commit()
+    return {"status": "ok", "message": f"Kullanici silindi: {silinen_ad}", "id": kullanici_id}
 
 
 @app.get("/api/hayvanlar", response_model=List[schemas.HayvanResponse])
@@ -962,6 +1196,15 @@ def create_hayvan(
     db_hayvan = models.Hayvan(id=veri["id"])
     db.add(db_hayvan)
     db_hayvana_yaz(db, db_hayvan, veri)
+    audit_kaydi(
+        db,
+        kullanici,
+        "hayvan_olustur",
+        f"Hayvan olusturuldu: {veri.get('kupe_no') or db_hayvan.id}",
+        ciftlik_id=db_hayvan.ciftlik_id,
+        hedef_tipi="hayvan",
+        hedef_id=db_hayvan.id,
+    )
     db.commit()
     db.refresh(db_hayvan)
     return db_hayvandan_payload(db_hayvan)
@@ -989,6 +1232,15 @@ def update_hayvan(
         ciftlik_bul(db, mevcut["ciftlik_id"])
     veri = normalize_hayvan(mevcut, hayvan_id=db_hayvan.id)
     kupe_cakismasi_kontrol(db, veri, haric_id=db_hayvan.id, ciftlik_id=veri.get("ciftlik_id"))
+    audit_kaydi(
+        db,
+        kullanici,
+        "hayvan_guncelle",
+        f"Hayvan guncellendi: {veri.get('kupe_no') or db_hayvan.id}",
+        ciftlik_id=veri.get("ciftlik_id"),
+        hedef_tipi="hayvan",
+        hedef_id=db_hayvan.id,
+    )
     return response_kaydet(db, db_hayvan, veri)
 
 
@@ -1002,13 +1254,33 @@ def delete_hayvan(
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     if kalici:
         silinen_id = db_hayvan.id
+        silinen_kupe = db_hayvan.ciftlik_kupe_no or db_hayvan.resmi_kupe_no or db_hayvan.id
+        silinen_ciftlik_id = db_hayvan.ciftlik_id
         db.delete(db_hayvan)
+        audit_kaydi(
+            db,
+            kullanici,
+            "hayvan_sil",
+            f"Hayvan kalici silindi: {silinen_kupe}",
+            ciftlik_id=silinen_ciftlik_id,
+            hedef_tipi="hayvan",
+            hedef_id=silinen_id,
+        )
         db.commit()
         return {"status": "ok", "message": "Hayvan kalıcı olarak silindi.", "id": silinen_id}
 
     veri = db_hayvandan_payload(db_hayvan)
     veri["arsivli"] = True
     veri["arsiv_tarihi"] = bugun()
+    audit_kaydi(
+        db,
+        kullanici,
+        "hayvan_arsivle",
+        f"Hayvan arsive alindi: {veri.get('kupe_no') or db_hayvan.id}",
+        ciftlik_id=veri.get("ciftlik_id"),
+        hedef_tipi="hayvan",
+        hedef_id=db_hayvan.id,
+    )
     response_kaydet(db, db_hayvan, veri)
     return {"status": "ok", "message": "Hayvan arşive alındı.", "id": db_hayvan.id}
 
@@ -1292,6 +1564,58 @@ def get_rapor_ozet(
         "kesildi": sum(1 for h in hayvanlar if h.get("kesildi")),
         "cins_dagilimi": cins_dagilimi,
         "acik_uyari": len(uyarilar),
+    }
+
+
+@app.get("/api/islem-gecmisi", response_model=List[schemas.IslemGecmisiResponse])
+def get_islem_gecmisi(
+    limit: int = Query(default=100, ge=1, le=500),
+    ciftlik_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    sorgu = db.query(models.IslemGecmisi)
+    if kullanici.rol == "admin":
+        if ciftlik_id:
+            sorgu = sorgu.filter(models.IslemGecmisi.ciftlik_id == ciftlik_id)
+    else:
+        sorgu = sorgu.filter(models.IslemGecmisi.ciftlik_id == kullanici.ciftlik_id)
+    kayitlar = sorgu.order_by(models.IslemGecmisi.zaman.desc()).limit(limit).all()
+    return [islem_payload(kayit) for kayit in kayitlar]
+
+
+@app.get("/api/yedek", response_model=schemas.YedekResponse)
+def get_yedek(
+    db: Session = Depends(get_db),
+    admin: models.Kullanici = Depends(require_admin),
+):
+    ciftlikler = [
+        {
+            "id": c.id,
+            "ad": c.ad,
+            "aciklama": c.aciklama,
+            "aktif": bool(c.aktif),
+            "olusturma_tarihi": c.olusturma_tarihi,
+        }
+        for c in db.query(models.Ciftlik).order_by(models.Ciftlik.ad).all()
+    ]
+    kullanicilar = [kullanici_payload(k) for k in db.query(models.Kullanici).order_by(models.Kullanici.kullanici_adi).all()]
+    hayvanlar = [db_hayvandan_payload(h) for h in db.query(models.Hayvan).order_by(models.Hayvan.id).all()]
+    gecmis = db.query(models.IslemGecmisi).order_by(models.IslemGecmisi.zaman.desc()).limit(500).all()
+    audit_kaydi(
+        db,
+        admin,
+        "yedek_al",
+        "Online yedek indirildi.",
+        hedef_tipi="yedek",
+    )
+    db.commit()
+    return {
+        "olusturma_zamani": simdi(),
+        "ciftlikler": ciftlikler,
+        "kullanicilar": kullanicilar,
+        "hayvanlar": hayvanlar,
+        "islem_gecmisi": [islem_payload(kayit) for kayit in gecmis],
     }
 
 

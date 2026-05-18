@@ -74,19 +74,38 @@ def ensure_sqlite_schema():
     if not SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
         return
     with engine.begin() as connection:
-        tables = connection.exec_driver_sql(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='hayvanlar'"
-        ).fetchall()
-        if not tables:
-            return
-        columns = {
-            row[1]
-            for row in connection.exec_driver_sql("PRAGMA table_info(hayvanlar)").fetchall()
-        }
-        if "veri_json" not in columns:
-            connection.exec_driver_sql("ALTER TABLE hayvanlar ADD COLUMN veri_json TEXT")
-        if "ciftlik_id" not in columns:
-            connection.exec_driver_sql("ALTER TABLE hayvanlar ADD COLUMN ciftlik_id VARCHAR")
+        def table_exists(table):
+            return bool(connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchall())
+
+        def columns_for(table):
+            return {
+                row[1]
+                for row in connection.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+            }
+
+        if table_exists("hayvanlar"):
+            columns = columns_for("hayvanlar")
+            if "veri_json" not in columns:
+                connection.exec_driver_sql("ALTER TABLE hayvanlar ADD COLUMN veri_json TEXT")
+            if "ciftlik_id" not in columns:
+                connection.exec_driver_sql("ALTER TABLE hayvanlar ADD COLUMN ciftlik_id VARCHAR")
+
+        if table_exists("islem_gecmisi"):
+            columns = columns_for("islem_gecmisi")
+            for column in (
+                "islem_tipi",
+                "kullanici_id",
+                "kullanici_adi",
+                "rol",
+                "ciftlik_id",
+                "hedef_tipi",
+                "hedef_id",
+            ):
+                if column not in columns:
+                    connection.exec_driver_sql(f"ALTER TABLE islem_gecmisi ADD COLUMN {column} VARCHAR")
 
 
 def ensure_postgres_security():
@@ -118,6 +137,15 @@ def ensure_postgres_schema_updates():
         connection.exec_driver_sql("ALTER TABLE IF EXISTS public.hayvanlar DROP CONSTRAINT IF EXISTS hayvanlar_ciftlik_kupe_no_key")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_hayvanlar_resmi_kupe_no ON public.hayvanlar (resmi_kupe_no)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_hayvanlar_ciftlik_kupe_no ON public.hayvanlar (ciftlik_kupe_no)")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS islem_tipi VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS kullanici_id VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS kullanici_adi VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS rol VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS ciftlik_id VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS hedef_tipi VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS hedef_id VARCHAR")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_islem_gecmisi_ciftlik_id ON public.islem_gecmisi (ciftlik_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_islem_gecmisi_islem_tipi ON public.islem_gecmisi (islem_tipi)")
 
 
 def get_db():

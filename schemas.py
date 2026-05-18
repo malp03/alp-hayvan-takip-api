@@ -75,6 +75,15 @@ class LoginResponse(AlpModel):
     kullanici: KullaniciResponse
 
 
+class SifreDegistirRequest(AlpModel):
+    eski_sifre: str
+    yeni_sifre: str
+
+
+class SifreSifirlaRequest(AlpModel):
+    yeni_sifre: str
+
+
 class TohumlamaBase(AlpModel):
     tarih: str
     sekil: Optional[str] = None
@@ -254,3 +263,24 @@ class IslemSonucResponse(AlpModel):
     status: str = "ok"
     message: str
     id: Optional[str] = None
+
+
+class IslemGecmisiResponse(AlpModel):
+    id: str
+    zaman: str
+    detay: str
+    islem_tipi: Optional[str] = None
+    kullanici_id: Optional[str] = None
+    kullanici_adi: Optional[str] = None
+    rol: Optional[str] = None
+    ciftlik_id: Optional[str] = None
+    hedef_tipi: Optional[str] = None
+    hedef_id: Optional[str] = None
+
+
+class YedekResponse(AlpModel):
+    olusturma_zamani: str
+    ciftlikler: List[Dict[str, Any]] = Field(default_factory=list)
+    kullanicilar: List[Dict[str, Any]] = Field(default_factory=list)
+    hayvanlar: List[Dict[str, Any]] = Field(default_factory=list)
+    islem_gecmisi: List[IslemGecmisiResponse] = Field(default_factory=list)
