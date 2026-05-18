@@ -1,4 +1,4 @@
-from database import engine, Base, ensure_postgres_security, ensure_sqlite_schema
+from database import engine, Base, ensure_postgres_schema_updates, ensure_postgres_security, ensure_sqlite_schema
 import models
 
 def init_db():
@@ -6,6 +6,7 @@ def init_db():
     print("Veritabanı tabloları oluşturuluyor...")
     Base.metadata.create_all(bind=engine)
     ensure_sqlite_schema()
+    ensure_postgres_schema_updates()
     ensure_postgres_security()
     print("Veritabanı hazır!")
 

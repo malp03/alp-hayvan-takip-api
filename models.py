@@ -10,8 +10,9 @@ class Hayvan(Base):
     __tablename__ = "hayvanlar"
 
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
-    resmi_kupe_no = Column(String, unique=True, index=True, nullable=True)
-    ciftlik_kupe_no = Column(String, unique=True, index=True, nullable=True)
+    ciftlik_id = Column(String, ForeignKey("ciftlikler.id"), index=True, nullable=True)
+    resmi_kupe_no = Column(String, index=True, nullable=True)
+    ciftlik_kupe_no = Column(String, index=True, nullable=True)
     ad = Column(String, nullable=True)
     
     yas_yil = Column(Integer, default=0)
@@ -35,9 +36,38 @@ class Hayvan(Base):
     son_guncelleme = Column(String, nullable=True)
 
     # İlişkiler
+    ciftlik = relationship("Ciftlik", back_populates="hayvanlar")
     tohumlamalar = relationship("Tohumlama", back_populates="hayvan", cascade="all, delete-orphan")
     asi_prosedurler = relationship("AsiProsedur", back_populates="hayvan", cascade="all, delete-orphan")
     uyarilar = relationship("Uyari", back_populates="hayvan", cascade="all, delete-orphan")
+
+
+class Ciftlik(Base):
+    __tablename__ = "ciftlikler"
+
+    id = Column(String, primary_key=True, default=generate_uuid, index=True)
+    ad = Column(String, nullable=False)
+    aciklama = Column(Text, nullable=True)
+    aktif = Column(Boolean, default=True)
+    olusturma_tarihi = Column(String, nullable=True)
+
+    hayvanlar = relationship("Hayvan", back_populates="ciftlik")
+    kullanicilar = relationship("Kullanici", back_populates="ciftlik")
+
+
+class Kullanici(Base):
+    __tablename__ = "kullanicilar"
+
+    id = Column(String, primary_key=True, default=generate_uuid, index=True)
+    kullanici_adi = Column(String, unique=True, index=True, nullable=False)
+    sifre_hash = Column(Text, nullable=False)
+    rol = Column(String, default="ciftlik", nullable=False)  # admin / ciftlik
+    ciftlik_id = Column(String, ForeignKey("ciftlikler.id"), nullable=True)
+    aktif = Column(Boolean, default=True)
+    olusturma_tarihi = Column(String, nullable=True)
+    son_giris = Column(String, nullable=True)
+
+    ciftlik = relationship("Ciftlik", back_populates="kullanicilar")
 
 class Tohumlama(Base):
     __tablename__ = "tohumlamalar"

@@ -85,15 +85,39 @@ def ensure_sqlite_schema():
         }
         if "veri_json" not in columns:
             connection.exec_driver_sql("ALTER TABLE hayvanlar ADD COLUMN veri_json TEXT")
+        if "ciftlik_id" not in columns:
+            connection.exec_driver_sql("ALTER TABLE hayvanlar ADD COLUMN ciftlik_id VARCHAR")
 
 
 def ensure_postgres_security():
     if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
         return
-    tables = ["hayvanlar", "tohumlamalar", "asi_prosedurler", "uyarilar", "islem_gecmisi"]
+    tables = [
+        "ciftlikler",
+        "kullanicilar",
+        "hayvanlar",
+        "tohumlamalar",
+        "asi_prosedurler",
+        "uyarilar",
+        "islem_gecmisi",
+    ]
     with engine.begin() as connection:
         for table in tables:
             connection.exec_driver_sql(f'ALTER TABLE IF EXISTS public.{table} ENABLE ROW LEVEL SECURITY')
+
+
+def ensure_postgres_schema_updates():
+    if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+        return
+    with engine.begin() as connection:
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.hayvanlar ADD COLUMN IF NOT EXISTS ciftlik_id VARCHAR")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_hayvanlar_ciftlik_id ON public.hayvanlar (ciftlik_id)")
+        connection.exec_driver_sql("DROP INDEX IF EXISTS public.ix_hayvanlar_resmi_kupe_no")
+        connection.exec_driver_sql("DROP INDEX IF EXISTS public.ix_hayvanlar_ciftlik_kupe_no")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.hayvanlar DROP CONSTRAINT IF EXISTS hayvanlar_resmi_kupe_no_key")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.hayvanlar DROP CONSTRAINT IF EXISTS hayvanlar_ciftlik_kupe_no_key")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_hayvanlar_resmi_kupe_no ON public.hayvanlar (resmi_kupe_no)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_hayvanlar_ciftlik_kupe_no ON public.hayvanlar (ciftlik_kupe_no)")
 
 
 def get_db():

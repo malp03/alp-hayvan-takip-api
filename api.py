@@ -1,16 +1,28 @@
 from datetime import datetime, timedelta
+import base64
+import hashlib
+import hmac
 import json
 import os
+import secrets
+import time
 from typing import Any, Dict, Iterable, List, Optional
 import uuid
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 import uvicorn
 
-from database import Base, engine, ensure_postgres_security, ensure_sqlite_schema, get_db
+from database import (
+    Base,
+    engine,
+    ensure_postgres_schema_updates,
+    ensure_postgres_security,
+    ensure_sqlite_schema,
+    get_db,
+)
 import models
 import schemas
 
@@ -32,12 +44,17 @@ app.add_middleware(
 
 Base.metadata.create_all(bind=engine)
 ensure_sqlite_schema()
+ensure_postgres_schema_updates()
 ensure_postgres_security()
 
 TARIH_FORMATI = "%d/%m/%Y"
 ZAMAN_FORMATI = "%d/%m/%Y %H:%M:%S"
 ERKEK_CINSLER = {"Erkek Buzağı", "Dana"}
 DISI_CINSLER = {"Dişi Buzağı", "Düve", "Sağmal İnek", "Kuru İnek"}
+DEFAULT_CIFTLIK_ID = os.getenv("ALP_DEFAULT_CIFTLIK_ID", "varsayilan-ciftlik")
+DEFAULT_CIFTLIK_ADI = os.getenv("ALP_DEFAULT_CIFTLIK_ADI", "Varsayılan Çiftlik")
+AUTH_SECRET = os.getenv("ALP_AUTH_SECRET", "alp-ziraat-dev-secret-change-me")
+TOKEN_TTL_SECONDS = int(os.getenv("ALP_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 
 
 def simdi() -> str:
@@ -74,6 +91,120 @@ def model_verisi(model: Any, *, exclude_unset: bool = False) -> Dict[str, Any]:
             by_alias=True,
         )
     return model.dict(exclude_unset=exclude_unset, by_alias=True)
+
+
+def b64_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def b64_decode(data: str) -> bytes:
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(data + padding)
+
+
+def sifre_hashle(sifre: str) -> str:
+    salt = secrets.token_bytes(16)
+    iterations = 210_000
+    digest = hashlib.pbkdf2_hmac("sha256", sifre.encode("utf-8"), salt, iterations)
+    return f"pbkdf2_sha256${iterations}${salt.hex()}${digest.hex()}"
+
+
+def sifre_dogrula(sifre: str, sifre_hash: str) -> bool:
+    try:
+        algoritma, iterations, salt_hex, digest_hex = sifre_hash.split("$", 3)
+        if algoritma != "pbkdf2_sha256":
+            return False
+        digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            sifre.encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            int(iterations),
+        )
+        return hmac.compare_digest(digest.hex(), digest_hex)
+    except Exception:
+        return False
+
+
+def token_uret(kullanici: models.Kullanici) -> str:
+    payload = {
+        "sub": kullanici.id,
+        "rol": kullanici.rol,
+        "ciftlik_id": kullanici.ciftlik_id,
+        "exp": int(time.time()) + TOKEN_TTL_SECONDS,
+    }
+    payload_b64 = b64_encode(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    imza = hmac.new(AUTH_SECRET.encode("utf-8"), payload_b64.encode("ascii"), hashlib.sha256).digest()
+    return f"{payload_b64}.{b64_encode(imza)}"
+
+
+def token_coz(token: str) -> Dict[str, Any]:
+    try:
+        payload_b64, imza_b64 = token.split(".", 1)
+        beklenen = hmac.new(AUTH_SECRET.encode("utf-8"), payload_b64.encode("ascii"), hashlib.sha256).digest()
+        if not hmac.compare_digest(b64_decode(imza_b64), beklenen):
+            raise ValueError("geçersiz imza")
+        payload = json.loads(b64_decode(payload_b64).decode("utf-8"))
+        if int(payload.get("exp", 0)) < int(time.time()):
+            raise ValueError("token süresi doldu")
+        return payload
+    except Exception as hata:
+        raise HTTPException(status_code=401, detail="Oturum geçersiz veya süresi dolmuş.") from hata
+
+
+def kullanici_payload(kullanici: models.Kullanici) -> Dict[str, Any]:
+    ciftlik = None
+    if kullanici.ciftlik:
+        ciftlik = {
+            "id": kullanici.ciftlik.id,
+            "ad": kullanici.ciftlik.ad,
+            "aciklama": kullanici.ciftlik.aciklama,
+            "aktif": bool(kullanici.ciftlik.aktif),
+            "olusturma_tarihi": kullanici.ciftlik.olusturma_tarihi,
+        }
+    return {
+        "id": kullanici.id,
+        "kullanici_adi": kullanici.kullanici_adi,
+        "rol": kullanici.rol,
+        "ciftlik_id": kullanici.ciftlik_id,
+        "aktif": bool(kullanici.aktif),
+        "olusturma_tarihi": kullanici.olusturma_tarihi,
+        "son_giris": kullanici.son_giris,
+        "ciftlik": ciftlik,
+    }
+
+
+def get_current_user(
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+) -> models.Kullanici:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Giriş yapılmalıdır.")
+    payload = token_coz(authorization.split(" ", 1)[1].strip())
+    kullanici = db.query(models.Kullanici).filter(models.Kullanici.id == payload.get("sub")).first()
+    if not kullanici or not kullanici.aktif:
+        raise HTTPException(status_code=401, detail="Kullanıcı aktif değil veya bulunamadı.")
+    return kullanici
+
+
+def require_admin(kullanici: models.Kullanici = Depends(get_current_user)) -> models.Kullanici:
+    if kullanici.rol != "admin":
+        raise HTTPException(status_code=403, detail="Bu işlem için admin yetkisi gerekir.")
+    return kullanici
+
+
+def kullanici_ciftlik_id(kullanici: models.Kullanici, requested_ciftlik_id: Optional[str] = None) -> Optional[str]:
+    if kullanici.rol == "admin":
+        return requested_ciftlik_id
+    if not kullanici.ciftlik_id:
+        raise HTTPException(status_code=403, detail="Kullanıcı bir çiftliğe bağlı değil.")
+    return kullanici.ciftlik_id
+
+
+def ciftlik_erisim_kontrol(kullanici: models.Kullanici, ciftlik_id: Optional[str]) -> None:
+    if kullanici.rol == "admin":
+        return
+    if not ciftlik_id or ciftlik_id != kullanici.ciftlik_id:
+        raise HTTPException(status_code=403, detail="Bu çiftlik verisine erişim yok.")
 
 
 def bos_yoksa_none(deger: Any) -> Optional[str]:
@@ -185,6 +316,8 @@ def normalize_dogum(veri: Dict[str, Any], *, yeni: bool = False) -> Dict[str, An
 def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -> Dict[str, Any]:
     sonuc = dict(veri or {})
     sonuc["id"] = metin(sonuc.get("id") or hayvan_id) or yeni_id()
+    sonuc["ciftlik_id"] = bos_yoksa_none(sonuc.get("ciftlik_id"))
+    sonuc["ciftlik_ad"] = bos_yoksa_none(sonuc.get("ciftlik_ad"))
 
     eski_kupe = metin(sonuc.get("kupe_no"), upper=True)
     resmi = metin(sonuc.get("resmi_kupe_no"), upper=True)
@@ -259,6 +392,9 @@ def db_hayvandan_payload(h: models.Hayvan) -> Dict[str, Any]:
         try:
             veri = json.loads(h.veri_json)
             if isinstance(veri, dict):
+                veri["ciftlik_id"] = h.ciftlik_id or veri.get("ciftlik_id")
+                if h.ciftlik:
+                    veri["ciftlik_ad"] = h.ciftlik.ad
                 return normalize_hayvan(veri, hayvan_id=h.id)
         except json.JSONDecodeError:
             pass
@@ -292,6 +428,8 @@ def db_hayvandan_payload(h: models.Hayvan) -> Dict[str, Any]:
     return normalize_hayvan(
         {
             "id": h.id,
+            "ciftlik_id": h.ciftlik_id,
+            "ciftlik_ad": h.ciftlik.ad if h.ciftlik else None,
             "kupe_no": h.ciftlik_kupe_no or h.resmi_kupe_no or h.id,
             "resmi_kupe_no": h.resmi_kupe_no or "",
             "ciftlik_kupe_no": h.ciftlik_kupe_no or "",
@@ -328,6 +466,7 @@ def db_hayvana_yaz(db: Session, db_hayvan: models.Hayvan, veri: Dict[str, Any]) 
     kesim_bilgisi = veri.get("kesim_bilgisi") or {}
 
     db_hayvan.id = veri["id"]
+    db_hayvan.ciftlik_id = veri.get("ciftlik_id")
     db_hayvan.resmi_kupe_no = bos_yoksa_none(veri.get("resmi_kupe_no"))
     db_hayvan.ciftlik_kupe_no = bos_yoksa_none(veri.get("ciftlik_kupe_no"))
     db_hayvan.ad = bos_yoksa_none(veri.get("ad"))
@@ -376,44 +515,107 @@ def db_hayvana_yaz(db: Session, db_hayvan: models.Hayvan, veri: Dict[str, Any]) 
     return db_hayvan
 
 
-def hayvan_bul(db: Session, ref: str) -> models.Hayvan:
+def hayvan_bul(db: Session, ref: str, kullanici: Optional[models.Kullanici] = None) -> models.Hayvan:
     ref_metin = metin(ref)
-    hayvan = db.query(models.Hayvan).filter(models.Hayvan.id == ref_metin).first()
+    sorgu = db.query(models.Hayvan)
+    if kullanici and kullanici.rol != "admin":
+        sorgu = sorgu.filter(models.Hayvan.ciftlik_id == kullanici.ciftlik_id)
+    hayvan = sorgu.filter(models.Hayvan.id == ref_metin).first()
     if hayvan:
         return hayvan
     ref_kupe = ref_metin.upper()
-    hayvan = (
-        db.query(models.Hayvan)
-        .filter(
-            or_(
-                models.Hayvan.resmi_kupe_no == ref_kupe,
-                models.Hayvan.ciftlik_kupe_no == ref_kupe,
-            )
+    hayvan = sorgu.filter(
+        or_(
+            models.Hayvan.resmi_kupe_no == ref_kupe,
+            models.Hayvan.ciftlik_kupe_no == ref_kupe,
         )
-        .first()
-    )
+    ).first()
+    if hayvan and kullanici:
+        ciftlik_erisim_kontrol(kullanici, hayvan.ciftlik_id)
     if not hayvan:
         raise HTTPException(status_code=404, detail="Hayvan bulunamadı.")
     return hayvan
 
 
-def kupe_cakismasi_kontrol(db: Session, veri: Dict[str, Any], *, haric_id: Optional[str] = None) -> None:
+def ciftlik_bul(db: Session, ciftlik_id: str) -> models.Ciftlik:
+    ciftlik = db.query(models.Ciftlik).filter(models.Ciftlik.id == ciftlik_id).first()
+    if not ciftlik:
+        raise HTTPException(status_code=404, detail="Çiftlik bulunamadı.")
+    return ciftlik
+
+
+def hayvan_sorgusu_scope(db: Session, kullanici: models.Kullanici, ciftlik_id: Optional[str] = None):
+    sorgu = db.query(models.Hayvan)
+    hedef_ciftlik_id = kullanici_ciftlik_id(kullanici, ciftlik_id)
+    if hedef_ciftlik_id:
+        sorgu = sorgu.filter(models.Hayvan.ciftlik_id == hedef_ciftlik_id)
+    return sorgu
+
+
+def kupe_cakismasi_kontrol(
+    db: Session,
+    veri: Dict[str, Any],
+    *,
+    haric_id: Optional[str] = None,
+    ciftlik_id: Optional[str] = None,
+) -> None:
     kupeler = [k for k in {veri.get("resmi_kupe_no"), veri.get("ciftlik_kupe_no")} if k]
     if not kupeler:
         raise HTTPException(status_code=400, detail="En az bir küpe numarası girilmelidir.")
+    sorgu = db.query(models.Hayvan)
+    if ciftlik_id:
+        sorgu = sorgu.filter(models.Hayvan.ciftlik_id == ciftlik_id)
     for kupe in kupeler:
-        mevcut = (
-            db.query(models.Hayvan)
-            .filter(
-                or_(
-                    models.Hayvan.resmi_kupe_no == kupe,
-                    models.Hayvan.ciftlik_kupe_no == kupe,
-                )
+        mevcut = sorgu.filter(
+            or_(
+                models.Hayvan.resmi_kupe_no == kupe,
+                models.Hayvan.ciftlik_kupe_no == kupe,
             )
-            .first()
-        )
+        ).first()
         if mevcut and mevcut.id != haric_id:
-            raise HTTPException(status_code=400, detail=f"{kupe} küpe numarası zaten kayıtlı.")
+            raise HTTPException(status_code=400, detail=f"{kupe} küpe numarası bu çiftlikte zaten kayıtlı.")
+
+
+def varsayilan_ciftlik_ve_kayitlari_hazirla(db: Session) -> models.Ciftlik:
+    ciftlik = db.query(models.Ciftlik).filter(models.Ciftlik.id == DEFAULT_CIFTLIK_ID).first()
+    if not ciftlik:
+        ciftlik = models.Ciftlik(
+            id=DEFAULT_CIFTLIK_ID,
+            ad=DEFAULT_CIFTLIK_ADI,
+            aciklama="Mevcut kayıtların taşındığı varsayılan çiftlik",
+            aktif=True,
+            olusturma_tarihi=simdi(),
+        )
+        db.add(ciftlik)
+        db.flush()
+    db.query(models.Hayvan).filter(models.Hayvan.ciftlik_id.is_(None)).update(
+        {models.Hayvan.ciftlik_id: ciftlik.id},
+        synchronize_session=False,
+    )
+    return ciftlik
+
+
+def auth_baslangic_verisini_hazirla():
+    db = next(get_db())
+    try:
+        varsayilan_ciftlik_ve_kayitlari_hazirla(db)
+        if db.query(models.Kullanici).count() == 0:
+            admin_sifre = os.getenv("ALP_BOOTSTRAP_ADMIN_PASSWORD")
+            if admin_sifre:
+                db.add(
+                    models.Kullanici(
+                        id=yeni_id(),
+                        kullanici_adi=os.getenv("ALP_BOOTSTRAP_ADMIN_USERNAME", "admin").strip().lower(),
+                        sifre_hash=sifre_hashle(admin_sifre),
+                        rol="admin",
+                        ciftlik_id=None,
+                        aktif=True,
+                        olusturma_tarihi=simdi(),
+                    )
+                )
+        db.commit()
+    finally:
+        db.close()
 
 
 def hayvan_aktif_mi(veri: Dict[str, Any]) -> bool:
@@ -556,6 +758,9 @@ def uyarilari_hesapla(hayvanlar: Iterable[Dict[str, Any]]) -> List[Dict[str, Any
     return sorted(uyarilar, key=lambda u: u["kalan_gun"])
 
 
+auth_baslangic_verisini_hazirla()
+
+
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "ALP Ziraat Hayvan Takip API çalışıyor."}
@@ -566,15 +771,153 @@ def health():
     return {"status": "ok", "database": "connected"}
 
 
+@app.post("/api/auth/login", response_model=schemas.LoginResponse)
+def login(giris: schemas.LoginRequest, db: Session = Depends(get_db)):
+    kullanici_adi = giris.kullanici_adi.strip().lower()
+    kullanici = db.query(models.Kullanici).filter(models.Kullanici.kullanici_adi == kullanici_adi).first()
+    if not kullanici or not kullanici.aktif or not sifre_dogrula(giris.sifre, kullanici.sifre_hash):
+        raise HTTPException(status_code=401, detail="Kullanıcı adı veya şifre hatalı.")
+    kullanici.son_giris = simdi()
+    db.commit()
+    db.refresh(kullanici)
+    return {"access_token": token_uret(kullanici), "kullanici": kullanici_payload(kullanici)}
+
+
+@app.get("/api/auth/me", response_model=schemas.KullaniciResponse)
+def me(kullanici: models.Kullanici = Depends(get_current_user)):
+    return kullanici_payload(kullanici)
+
+
+@app.get("/api/ciftlikler", response_model=List[schemas.CiftlikResponse])
+def get_ciftlikler(
+    aktif_dahil: bool = True,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    if kullanici.rol != "admin":
+        return [ciftlik_bul(db, kullanici.ciftlik_id)] if kullanici.ciftlik_id else []
+    sorgu = db.query(models.Ciftlik)
+    if not aktif_dahil:
+        sorgu = sorgu.filter(models.Ciftlik.aktif.is_(True))
+    return sorgu.order_by(models.Ciftlik.ad).all()
+
+
+@app.post("/api/ciftlikler", response_model=schemas.CiftlikResponse, status_code=status.HTTP_201_CREATED)
+def create_ciftlik(
+    ciftlik: schemas.CiftlikCreate,
+    db: Session = Depends(get_db),
+    _: models.Kullanici = Depends(require_admin),
+):
+    veri = model_verisi(ciftlik)
+    ciftlik_id = metin(veri.get("id")) or yeni_id()
+    if db.query(models.Ciftlik).filter(models.Ciftlik.id == ciftlik_id).first():
+        raise HTTPException(status_code=400, detail="Bu çiftlik id zaten kullanılıyor.")
+    db_ciftlik = models.Ciftlik(
+        id=ciftlik_id,
+        ad=veri.get("ad"),
+        aciklama=veri.get("aciklama"),
+        aktif=bool(veri.get("aktif", True)),
+        olusturma_tarihi=simdi(),
+    )
+    db.add(db_ciftlik)
+    db.commit()
+    db.refresh(db_ciftlik)
+    return db_ciftlik
+
+
+@app.patch("/api/ciftlikler/{ciftlik_id}", response_model=schemas.CiftlikResponse)
+def update_ciftlik(
+    ciftlik_id: str,
+    ciftlik: schemas.CiftlikUpdate,
+    db: Session = Depends(get_db),
+    _: models.Kullanici = Depends(require_admin),
+):
+    db_ciftlik = ciftlik_bul(db, ciftlik_id)
+    veri = model_verisi(ciftlik, exclude_unset=True)
+    for alan in ("ad", "aciklama", "aktif"):
+        if alan in veri:
+            setattr(db_ciftlik, alan, veri[alan])
+    db.commit()
+    db.refresh(db_ciftlik)
+    return db_ciftlik
+
+
+@app.get("/api/kullanicilar", response_model=List[schemas.KullaniciResponse])
+def get_kullanicilar(
+    db: Session = Depends(get_db),
+    _: models.Kullanici = Depends(require_admin),
+):
+    return [kullanici_payload(k) for k in db.query(models.Kullanici).order_by(models.Kullanici.kullanici_adi).all()]
+
+
+@app.post("/api/kullanicilar", response_model=schemas.KullaniciResponse, status_code=status.HTTP_201_CREATED)
+def create_kullanici(
+    kullanici: schemas.KullaniciCreate,
+    db: Session = Depends(get_db),
+    _: models.Kullanici = Depends(require_admin),
+):
+    veri = model_verisi(kullanici)
+    kullanici_adi = veri["kullanici_adi"].strip().lower()
+    if db.query(models.Kullanici).filter(models.Kullanici.kullanici_adi == kullanici_adi).first():
+        raise HTTPException(status_code=400, detail="Bu kullanıcı adı zaten kayıtlı.")
+    rol = veri.get("rol") or "ciftlik"
+    ciftlik_id = veri.get("ciftlik_id")
+    if rol != "admin":
+        if not ciftlik_id:
+            raise HTTPException(status_code=400, detail="Çiftlik kullanıcısı için çiftlik seçilmelidir.")
+        ciftlik_bul(db, ciftlik_id)
+    db_kullanici = models.Kullanici(
+        id=yeni_id(),
+        kullanici_adi=kullanici_adi,
+        sifre_hash=sifre_hashle(veri["sifre"]),
+        rol=rol,
+        ciftlik_id=ciftlik_id if rol != "admin" else None,
+        aktif=bool(veri.get("aktif", True)),
+        olusturma_tarihi=simdi(),
+    )
+    db.add(db_kullanici)
+    db.commit()
+    db.refresh(db_kullanici)
+    return kullanici_payload(db_kullanici)
+
+
+@app.patch("/api/kullanicilar/{kullanici_id}", response_model=schemas.KullaniciResponse)
+def update_kullanici(
+    kullanici_id: str,
+    kullanici: schemas.KullaniciUpdate,
+    db: Session = Depends(get_db),
+    _: models.Kullanici = Depends(require_admin),
+):
+    db_kullanici = db.query(models.Kullanici).filter(models.Kullanici.id == kullanici_id).first()
+    if not db_kullanici:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı.")
+    veri = model_verisi(kullanici, exclude_unset=True)
+    if "kullanici_adi" in veri:
+        db_kullanici.kullanici_adi = veri["kullanici_adi"].strip().lower()
+    if "sifre" in veri and veri["sifre"]:
+        db_kullanici.sifre_hash = sifre_hashle(veri["sifre"])
+    if "rol" in veri:
+        db_kullanici.rol = veri["rol"]
+    if "ciftlik_id" in veri:
+        db_kullanici.ciftlik_id = veri["ciftlik_id"] if db_kullanici.rol != "admin" else None
+    if "aktif" in veri:
+        db_kullanici.aktif = bool(veri["aktif"])
+    db.commit()
+    db.refresh(db_kullanici)
+    return kullanici_payload(db_kullanici)
+
+
 @app.get("/api/hayvanlar", response_model=List[schemas.HayvanResponse])
 def get_hayvanlar(
     skip: int = 0,
     limit: int = Query(default=100, le=1000),
     q: Optional[str] = None,
+    ciftlik_id: Optional[str] = None,
     arsiv_dahil: bool = True,
     db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
 ):
-    sorgu = db.query(models.Hayvan)
+    sorgu = hayvan_sorgusu_scope(db, kullanici, ciftlik_id)
     if not arsiv_dahil:
         sorgu = sorgu.filter(
             models.Hayvan.arsivli.is_(False),
@@ -595,16 +938,27 @@ def get_hayvanlar(
 
 
 @app.get("/api/hayvanlar/{hayvan_ref}", response_model=schemas.HayvanResponse)
-def get_hayvan(hayvan_ref: str, db: Session = Depends(get_db)):
-    return db_hayvandan_payload(hayvan_bul(db, hayvan_ref))
+def get_hayvan(
+    hayvan_ref: str,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    return db_hayvandan_payload(hayvan_bul(db, hayvan_ref, kullanici))
 
 
 @app.post("/api/hayvanlar", response_model=schemas.HayvanResponse, status_code=status.HTTP_201_CREATED)
-def create_hayvan(hayvan: schemas.HayvanCreate, db: Session = Depends(get_db)):
+def create_hayvan(
+    hayvan: schemas.HayvanCreate,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
     veri = normalize_hayvan(model_verisi(hayvan))
+    hedef_ciftlik_id = kullanici_ciftlik_id(kullanici, veri.get("ciftlik_id"))
+    veri["ciftlik_id"] = hedef_ciftlik_id or DEFAULT_CIFTLIK_ID
+    ciftlik_bul(db, veri["ciftlik_id"])
     if db.query(models.Hayvan).filter(models.Hayvan.id == veri["id"]).first():
         raise HTTPException(status_code=400, detail="Bu id ile kayıt zaten var.")
-    kupe_cakismasi_kontrol(db, veri)
+    kupe_cakismasi_kontrol(db, veri, ciftlik_id=veri["ciftlik_id"])
     db_hayvan = models.Hayvan(id=veri["id"])
     db.add(db_hayvan)
     db_hayvana_yaz(db, db_hayvan, veri)
@@ -615,15 +969,26 @@ def create_hayvan(hayvan: schemas.HayvanCreate, db: Session = Depends(get_db)):
 
 @app.put("/api/hayvanlar/{hayvan_ref}", response_model=schemas.HayvanResponse)
 @app.patch("/api/hayvanlar/{hayvan_ref}", response_model=schemas.HayvanResponse)
-def update_hayvan(hayvan_ref: str, hayvan: schemas.HayvanUpdate, db: Session = Depends(get_db)):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+def update_hayvan(
+    hayvan_ref: str,
+    hayvan: schemas.HayvanUpdate,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     mevcut = db_hayvandan_payload(db_hayvan)
     guncelleme = model_verisi(hayvan, exclude_unset=True)
     guncelleme.pop("id", None)
+    if "ciftlik_id" in guncelleme and kullanici.rol != "admin":
+        guncelleme.pop("ciftlik_id", None)
     mevcut.update(guncelleme)
     mevcut["id"] = db_hayvan.id
+    if kullanici.rol != "admin":
+        mevcut["ciftlik_id"] = kullanici.ciftlik_id
+    if mevcut.get("ciftlik_id"):
+        ciftlik_bul(db, mevcut["ciftlik_id"])
     veri = normalize_hayvan(mevcut, hayvan_id=db_hayvan.id)
-    kupe_cakismasi_kontrol(db, veri, haric_id=db_hayvan.id)
+    kupe_cakismasi_kontrol(db, veri, haric_id=db_hayvan.id, ciftlik_id=veri.get("ciftlik_id"))
     return response_kaydet(db, db_hayvan, veri)
 
 
@@ -632,8 +997,9 @@ def delete_hayvan(
     hayvan_ref: str,
     kalici: bool = False,
     db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
 ):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     if kalici:
         silinen_id = db_hayvan.id
         db.delete(db_hayvan)
@@ -652,8 +1018,13 @@ def delete_hayvan(
     response_model=schemas.TohumlamaResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_tohumlama(hayvan_ref: str, tohumlama: schemas.TohumlamaCreate, db: Session = Depends(get_db)):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+def create_tohumlama(
+    hayvan_ref: str,
+    tohumlama: schemas.TohumlamaCreate,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     veri = db_hayvandan_payload(db_hayvan)
     yeni = normalize_tohumlama(model_verisi(tohumlama), yeni=True)
     tohumlama_kurallarini_kontrol(veri, yeni)
@@ -676,8 +1047,9 @@ def update_tohumlama(
     tohumlama_ref: str,
     tohumlama: schemas.TohumlamaUpdate,
     db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
 ):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     veri = db_hayvandan_payload(db_hayvan)
     kayit = nested_kayit_bul(veri.setdefault("tohumlamalar", []), tohumlama_ref, "Tohumlama")
     kayit.update(model_verisi(tohumlama, exclude_unset=True))
@@ -692,8 +1064,13 @@ def update_tohumlama(
 
 
 @app.delete("/api/hayvanlar/{hayvan_ref}/tohumlamalar/{tohumlama_ref}", response_model=schemas.IslemSonucResponse)
-def delete_tohumlama(hayvan_ref: str, tohumlama_ref: str, db: Session = Depends(get_db)):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+def delete_tohumlama(
+    hayvan_ref: str,
+    tohumlama_ref: str,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     veri = db_hayvandan_payload(db_hayvan)
     silinen = nested_kayit_sil(veri.setdefault("tohumlamalar", []), tohumlama_ref, "Tohumlama")
     if veri.get("aktif_tohumlama_id") == silinen.get("id"):
@@ -709,8 +1086,13 @@ def delete_tohumlama(hayvan_ref: str, tohumlama_ref: str, db: Session = Depends(
     response_model=schemas.AsiProsedurResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_asi(hayvan_ref: str, asi: schemas.AsiProsedurCreate, db: Session = Depends(get_db)):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+def create_asi(
+    hayvan_ref: str,
+    asi: schemas.AsiProsedurCreate,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     veri = db_hayvandan_payload(db_hayvan)
     yeni = normalize_asi(model_verisi(asi), yeni=True)
     veri.setdefault("asi_prosedurler", []).append(yeni)
@@ -731,8 +1113,9 @@ def update_asi(
     asi_ref: str,
     asi: schemas.AsiProsedurUpdate,
     db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
 ):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     veri = db_hayvandan_payload(db_hayvan)
     kayit = nested_kayit_bul(veri.setdefault("asi_prosedurler", []), asi_ref, "Aşı/prosedür")
     kayit.update(model_verisi(asi, exclude_unset=True))
@@ -746,8 +1129,13 @@ def update_asi(
 
 
 @app.delete("/api/hayvanlar/{hayvan_ref}/asi-prosedurler/{asi_ref}", response_model=schemas.IslemSonucResponse)
-def delete_asi(hayvan_ref: str, asi_ref: str, db: Session = Depends(get_db)):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+def delete_asi(
+    hayvan_ref: str,
+    asi_ref: str,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     veri = db_hayvandan_payload(db_hayvan)
     silinen = nested_kayit_sil(veri.setdefault("asi_prosedurler", []), asi_ref, "Aşı/prosedür")
     response_kaydet(db, db_hayvan, veri)
@@ -759,8 +1147,13 @@ def delete_asi(hayvan_ref: str, asi_ref: str, db: Session = Depends(get_db)):
     response_model=schemas.DogumResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_dogum(hayvan_ref: str, dogum: schemas.DogumCreate, db: Session = Depends(get_db)):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+def create_dogum(
+    hayvan_ref: str,
+    dogum: schemas.DogumCreate,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     anne = db_hayvandan_payload(db_hayvan)
     yeni = normalize_dogum(model_verisi(dogum), yeni=True)
     dogum_tarihi = parse_tarih(yeni.get("tarih"), "Doğum tarihi", zorunlu=True)
@@ -775,13 +1168,19 @@ def create_dogum(hayvan_ref: str, dogum: schemas.DogumCreate, db: Session = Depe
     if len(yavru_kupeleri) != len(set(yavru_kupeleri)):
         raise HTTPException(status_code=400, detail="Yavru küpe numaraları kendi içinde tekrar edemez.")
     for kupe in yavru_kupeleri:
-        try:
-            hayvan_bul(db, kupe)
-        except HTTPException as hata:
-            if hata.status_code == 404:
-                continue
-            raise
-        raise HTTPException(status_code=400, detail=f"{kupe} yavru küpe numarası zaten kayıtlı.")
+        mevcut_yavru = (
+            db.query(models.Hayvan)
+            .filter(
+                models.Hayvan.ciftlik_id == anne.get("ciftlik_id"),
+                or_(
+                    models.Hayvan.resmi_kupe_no == kupe,
+                    models.Hayvan.ciftlik_kupe_no == kupe,
+                ),
+            )
+            .first()
+        )
+        if mevcut_yavru:
+            raise HTTPException(status_code=400, detail=f"{kupe} yavru küpe numarası bu çiftlikte zaten kayıtlı.")
 
     kaydedilen_yavrular = []
     for yavru in yeni.get("yavrular") or []:
@@ -790,6 +1189,7 @@ def create_dogum(hayvan_ref: str, dogum: schemas.DogumCreate, db: Session = Depe
         yavru_veri = normalize_hayvan(
             {
                 "id": yavru_id,
+                "ciftlik_id": anne.get("ciftlik_id"),
                 "kupe_no": yavru_kupe,
                 "resmi_kupe_no": yavru_kupe if yavru.get("kupe") else "",
                 "ciftlik_kupe_no": "",
@@ -827,8 +1227,14 @@ def create_dogum(hayvan_ref: str, dogum: schemas.DogumCreate, db: Session = Depe
 
 @app.put("/api/hayvanlar/{hayvan_ref}/dogumlar/{dogum_ref}", response_model=schemas.DogumResponse)
 @app.patch("/api/hayvanlar/{hayvan_ref}/dogumlar/{dogum_ref}", response_model=schemas.DogumResponse)
-def update_dogum(hayvan_ref: str, dogum_ref: str, dogum: schemas.DogumUpdate, db: Session = Depends(get_db)):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+def update_dogum(
+    hayvan_ref: str,
+    dogum_ref: str,
+    dogum: schemas.DogumUpdate,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     veri = db_hayvandan_payload(db_hayvan)
     kayit = nested_kayit_bul(veri.setdefault("dogumlar", []), dogum_ref, "Doğum")
     kayit.update(model_verisi(dogum, exclude_unset=True))
@@ -842,8 +1248,13 @@ def update_dogum(hayvan_ref: str, dogum_ref: str, dogum: schemas.DogumUpdate, db
 
 
 @app.delete("/api/hayvanlar/{hayvan_ref}/dogumlar/{dogum_ref}", response_model=schemas.IslemSonucResponse)
-def delete_dogum(hayvan_ref: str, dogum_ref: str, db: Session = Depends(get_db)):
-    db_hayvan = hayvan_bul(db, hayvan_ref)
+def delete_dogum(
+    hayvan_ref: str,
+    dogum_ref: str,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     veri = db_hayvandan_payload(db_hayvan)
     silinen = nested_kayit_sil(veri.setdefault("dogumlar", []), dogum_ref, "Doğum")
     response_kaydet(db, db_hayvan, veri)
@@ -851,14 +1262,22 @@ def delete_dogum(hayvan_ref: str, dogum_ref: str, db: Session = Depends(get_db))
 
 
 @app.get("/api/uyarilar", response_model=List[schemas.UyariResponse])
-def get_uyarilar(db: Session = Depends(get_db)):
-    hayvanlar = [db_hayvandan_payload(h) for h in db.query(models.Hayvan).all()]
+def get_uyarilar(
+    ciftlik_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    hayvanlar = [db_hayvandan_payload(h) for h in hayvan_sorgusu_scope(db, kullanici, ciftlik_id).all()]
     return uyarilari_hesapla(hayvanlar)
 
 
 @app.get("/api/raporlar/ozet", response_model=schemas.RaporOzetResponse)
-def get_rapor_ozet(db: Session = Depends(get_db)):
-    hayvanlar = [db_hayvandan_payload(h) for h in db.query(models.Hayvan).all()]
+def get_rapor_ozet(
+    ciftlik_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    hayvanlar = [db_hayvandan_payload(h) for h in hayvan_sorgusu_scope(db, kullanici, ciftlik_id).all()]
     cins_dagilimi: Dict[str, int] = {}
     for h in hayvanlar:
         cins = h.get("cins") or "Bilinmiyor"

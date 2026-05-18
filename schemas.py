@@ -17,6 +17,64 @@ class KesimBilgisi(AlpModel):
     yas_gun: Optional[int] = None
 
 
+class CiftlikBase(AlpModel):
+    ad: str
+    aciklama: Optional[str] = None
+    aktif: bool = True
+
+
+class CiftlikCreate(CiftlikBase):
+    id: Optional[str] = None
+
+
+class CiftlikUpdate(AlpModel):
+    ad: Optional[str] = None
+    aciklama: Optional[str] = None
+    aktif: Optional[bool] = None
+
+
+class CiftlikResponse(CiftlikBase):
+    id: str
+    olusturma_tarihi: Optional[str] = None
+
+
+class KullaniciBase(AlpModel):
+    kullanici_adi: str
+    rol: str = "ciftlik"
+    ciftlik_id: Optional[str] = None
+    aktif: bool = True
+
+
+class KullaniciCreate(KullaniciBase):
+    sifre: str
+
+
+class KullaniciUpdate(AlpModel):
+    kullanici_adi: Optional[str] = None
+    sifre: Optional[str] = None
+    rol: Optional[str] = None
+    ciftlik_id: Optional[str] = None
+    aktif: Optional[bool] = None
+
+
+class KullaniciResponse(KullaniciBase):
+    id: str
+    olusturma_tarihi: Optional[str] = None
+    son_giris: Optional[str] = None
+    ciftlik: Optional[CiftlikResponse] = None
+
+
+class LoginRequest(AlpModel):
+    kullanici_adi: str
+    sifre: str
+
+
+class LoginResponse(AlpModel):
+    access_token: str
+    token_type: str = "bearer"
+    kullanici: KullaniciResponse
+
+
 class TohumlamaBase(AlpModel):
     tarih: str
     sekil: Optional[str] = None
@@ -95,6 +153,8 @@ class DogumResponse(DogumBase):
 
 
 class HayvanBase(AlpModel):
+    ciftlik_id: Optional[str] = None
+    ciftlik_ad: Optional[str] = None
     kupe_no: Optional[str] = None
     resmi_kupe_no: Optional[str] = None
     ciftlik_kupe_no: Optional[str] = None
@@ -131,6 +191,7 @@ class HayvanCreate(HayvanBase):
 
 
 class HayvanUpdate(AlpModel):
+    ciftlik_id: Optional[str] = None
     kupe_no: Optional[str] = None
     resmi_kupe_no: Optional[str] = None
     ciftlik_kupe_no: Optional[str] = None
