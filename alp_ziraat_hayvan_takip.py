@@ -48,7 +48,7 @@ VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
 
 # --- Exe'de dosya yolunu doğru bulmak için fonksiyon ---
 def resource_path(relative_path):
-    """ Hem script hem de donmuş exe için varlıklara mutlak yol oluşturur. """
+    """Hem script hem de donmuş exe için varlıklara mutlak yol oluşturur. """
     try:
         base_path = sys._MEIPASS
     except Exception:
@@ -67,52 +67,54 @@ class HayvanTakipSistemi:
 
             # --- TEMA RENK PALETLERİ ---
             self.dark_theme = {
-                "ana_kirmizi": "#D92D20", "koyu_kirmizi": "#B42318",
-                "siyah": "#101510",
-                "arkaplan": "#121611",
-                "kart_arkaplan": "#1B211A",
-                "kart_ikincil": "#232B21",
-                "gri": "#2E372B",
-                "kenarlik": "#3D4938",
-                "input_bg": "#20281F",
-                "muted": "#A7B0A4",
-                "yazi_rengi": "#F4F7F2",
+                "ana_kirmizi": "#2F81F7", "koyu_kirmizi": "#1D4ED8",
+                "siyah": "#0B1220",
+                "arkaplan": "#070D16",
+                "kart_arkaplan": "#0F1826",
+                "kart_ikincil": "#142238",
+                "gri": "#1B2A3D",
+                "kenarlik": "#243855",
+                "input_bg": "#050B14",
+                "muted": "#7EA0C4",
+                "yazi_rengi": "#EAF2FF",
                 "beyaz": "#FFFFFF",
-                "yesil": "#16A34A", "koyu_yesil": "#15803D",
-                "uyari": "#F59E0B", "uyari_yazi": "#18140A",
-                "kesildi_bg": "#40473E", "kesildi_fg": "#FFFFFF",
-                "button_default_bg": "#31402F", "button_default_fg": "#F4F7F2",
-                "button_success_bg": "#168A43", "button_success_fg": "#FFFFFF",
-                "button_danger_bg": "#D92D20", "button_danger_fg": "#FFFFFF",
-                "button_warning_bg": "#F59E0B", "button_warning_fg": "#18140A",
-                "button_theme_bg": "#232B21", "button_theme_fg": "#F4F7F2",
-                "button_primary_bg": "#2563EB", "button_primary_fg": "#FFFFFF",
-                "band_normal_bg": "#123C2A", "band_normal_fg": "#D9FBE8",
-                "band_warning_bg": "#563B12", "band_warning_fg": "#FEF3C7",
-                "band_critical_bg": "#7F1D1D", "band_critical_fg": "#FFF1F2",
+                "yesil": "#22C55E", "koyu_yesil": "#16A34A",
+                "uyari": "#F59E0B", "uyari_yazi": "#111827",
+                "kesildi_bg": "#334155", "kesildi_fg": "#EAF2FF",
+                "button_default_bg": "#132238", "button_default_fg": "#D9E8FF",
+                "button_success_bg": "#10B981", "button_success_fg": "#FFFFFF",
+                "button_danger_bg": "#EF4444", "button_danger_fg": "#FFFFFF",
+                "button_warning_bg": "#F59E0B", "button_warning_fg": "#111827",
+                "button_theme_bg": "#101B2C", "button_theme_fg": "#D9E8FF",
+                "button_primary_bg": "#3B82F6", "button_primary_fg": "#FFFFFF",
+                "table_heading_bg": "#101B2C",
+                "band_normal_bg": "#062D22", "band_normal_fg": "#A7F3D0",
+                "band_warning_bg": "#3A2A09", "band_warning_fg": "#FDE68A",
+                "band_critical_bg": "#40181A", "band_critical_fg": "#FECACA",
             }
 
             self.light_theme = {
-                "ana_kirmizi": "#D92D20", "koyu_kirmizi": "#B42318",
-                "siyah": "#172016",
-                "arkaplan": "#F5F7F2",
+                "ana_kirmizi": "#DC2626", "koyu_kirmizi": "#B91C1C",
+                "siyah": "#111816",
+                "arkaplan": "#F5F7F4",
                 "kart_arkaplan": "#FFFFFF",
-                "kart_ikincil": "#EEF3E9",
-                "gri": "#E6ECE1",
-                "kenarlik": "#D4DDCF",
-                "input_bg": "#F8FAF6",
-                "muted": "#66735F",
-                "yazi_rengi": "#1F2A1D",
+                "kart_ikincil": "#F1F5EF",
+                "gri": "#E5EBE3",
+                "kenarlik": "#D5DDD2",
+                "input_bg": "#FFFFFF",
+                "muted": "#637064",
+                "yazi_rengi": "#18211A",
                 "beyaz": "#FFFFFF",
                 "yesil": "#15803D", "koyu_yesil": "#166534",
-                "uyari": "#F59E0B", "uyari_yazi": "#1F2A1D",
-                "kesildi_bg": "#9AA79A", "kesildi_fg": "#FFFFFF",
-                "button_default_bg": "#E0E7DA", "button_default_fg": "#1F2A1D",
+                "uyari": "#C27A0A", "uyari_yazi": "#1F2A1D",
+                "kesildi_bg": "#A3ADA0", "kesildi_fg": "#FFFFFF",
+                "button_default_bg": "#E9EFE6", "button_default_fg": "#18211A",
                 "button_success_bg": "#15803D", "button_success_fg": "#FFFFFF",
-                "button_danger_bg": "#D92D20", "button_danger_fg": "#FFFFFF",
-                "button_warning_bg": "#F59E0B", "button_warning_fg": "#1F2A1D",
-                "button_theme_bg": "#EEF3E9", "button_theme_fg": "#1F2A1D",
+                "button_danger_bg": "#DC2626", "button_danger_fg": "#FFFFFF",
+                "button_warning_bg": "#D99A12", "button_warning_fg": "#1F2A1D",
+                "button_theme_bg": "#FFFFFF", "button_theme_fg": "#18211A",
                 "button_primary_bg": "#2563EB", "button_primary_fg": "#FFFFFF",
+                "table_heading_bg": "#EDF3EA",
                 "band_normal_bg": "#DDF7E8", "band_normal_fg": "#14532D",
                 "band_warning_bg": "#FEF3C7", "band_warning_fg": "#78350F",
                 "band_critical_bg": "#FEE2E2", "band_critical_fg": "#991B1B",
@@ -126,7 +128,7 @@ class HayvanTakipSistemi:
             self.logo_path = resource_path("alp_ziraat_logo.png")
             
             self.root.title("ALP ZİRAAT - Sürü Takip Sistemi")
-            self.root.geometry("1600x1000")
+            self.root.geometry("1500x900")
             self.root.configure(bg=self.renkler["arkaplan"])
 
             try:
@@ -177,15 +179,9 @@ class HayvanTakipSistemi:
 
     # --- Tema Yönetimi ve Diğer Yardımcı Fonksiyonlar ---
     def toggle_theme(self):
-        if self.theme_mode == "dark":
-            self.theme_mode = "light"
-            self.renkler = self.light_theme
-            self.theme_toggle_button.itemconfig(self.theme_toggle_button.text_item, text="🌙 Koyu Mod")
-        else:
-            self.theme_mode = "dark"
-            self.renkler = self.dark_theme
-            self.theme_toggle_button.itemconfig(self.theme_toggle_button.text_item, text="☀️ Açık Mod")
-        self.apply_theme_to_widgets()
+        # Tema değiştirme kaldırıldı; uygulama sabit koyu dashboard temasıyla çalışır.
+        self.theme_mode = "dark"
+        self.renkler = self.dark_theme
 
     def apply_theme_to_widgets(self):
         self.root.config(bg=self.renkler["arkaplan"])
@@ -278,7 +274,15 @@ class HayvanTakipSistemi:
         style.configure('TFrame', background=self.renkler["arkaplan"])
         style.configure('TLabel', background=self.renkler["arkaplan"], foreground=self.renkler["yazi_rengi"], font=('Segoe UI', 11))
         style.configure('TNotebook', background=self.renkler["arkaplan"], borderwidth=0, tabmargins=[0, 0, 0, 0])
-        style.configure('Modern.TNotebook', background=self.renkler["arkaplan"], borderwidth=0)
+        style.configure(
+            'Modern.TNotebook',
+            background=self.renkler["arkaplan"],
+            borderwidth=0,
+            relief='flat',
+            bordercolor=self.renkler["arkaplan"],
+            lightcolor=self.renkler["arkaplan"],
+            darkcolor=self.renkler["arkaplan"],
+        )
         style.configure('Modern.TNotebook.Tab',
             padding=[28, 16],
             font=('Segoe UI', 12, 'bold'),
@@ -297,8 +301,8 @@ class HayvanTakipSistemi:
             relief='flat')
         style.configure('Modern.Treeview.Heading',
             font=('Segoe UI', 10, 'bold'),
-            background=self.renkler["siyah"],
-            foreground=self.renkler["muted"],
+            background=self.renkler.get("table_heading_bg", self.renkler["siyah"]),
+            foreground=self.renkler["yazi_rengi"],
             padding=[10, 12],
             relief='flat')
         
@@ -315,7 +319,12 @@ class HayvanTakipSistemi:
             arrowcolor=self.renkler["yazi_rengi"],
             selectbackground=self.renkler["input_bg"],
             selectforeground=self.renkler["yazi_rengi"],
-            padding=[10, 8], borderwidth=1, relief='flat')
+            padding=[12, 9],
+            borderwidth=1,
+            relief='flat',
+            bordercolor=self.renkler["kenarlik"],
+            lightcolor=self.renkler["kenarlik"],
+            darkcolor=self.renkler["kenarlik"])
         style.map('TCombobox',
             fieldbackground=[('readonly', self.renkler["input_bg"]), ('focus', self.renkler["input_bg"])],
             selectbackground=[('readonly', self.renkler["input_bg"])])
@@ -323,7 +332,12 @@ class HayvanTakipSistemi:
             fieldbackground=self.renkler["input_bg"],
             foreground=self.renkler["yazi_rengi"],
             insertcolor=self.renkler["yazi_rengi"],
-            padding=[10, 8], borderwidth=1, relief='flat')
+            padding=[12, 9],
+            borderwidth=1,
+            relief='flat',
+            bordercolor=self.renkler["kenarlik"],
+            lightcolor=self.renkler["kenarlik"],
+            darkcolor=self.renkler["kenarlik"])
         style.configure('Vertical.TScrollbar',
             background=self.renkler["gri"],
             troughcolor=self.renkler["kart_arkaplan"],
@@ -349,18 +363,6 @@ class HayvanTakipSistemi:
 
     def _rgb_to_hex(self, rgb):
         return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
-
-    def _animate_bg_color(self, widget, current_rgb, target_rgb, step=0, total_steps=8):
-        if not widget.winfo_exists(): return
-        if step > total_steps:
-            widget.config(bg=self._rgb_to_hex(target_rgb))
-            return
-        r = int(current_rgb[0] + (target_rgb[0] - current_rgb[0]) * (step / total_steps))
-        g = int(current_rgb[1] + (target_rgb[1] - current_rgb[1]) * (step / total_steps))
-        b = int(current_rgb[2] + (target_rgb[2] - current_rgb[2]) * (step / total_steps))
-        
-        widget.config(bg=self._rgb_to_hex((r, g, b)))
-        widget.after(15, lambda: self._animate_bg_color(widget, current_rgb, target_rgb, step + 1, total_steps))
 
     def _create_rounded_rect(self, canvas, x1, y1, x2, y2, radius=25, **kwargs):
         x2 -= 1
@@ -397,9 +399,9 @@ class HayvanTakipSistemi:
         hover_color = self._lighten_color(bg_color, 25) if self.theme_mode == 'dark' else self.koyu_renk(bg_color)
         _ = hover_color  # hover_color kullanımı canvas içindeki get_colors()'da dinamik olarak yapılıyor
         
-        pad_x = 18 if small else 26
-        pad_y = 6 if small else 9
-        font_size = 10 if small else 11
+        pad_x = 12 if small else 30
+        pad_y = 7 if small else 12
+        font_size = 9 if small else 11
         font_spec = ('Segoe UI', font_size, 'bold')
         
         dummy = tk.Label(parent, text=text, font=font_spec)
@@ -416,7 +418,7 @@ class HayvanTakipSistemi:
             parent_bg = self.renkler["arkaplan"]
         canvas = tk.Canvas(parent, width=req_w, height=req_h, bg=parent_bg, highlightthickness=0, bd=0)
         
-        radius = 8
+        radius = 10
         border_color = self.renkler.get("kenarlik", self.renkler["gri"])
         border_parts = self._create_rounded_rect(canvas, 0, 0, req_w, req_h, radius=radius, fill=border_color)
         parts = self._create_rounded_rect(canvas, 1, 1, req_w - 1, req_h - 1, radius=max(6, radius - 1), fill=bg_color)
@@ -461,6 +463,130 @@ class HayvanTakipSistemi:
         self.themed_buttons.append((canvas, purpose))
         return canvas
 
+    def responsive_buton_grubu(self, parent, butonlar, gap=8, align="left"):
+        """Butonlari pencere genisligine gore satir kirarak yerlestirir."""
+        olusan_butonlar = []
+        for metin, komut, amac in butonlar:
+            btn = self.modern_buton(parent, metin, komut, purpose=amac, small=True)
+            olusan_butonlar.append(btn)
+
+        def yerlestir(event=None):
+            try:
+                if not parent.winfo_exists():
+                    return
+                kullanilabilir = max(parent.winfo_width() - 12, 120)
+                satir = 0
+                sutun = 0
+                kullanilan = 0
+                for btn in olusan_butonlar:
+                    btn.grid_forget()
+                if align == "right":
+                    parent.columnconfigure(0, weight=1)
+                for btn in olusan_butonlar:
+                    genislik = btn.winfo_reqwidth() + gap
+                    if sutun and kullanilan + genislik > kullanilabilir:
+                        satir += 1
+                        sutun = 0
+                        kullanilan = 0
+                    sticky = "e" if align == "right" else "w"
+                    col_index = sutun + 1 if align == "right" else sutun
+                    btn.grid(row=satir, column=col_index, padx=(0, gap), pady=(3, 7), sticky=sticky)
+                    kullanilan += genislik
+                    sutun += 1
+            except tk.TclError:
+                return
+
+        parent.bind("<Configure>", yerlestir)
+        self.root.after(50, yerlestir)
+        return olusan_butonlar
+
+    def kaydirilabilir_sayfa(self, parent, padx=28, pady=22):
+        kapsayici = tk.Frame(parent, bg=self.renkler["arkaplan"])
+        kapsayici.pack(fill='both', expand=True)
+        self.themed_widgets.append((kapsayici, 'arkaplan'))
+
+        canvas = tk.Canvas(kapsayici, bg=self.renkler["arkaplan"], highlightthickness=0, bd=0)
+        scrollbar = tk.Scrollbar(
+            kapsayici,
+            orient='vertical',
+            command=canvas.yview,
+            bg=self.renkler["kart_ikincil"],
+            troughcolor=self.renkler["arkaplan"],
+            activebackground=self.renkler["button_primary_bg"],
+            highlightthickness=0,
+        )
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side='left', fill='both', expand=True)
+
+        sayfa = tk.Frame(canvas, bg=self.renkler["arkaplan"], padx=padx, pady=pady)
+        self.themed_widgets.append((sayfa, 'arkaplan'))
+        pencere = canvas.create_window((0, 0), window=sayfa, anchor='nw')
+
+        def bolge_guncelle(event=None):
+            try:
+                canvas.configure(scrollregion=canvas.bbox("all"))
+                bbox = canvas.bbox("all")
+                gerekli = bool(bbox and bbox[3] > canvas.winfo_height())
+                if gerekli and not scrollbar.winfo_ismapped():
+                    scrollbar.pack(side='right', fill='y')
+                elif not gerekli and scrollbar.winfo_ismapped():
+                    scrollbar.pack_forget()
+            except tk.TclError:
+                pass
+
+        def genislik_guncelle(event):
+            try:
+                canvas.itemconfigure(pencere, width=event.width)
+                bolge_guncelle()
+            except tk.TclError:
+                pass
+
+        def mousewheel(event):
+            try:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except tk.TclError:
+                pass
+
+        def mousewheel_ac(event=None):
+            canvas.bind_all("<MouseWheel>", mousewheel)
+
+        def mousewheel_kapat(event=None):
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except tk.TclError:
+                pass
+
+        sayfa.bind("<Configure>", bolge_guncelle)
+        canvas.bind("<Configure>", genislik_guncelle)
+        canvas.bind("<Enter>", mousewheel_ac)
+        canvas.bind("<Leave>", mousewheel_kapat)
+        return sayfa
+
+    def _sayfa_basligi(self, parent, baslik, alt_metin=None):
+        alan = tk.Frame(parent, bg=self.renkler["arkaplan"])
+        alan.pack(fill='x', pady=(0, 14))
+        self.themed_widgets.append((alan, 'arkaplan'))
+        baslik_lbl = tk.Label(
+            alan,
+            text=baslik,
+            font=('Segoe UI', 22, 'bold'),
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+        )
+        baslik_lbl.pack(anchor='w')
+        self.themed_widgets.append((baslik_lbl, 'label'))
+        if alt_metin:
+            alt_lbl = tk.Label(
+                alan,
+                text=alt_metin,
+                font=('Segoe UI', 10),
+                bg=self.renkler["arkaplan"],
+                fg=self.renkler["muted"],
+            )
+            alt_lbl.pack(anchor='w', pady=(3, 0))
+            self.themed_widgets.append((alt_lbl, 'muted_label'))
+        return alan
+
     def koyu_renk(self, hex_color):
         try:
             rgb = self._hex_to_rgb(hex_color)
@@ -476,48 +602,33 @@ class HayvanTakipSistemi:
             return hex_color
 
     def modern_kart(self, parent, accent=None):
-        """Modern kart — düz, temiz frame. accent rengi verilirse sol kenar çizgisi eklenir."""
+        """Modern kart: ince çerçeveli, isteğe bağlı üst accent çizgili panel."""
+        kart = tk.Frame(
+            parent,
+            bg=self.renkler["kart_arkaplan"],
+            highlightthickness=1,
+            highlightbackground=self.renkler.get("kenarlik", self.renkler["gri"]),
+            bd=0
+        )
+        self.themed_widgets.append((kart, 'kart'))
         if accent:
-            outer = tk.Frame(parent, bg=self.renkler["kart_arkaplan"])
-            accent_bar = tk.Frame(outer, bg=accent, width=4)
-            accent_bar.pack(side='left', fill='y')
-            inner = tk.Frame(outer, bg=self.renkler["kart_arkaplan"])
-            inner.pack(side='left', fill='both', expand=True)
-            self.themed_widgets.append((outer, 'kart'))
-            self.themed_widgets.append((inner, 'kart'))
-            return inner   # İÇ frame dönüyor — children doğru yere giriyor
-        else:
-            kart = tk.Frame(
-                parent,
-                bg=self.renkler["kart_arkaplan"],
-                highlightthickness=1,
-                highlightbackground=self.renkler.get("kenarlik", self.renkler["gri"]),
-                bd=0
-            )
-            self.themed_widgets.append((kart, 'kart'))
-            return kart
+            accent_bar = tk.Frame(kart, bg=accent, height=4)
+            accent_bar.pack(fill='x', side='top')
+        return kart
 
-    def modern_section_baslik(self, parent, text, icon='', color=None):
-        """Sekme içi bölüm başlığı — ince sol accent çizgisi ile."""
-        renk = color or self.renkler["ana_kirmizi"]
-        frame = tk.Frame(parent, bg=self.renkler["kart_arkaplan"])
-        accent = tk.Frame(frame, bg=renk, width=4, height=32)
-        accent.pack(side='left', fill='y', padx=(0, 12))
-        lbl = tk.Label(frame, text=f"{icon} {text}".strip(), font=('Segoe UI', 14, 'bold'),
-                       bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
-        lbl.pack(side='left', anchor='w')
-        self.themed_widgets.append((frame, 'kart'))
-        self.themed_widgets.append((lbl, 'label'))
-        return frame
-
-    # ── ANİMASYON METODLARı ──────────────────────────────────────────────────
-    def _bildirim_puls_baslat(self):
-        """Kritik uyarı varsa gösterge çubuğunu pulse animasyonuyla yanıp söndürür."""
-        self._puls_durum = True
-        self._puls_animasyon()
+    #  ANİMASYON METODLARı 
+    def _puls_zamanlayici_iptal_et(self):
+        after_id = getattr(self, "_puls_after_id", None)
+        if after_id:
+            try:
+                self.root.after_cancel(after_id)
+            except tk.TclError:
+                pass
+            self._puls_after_id = None
 
     def _puls_animasyon(self):
-        """Indicator bar rengini A→B→A→... şeklinde animasyonla değiştirir."""
+        """Indicator bar rengini ABA... şeklinde animasyonla değiştirir."""
+        self._puls_after_id = None
         if getattr(self, "_kapanis_istegi", False):
             return
         if not hasattr(self, 'uyari_indicator') or not self.uyari_indicator.winfo_exists():
@@ -535,41 +646,16 @@ class HayvanTakipSistemi:
         except tk.TclError:
             pass
 
-    def _hover_animasyon(self, widget, enter_bg, leave_bg, steps=8, delay=12):
-        """Widget arka plan rengini smooth geçişle değiştirir."""
-        def _interpolate(c1, c2, t):
-            r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
-            r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
-            r = int(r1 + (r2 - r1) * t)
-            g = int(g1 + (g2 - g1) * t)
-            b = int(b1 + (b2 - b1) * t)
-            return f'#{r:02x}{g:02x}{b:02x}'
-
-        def _animate(step, direction):
-            if not widget.winfo_exists():
-                return
-            t = (step / steps) if direction == 'in' else ((steps - step) / steps)
-            c = _interpolate(leave_bg, enter_bg, t)
-            try:
-                widget.config(bg=c)
-                if step < steps:
-                    widget.after(delay, lambda: _animate(step + 1, direction))
-            except tk.TclError:
-                pass
-
-        widget.bind('<Enter>', lambda e: _animate(0, 'in'))
-        widget.bind('<Leave>', lambda e: _animate(0, 'out'))
-
     def modern_form_satir(self, parent, label_text, widget_class, row, col=0, **kwargs):
         """Form satırı: küçük üst-etiket + widget — modern input görünümü."""
         container = tk.Frame(parent, bg=self.renkler["kart_arkaplan"])
         lbl = tk.Label(container, text=label_text.upper(),
-                       font=('Segoe UI', 8, 'bold'),
+                       font=('Segoe UI', 9, 'bold'),
                        bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"])
         lbl.pack(anchor='w', padx=2, pady=(0, 2))
         widget = widget_class(container, **kwargs)
-        widget.pack(fill='x', pady=(0, 0))
-        container.grid(row=row, column=col, sticky='ew', padx=8, pady=8)
+        widget.pack(fill='x', pady=(0, 0), ipady=3)
+        container.grid(row=row, column=col, sticky='ew', padx=12, pady=10)
         self.themed_widgets.append((container, 'kart'))
         self.themed_widgets.append((lbl, 'muted_label'))
         return widget
@@ -1085,7 +1171,8 @@ class HayvanTakipSistemi:
         self.hayvanlar = self.api_hayvanlari_yukle()
         self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
         if hasattr(self, "notebook"):
-            self.ekranlari_guncelle()
+            if hasattr(self, "notebook"):
+                self.ekranlari_guncelle()
             self.header_ozet_guncelle()
         self.api_durum_guncelle()
         return True
@@ -1117,110 +1204,6 @@ class HayvanTakipSistemi:
 
     def api_baglantiyi_yenile_ui(self):
         return self.api_senkronize_et_ui()
-
-    def _api_giris_penceresi_popup_eski(self):
-        sonuc = {"ok": False}
-        pencere = tk.Toplevel(self.root)
-        pencere.title("ALP Ziraat Giriş")
-        pencere.geometry("420x360")
-        pencere.resizable(False, False)
-        pencere.configure(bg=self.renkler["arkaplan"])
-        pencere.transient(self.root)
-        pencere.grab_set()
-        pencere.update_idletasks()
-        x = self.root.winfo_x() + max((self.root.winfo_width() - pencere.winfo_width()) // 2, 80)
-        y = self.root.winfo_y() + max((self.root.winfo_height() - pencere.winfo_height()) // 2, 80)
-        pencere.geometry(f"+{x}+{y}")
-        pencere.lift()
-        pencere.attributes("-topmost", True)
-        pencere.after(250, lambda: pencere.attributes("-topmost", False) if pencere.winfo_exists() else None)
-        pencere.focus_force()
-
-        kutu = tk.Frame(
-            pencere,
-            bg=self.renkler["kart_arkaplan"],
-            padx=26,
-            pady=24,
-            highlightthickness=1,
-            highlightbackground=self.renkler["kenarlik"],
-        )
-        kutu.pack(fill="both", expand=True, padx=22, pady=22)
-
-        tk.Label(
-            kutu,
-            text="ALP Ziraat",
-            bg=self.renkler["kart_arkaplan"],
-            fg=self.renkler["yazi_rengi"],
-            font=("Segoe UI", 19, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            kutu,
-            text="Çiftlik hesabınızla giriş yapın",
-            bg=self.renkler["kart_arkaplan"],
-            fg=self.renkler["muted"],
-            font=("Segoe UI", 10),
-        ).pack(anchor="w", pady=(0, 18))
-
-        tk.Label(kutu, text="Kullanıcı adı", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        kullanici_entry = ttk.Entry(kutu, font=("Segoe UI", 11), style="TEntry")
-        kullanici_entry.pack(fill="x", pady=(4, 12), ipady=5)
-
-        tk.Label(kutu, text="Şifre", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        sifre_entry = ttk.Entry(kutu, font=("Segoe UI", 11), style="TEntry", show="*")
-        sifre_entry.pack(fill="x", pady=(4, 12), ipady=5)
-
-        durum_label = tk.Label(kutu, text="", bg=self.renkler["kart_arkaplan"], fg=self.renkler["ana_kirmizi"], font=("Segoe UI", 9))
-        durum_label.pack(anchor="w", pady=(0, 10))
-
-        def giris():
-            kullanici_adi = kullanici_entry.get().strip()
-            sifre = sifre_entry.get()
-            if not kullanici_adi or not sifre:
-                durum_label.config(text="Kullanıcı adı ve şifre zorunludur.")
-                return
-            try:
-                self.api_giris_yap(kullanici_adi, sifre)
-                sonuc["ok"] = True
-                pencere.destroy()
-            except ApiHatasi as e:
-                durum_label.config(text=str(e))
-
-        def iptal():
-            sonuc["ok"] = False
-            pencere.destroy()
-
-        btn_frame = tk.Frame(kutu, bg=self.renkler["kart_arkaplan"])
-        btn_frame.pack(fill="x", pady=(4, 0))
-        tk.Button(
-            btn_frame,
-            text="Giriş",
-            command=giris,
-            bg=self.renkler["button_primary_bg"],
-            fg=self.renkler["button_primary_fg"],
-            activebackground=self.renkler["button_primary_bg"],
-            activeforeground=self.renkler["button_primary_fg"],
-            relief="flat",
-            padx=16,
-            pady=8,
-            font=("Segoe UI", 10, "bold"),
-        ).pack(side="left")
-        tk.Button(
-            btn_frame,
-            text="İptal",
-            command=iptal,
-            bg=self.renkler["button_default_bg"],
-            fg=self.renkler["button_default_fg"],
-            relief="flat",
-            padx=16,
-            pady=8,
-            font=("Segoe UI", 10),
-        ).pack(side="left", padx=(8, 0))
-
-        sifre_entry.bind("<Return>", lambda event: giris())
-        kullanici_entry.focus_set()
-        pencere.protocol("WM_DELETE_WINDOW", iptal)
-        self.root.wait_window(pencere)
-        return sonuc["ok"]
 
     def api_giris_penceresi(self):
         sonuc = {"ok": False}
@@ -1375,7 +1358,7 @@ class HayvanTakipSistemi:
             return False
 
         self.root.title("ALP ZIRAAT - Suru Takip Sistemi")
-        self.root.geometry("1600x1000")
+        self.root.geometry("1500x900")
         self.root.minsize(1000, 700)
         self.root.resizable(True, True)
         self.root.configure(bg=self.renkler["arkaplan"])
@@ -1672,15 +1655,45 @@ class HayvanTakipSistemi:
             child.destroy()
 
         self.root.title("ALP Ziraat - Admin Merkezi")
-        self.root.geometry("860x640")
-        self.root.minsize(780, 560)
+        self.root.geometry("960x720")
+        self.root.minsize(820, 600)
         self.root.resizable(True, True)
         self.root.configure(bg=self.renkler["arkaplan"])
         self.root.deiconify()
         self.root.lift()
 
-        sayfa = tk.Frame(self.root, bg=self.renkler["arkaplan"], padx=28, pady=24)
-        sayfa.pack(fill="both", expand=True)
+        scroll_kapsayici = tk.Frame(self.root, bg=self.renkler["arkaplan"])
+        scroll_kapsayici.pack(fill="both", expand=True)
+        admin_canvas = tk.Canvas(scroll_kapsayici, bg=self.renkler["arkaplan"], highlightthickness=0, bd=0)
+        admin_scroll = tk.Scrollbar(
+            scroll_kapsayici,
+            orient="vertical",
+            command=admin_canvas.yview,
+            bg=self.renkler["kart_ikincil"],
+            troughcolor=self.renkler["arkaplan"],
+            activebackground=self.renkler["button_primary_bg"],
+            highlightthickness=0,
+        )
+        admin_canvas.configure(yscrollcommand=admin_scroll.set)
+        admin_scroll.pack(side="right", fill="y")
+        admin_canvas.pack(side="left", fill="both", expand=True)
+
+        sayfa = tk.Frame(admin_canvas, bg=self.renkler["arkaplan"], padx=28, pady=24)
+        sayfa_pencere = admin_canvas.create_window((0, 0), window=sayfa, anchor="nw")
+
+        def admin_scroll_bolgesi_guncelle(event=None):
+            admin_canvas.configure(scrollregion=admin_canvas.bbox("all"))
+
+        def admin_canvas_genislik_guncelle(event):
+            admin_canvas.itemconfigure(sayfa_pencere, width=event.width)
+
+        def admin_mousewheel(event):
+            if admin_canvas.winfo_exists():
+                admin_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        sayfa.bind("<Configure>", admin_scroll_bolgesi_guncelle)
+        admin_canvas.bind("<Configure>", admin_canvas_genislik_guncelle)
+        self.root.bind_all("<MouseWheel>", admin_mousewheel)
 
         ust = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
         ust.pack(fill="x")
@@ -1710,11 +1723,29 @@ class HayvanTakipSistemi:
         govde.pack(fill="both", expand=True)
         govde.columnconfigure(0, weight=1)
         govde.columnconfigure(1, weight=1)
+        govde.rowconfigure(0, weight=1)
+        govde.rowconfigure(1, weight=1)
 
         sol = tk.Frame(govde, bg=self.renkler["kart_arkaplan"], padx=18, pady=18, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
         sag = tk.Frame(govde, bg=self.renkler["kart_arkaplan"], padx=18, pady=18, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
-        sol.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
-        sag.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
+
+        def admin_govde_yerlestir(event=None):
+            genislik = govde.winfo_width()
+            sol.grid_forget()
+            sag.grid_forget()
+            if genislik and genislik < 760:
+                govde.columnconfigure(0, weight=1)
+                govde.columnconfigure(1, weight=0)
+                sol.grid(row=0, column=0, sticky="nsew", padx=0, pady=(0, 12))
+                sag.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+            else:
+                govde.columnconfigure(0, weight=1)
+                govde.columnconfigure(1, weight=1)
+                sol.grid(row=0, column=0, sticky="nsew", padx=(0, 9), pady=0)
+                sag.grid(row=0, column=1, sticky="nsew", padx=(9, 0), pady=0)
+
+        govde.bind("<Configure>", admin_govde_yerlestir)
+        self.root.after(50, admin_govde_yerlestir)
 
         tk.Label(sol, text="Suruye Giris", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w")
         tk.Label(sol, text="Tum kayitlari gorebilir veya belirli bir ciftlige odaklanabilirsiniz.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9), wraplength=320, justify="left").pack(anchor="w", pady=(4, 14))
@@ -1804,7 +1835,19 @@ class HayvanTakipSistemi:
             if idx < len(aktif_ciftlikler()):
                 ciftlik_combo.current(idx)
 
+        def combodan_ciftlik_sec(event=None):
+            idx = ciftlik_combo.current()
+            if idx < 0:
+                return
+            ciftlik_liste.selection_clear(0, tk.END)
+            ciftlik_liste.selection_set(idx)
+            ciftlik_liste.see(idx)
+
         ciftlik_liste.bind("<<ListboxSelect>>", listeden_ciftlik_sec)
+        ciftlik_liste.bind("<Double-Button-1>", lambda event: (listeden_ciftlik_sec(event), secili_suruye_gir()))
+        ciftlik_liste.bind("<Return>", lambda event: secili_suruye_gir())
+        ciftlik_combo.bind("<<ComboboxSelected>>", combodan_ciftlik_sec)
+        ciftlik_combo.bind("<Return>", lambda event: secili_suruye_gir())
 
         admin_buton(sol, "Tum ciftliklerin suru takibine gir", tum_suruye_gir, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sol, "Secili ciftligin surusune gir", secili_suruye_gir, self.renkler["button_success_bg"]).pack(fill="x", pady=5)
@@ -1837,7 +1880,7 @@ class HayvanTakipSistemi:
                     fg=self.renkler["uyari"],
                 )
             else:
-                admin_durum_label.config(text="API bagli: yonetim listesi guncel.", fg=self.renkler["yesil"])
+                admin_durum_label.config(text="Online: yonetim listesi guncel.", fg=self.renkler["yesil"])
 
         def ciftlikleri_yonet():
             self.admin_ciftlik_yonetim_penceresi()
@@ -1855,14 +1898,19 @@ class HayvanTakipSistemi:
             if online:
                 messagebox.showinfo("Admin Merkezi", "API baglantisi yenilendi ve yonetim listesi guncellendi.", parent=self.root)
 
+        def admin_api_ayarlari():
+            self.api_ayar_penceresi()
+            verileri_yenile(sessiz=True)
+            ekrani_yenile()
+
         admin_buton(sag, "Ciftlikleri yonet", ciftlikleri_yonet).pack(fill="x", pady=5)
         admin_buton(sag, "Kullanicilari yonet", lambda: kullanicilari_yonet(False)).pack(fill="x", pady=5)
         admin_buton(sag, "Yeni kullanici olustur", lambda: kullanicilari_yonet(True), self.renkler["button_success_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Son islemleri gor", self.admin_islem_gecmisi_penceresi).pack(fill="x", pady=5)
         admin_buton(sag, "Online yedek indir", lambda: self.admin_online_yedek_indir(self.root), self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
+        admin_buton(sag, "API ayarlari", admin_api_ayarlari, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Sifremi degistir", lambda: self.sifre_degistir_penceresi(self.root)).pack(fill="x", pady=5)
         admin_buton(sag, "Senkronize Et", admin_senkronize_et, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
-        admin_buton(sag, "Listeyi yenile", lambda: (verileri_yenile(), ekrani_yenile())).pack(fill="x", pady=5)
 
         alt = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
         alt.pack(fill="x", pady=(18, 0))
@@ -1875,9 +1923,17 @@ class HayvanTakipSistemi:
         try:
             self.root.wait_variable(tamam)
         except tk.TclError:
+            try:
+                self.root.unbind_all("<MouseWheel>")
+            except tk.TclError:
+                pass
             return False
 
         self.root.unbind("<Escape>")
+        try:
+            self.root.unbind_all("<MouseWheel>")
+        except tk.TclError:
+            pass
         for child in self.root.winfo_children():
             child.destroy()
         return sonuc["ok"]
@@ -2258,12 +2314,14 @@ class HayvanTakipSistemi:
         eski_ciftlik_id = getattr(self, "admin_aktif_ciftlik_id", None)
         eski_ciftlik_ad = getattr(self, "admin_aktif_ciftlik_ad", None)
         self.uyari_thread_running = False
-        if getattr(self, "_uyari_after_id", None):
-            try:
-                self.root.after_cancel(self._uyari_after_id)
-            except tk.TclError:
-                pass
-            self._uyari_after_id = None
+        for after_attr in ("_uyari_after_id", "_saat_after_id", "_baslangic_after_id", "_puls_after_id", "_otomatik_baglanti_after_id"):
+            after_id = getattr(self, after_attr, None)
+            if after_id:
+                try:
+                    self.root.after_cancel(after_id)
+                except tk.TclError:
+                    pass
+                setattr(self, after_attr, None)
         for child in self.root.winfo_children():
             child.destroy()
         self.themed_widgets = []
@@ -2715,9 +2773,6 @@ class HayvanTakipSistemi:
         except:
             pass
 
-    def islem_gecmisi_kaydet(self):
-        pass
-
     def son_islemi_geri_al(self):
         if not getattr(self, "geri_al_yigini", None):
             messagebox.showinfo("Geri Al", "Geri alınabilecek işlem yok.", parent=self.root)
@@ -2915,7 +2970,7 @@ class HayvanTakipSistemi:
 
     # --- Arayüz Oluşturma Fonksiyonları ---
     def ana_interface_olustur(self):
-        # ─── ÜST BAŞLIK (HEADER) ────────────────────────────────────────────
+        #  ÜST BAŞLIK (HEADER) 
         # Header: net, düşük gürültülü operasyon barı
         header_accentstrip = tk.Frame(self.root, bg=self.renkler["ana_kirmizi"], height=4)
         header_accentstrip.pack(fill='x')
@@ -2925,7 +2980,7 @@ class HayvanTakipSistemi:
         self.baslik_frame.pack_propagate(False)
         self.themed_widgets.append((self.baslik_frame, 'baslik_frame'))
 
-        # ── Sol: Logo paneli (beyaz arka plan — görünürlük için) ──
+        #  Sol: Logo paneli (beyaz arka plan — görünürlük için) 
         sol_grup = tk.Frame(self.baslik_frame, bg=self.renkler["siyah"])
         sol_grup.pack(side='left', fill='y', padx=(16, 0))
 
@@ -3015,35 +3070,56 @@ class HayvanTakipSistemi:
             side='left', fill='y', padx=18, pady=12)
         self.themed_widgets.append((header_ayirici, 'divider'))
 
-        # ── Sağ: İşlem Butonları ──
-        sag_grup = tk.Frame(self.baslik_frame, bg=self.renkler["siyah"])
-        sag_grup.pack(side='right', fill='y', padx=(0, 14))
+        # Sağ: işlem butonları geniş ekranda başlıkta, dar ekranda alt satırda görünür.
+        self.header_action_group = tk.Frame(self.baslik_frame, bg=self.renkler["siyah"], padx=8, pady=0)
+        self.header_action_group.pack(side='right', fill='y', padx=(8, 14), pady=17)
+        self.themed_widgets.append((self.header_action_group, 'baslik_frame'))
 
-        self.theme_toggle_button = self.modern_buton(
-            sag_grup, "☀️ Açık Mod", self.toggle_theme, purpose='theme', small=True)
-        self.theme_toggle_button.pack(side='right', padx=(4, 0), pady=18)
+        self.header_action_fallback = tk.Frame(self.root, bg=self.renkler["siyah"], padx=12, pady=3)
+        self.themed_widgets.append((self.header_action_fallback, 'baslik_frame'))
+
+        aksiyonlar = [
+            ("Yedekten Yükle", self.yedekten_yukle_penceresi, 'danger'),
+            ("Dışa Aktar", self.disa_aktar_penceresi, 'success'),
+            ("Geçmiş", self.islem_gecmisi_penceresi, 'default'),
+            ("Geri Al", self.son_islemi_geri_al, 'warning'),
+        ]
         if self.admin_mi():
-            self.modern_buton(sag_grup, "Admin", self.admin_merkeze_don,
-                              purpose='primary', small=True).pack(side='right', padx=4, pady=18)
+            aksiyonlar.append(("Admin", self.admin_merkeze_don, 'primary'))
         if getattr(self, "api_modu", False):
-            self.modern_buton(sag_grup, "Sifre", self.sifre_degistir_penceresi,
-                              purpose='default', small=True).pack(side='right', padx=4, pady=18)
-            self.modern_buton(sag_grup, "Senkronize Et", self.api_senkronize_et_ui,
-                              purpose='primary', small=True).pack(side='right', padx=4, pady=18)
+            aksiyonlar.extend([
+                ("Senkronize", self.api_senkronize_et_ui, 'primary'),
+                ("Şifre", self.sifre_degistir_penceresi, 'default'),
+            ])
 
-        for metin, komut, amac in [
-            ("🔗 API",          self.api_ayar_penceresi,          'primary'),
-            ("↩ Geri Al",        self.son_islemi_geri_al,         'warning'),
-            ("📜 Geçmiş",        self.islem_gecmisi_penceresi,    'default'),
-            ("📤 Dışa Aktar",    self.disa_aktar_penceresi,       'success'),
-            ("🧯 Yedekten Yükle",self.yedekten_yukle_penceresi,   'danger'),
-        ]:
-            if "API" in metin and not self.admin_mi():
-                continue
-            self.modern_buton(sag_grup, metin, komut,
-                              purpose=amac, small=True).pack(side='right', padx=4, pady=18)
+        self.header_action_buttons = []
+        for metin, komut, amac in reversed(aksiyonlar):
+            btn = self.modern_buton(self.header_action_group, metin, komut, purpose=amac, small=True)
+            btn.pack(side='right', padx=(4, 0), pady=0)
+            self.header_action_buttons.append(btn)
+        self.fallback_action_buttons = self.responsive_buton_grubu(self.header_action_fallback, aksiyonlar, align="left")
+        self.theme_toggle_button = None
 
-        # ─── BİLDİRİM BANDI ─────────────────────────────────────────────────
+        def header_aksiyon_yerlestir(event=None):
+            try:
+                genis_ekran = self.root.winfo_width() >= 1320
+                if genis_ekran:
+                    if not self.header_action_group.winfo_ismapped():
+                        self.header_action_group.pack(side='right', fill='y', padx=(8, 14), pady=17)
+                    if self.header_action_fallback.winfo_ismapped():
+                        self.header_action_fallback.pack_forget()
+                else:
+                    if self.header_action_group.winfo_ismapped():
+                        self.header_action_group.pack_forget()
+                    if not self.header_action_fallback.winfo_ismapped():
+                        self.header_action_fallback.pack(fill='x', after=self.baslik_frame)
+            except tk.TclError:
+                return
+
+        self.root.bind("<Configure>", header_aksiyon_yerlestir, add="+")
+        self.root.after(80, header_aksiyon_yerlestir)
+
+        #  BİLDİRİM BANDI 
         self.uyari_frame = tk.Frame(self.root, bg=self.renkler["band_normal_bg"], height=38)
         self.uyari_frame.pack(fill='x')
         self.uyari_frame.pack_propagate(False)
@@ -3052,7 +3128,7 @@ class HayvanTakipSistemi:
         self.uyari_indicator.pack(side='left', fill='y')
 
         # İkon
-        self._uyari_ikon_lbl = tk.Label(self.uyari_frame, text="✅",
+        self._uyari_ikon_lbl = tk.Label(self.uyari_frame, text="",
                                          bg=self.renkler["band_normal_bg"], fg=self.renkler["band_normal_fg"],
                                          font=('Segoe UI', 11))
         self._uyari_ikon_lbl.pack(side='left', padx=(8, 4))
@@ -3068,7 +3144,7 @@ class HayvanTakipSistemi:
         self._saat_label.pack(side='right', padx=14)
         self._saati_guncelle()
 
-        # ─── NOTEBOOK ────────────────────────────────────────────────────────
+        #  NOTEBOOK 
         self.notebook = ttk.Notebook(self.root, style='Modern.TNotebook')
         self.notebook.pack(fill='both', expand=True, padx=12, pady=(10, 12))
 
@@ -3091,8 +3167,30 @@ class HayvanTakipSistemi:
         for i, tab_id in enumerate(self.notebook.tabs()):
             text = self.notebook.tab(tab_id, "text")
             btn = self.modern_buton(self.custom_tab_bar, text, command=lambda idx=i: self._select_tab(idx), purpose='theme')
-            btn.pack(side='left', padx=(0, 6))
             self.tab_buttons.append(btn)
+
+        def tablari_yerlestir(event=None):
+            try:
+                genislik = max(self.custom_tab_bar.winfo_width() - 12, 120)
+                satir = 0
+                sutun = 0
+                kullanilan = 0
+                for btn in self.tab_buttons:
+                    btn.grid_forget()
+                for btn in self.tab_buttons:
+                    btn_genislik = btn.winfo_reqwidth() + 8
+                    if sutun and kullanilan + btn_genislik > genislik:
+                        satir += 1
+                        sutun = 0
+                        kullanilan = 0
+                    btn.grid(row=satir, column=sutun, padx=(0, 8), pady=(0, 6), sticky="w")
+                    kullanilan += btn_genislik
+                    sutun += 1
+            except tk.TclError:
+                return
+
+        self.custom_tab_bar.bind("<Configure>", tablari_yerlestir)
+        self.root.after(50, tablari_yerlestir)
             
         self.notebook.bind('<<NotebookTabChanged>>', self._update_custom_tabs)
         self._update_custom_tabs() # Başlangıçta ilk sekmeyi renklendir
@@ -3102,6 +3200,11 @@ class HayvanTakipSistemi:
 
     def header_ozet_guncelle(self):
         if not hasattr(self, 'header_stats_label'):
+            return
+        try:
+            if not self.header_stats_label.winfo_exists():
+                return
+        except tk.TclError:
             return
         aktif = 0
         gebe = 0
@@ -3114,31 +3217,32 @@ class HayvanTakipSistemi:
             if hayvan.get('gebe_mi') and not hayvan.get('arsivli') and not hayvan.get('olu') and not hayvan.get('kesildi'):
                 gebe += 1
         self.header_stats_label.config(text=f"{aktif} aktif  ·  {gebe} gebe  ·  {arsivli} arşiv")
+        ozet_label_map = {
+            "aktif": aktif,
+            "gebe": gebe,
+            "arsivli": arsivli,
+        }
+        for anahtar, deger in ozet_label_map.items():
+            lbl = getattr(self, f"kayit_ozet_{anahtar}_label", None)
+            if lbl and lbl.winfo_exists():
+                lbl.config(text=str(deger))
 
     def api_durum_guncelle(self):
         if not hasattr(self, 'api_status_label'):
             return
+        try:
+            if not self.api_status_label.winfo_exists():
+                return
+        except tk.TclError:
+            return
         if getattr(self, "api_modu", False):
-            kisa_url = self.api_url.replace("https://", "").replace("http://", "")
-            if len(kisa_url) > 26:
-                kisa_url = kisa_url[:23] + "..."
-            kullanici = getattr(self, "api_kullanici", None) or {}
-            kullanici_adi = kullanici.get("kullanici_adi")
-            rol = kullanici.get("rol")
-            if rol == "admin":
-                ciftlik = getattr(self, "admin_aktif_ciftlik_ad", None) or "Tum ciftlikler"
-            else:
-                ciftlik = (kullanici.get("ciftlik") or {}).get("ad") or ""
-            kimlik = f" · {kullanici_adi}" if kullanici_adi else ""
-            if ciftlik:
-                kimlik += f" · {ciftlik}"
             bekleyen = self.bekleyen_senkron_sayisi()
-            bekleyen_metin = f" Â· {bekleyen} bekliyor" if bekleyen else ""
+            bekleyen_metin = f" | {bekleyen} bekliyor" if bekleyen else ""
             if getattr(self, "api_cevrimdisi", False):
-                metin = f"API çevrimdışı · {kisa_url}{kimlik}"
+                metin = "Offline"
                 renk = self.renkler["uyari"]
             else:
-                metin = f"API bağlı · {kisa_url}{kimlik}"
+                metin = "Online"
                 renk = self.renkler["yesil"]
             if bekleyen_metin:
                 metin += bekleyen_metin
@@ -3168,13 +3272,14 @@ class HayvanTakipSistemi:
         if yeni_url and not yeni_url.startswith(("http://", "https://")):
             yeni_url = "http://" + yeni_url
 
-        yerel_kopya = dict(self.hayvanlar)
+        yerel_kopya = dict(getattr(self, "hayvanlar", {}) or {})
         if not self.api_ayarlarini_kaydet(yeni_url):
             return
 
         if not self.api_modu:
             self.hayvanlar = self.veri_yukle()
-            self.ekranlari_guncelle()
+            if hasattr(self, "notebook"):
+                self.ekranlari_guncelle()
             self.header_ozet_guncelle()
             self.api_durum_guncelle()
             messagebox.showinfo("Merkezi API", "Yerel veri moduna geçildi.")
@@ -3320,50 +3425,54 @@ class HayvanTakipSistemi:
     # #################################################################
     def hayvan_kayit_sekmesi(self):
         kayit_frame = ttk.Frame(self.notebook, style='TFrame')
-        self.notebook.add(kayit_frame, text="📋 Hayvan Kaydı")
+        self.notebook.add(kayit_frame, text="Hayvan Kaydı")
 
-        main_card = self.modern_kart(kayit_frame)
-        main_card.pack(fill='both', expand=True, padx=16, pady=16)
+        sayfa = self.kaydirilabilir_sayfa(kayit_frame, padx=28, pady=22)
 
-        # ─── Bölüm Başlığı ───────────────────────────────────────────────────
-        header = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], pady=20)
-        header.pack(fill='x', padx=24)
+        self._sayfa_basligi(
+            sayfa,
+            "Yeni Hayvan Kaydı",
+            "Küpe, doğum ve sürü bilgilerini tek ekranda kaydedin."
+        )
+
+        govde = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
+        govde.pack(fill='x')
+        govde.columnconfigure(0, weight=1)
+        self.themed_widgets.append((govde, 'arkaplan'))
+
+        main_card = self.modern_kart(govde, accent=self.renkler["button_success_bg"])
+        main_card.grid(row=0, column=0, sticky='nsew', padx=(0, 18))
+
+        header = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], pady=18)
+        header.pack(fill='x', padx=28)
         self.themed_widgets.append((header, 'kart'))
 
-        baslik_lbl = tk.Label(header, text="Yeni Hayvan Kaydı",
-                               font=('Segoe UI', 18, 'bold'),
+        baslik_lbl = tk.Label(header, text="Hayvan Bilgileri",
+                               font=('Segoe UI', 16, 'bold'),
                                bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
         baslik_lbl.pack(side='left')
         self.themed_widgets.append((baslik_lbl, 'label'))
 
-        alt_lbl = tk.Label(header, text="  —  Tüm alanları doldurun ve kaydedin.",
-                            font=('Segoe UI', 11),
-                            bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"])
-        alt_lbl.pack(side='left')
-        self.themed_widgets.append((alt_lbl, 'muted_label'))
-
-        # Yatay ayırıcı
         sep = tk.Frame(main_card, bg=self.renkler["kenarlik"], height=1)
-        sep.pack(fill='x', padx=24)
+        sep.pack(fill='x', padx=28)
         self.themed_widgets.append((sep, 'divider'))
 
-        # Form Container
-        form_frame = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], padx=32, pady=28)
-        form_frame.pack(fill='both', expand=True)
+        form_frame = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], padx=28, pady=22)
+        form_frame.pack(fill='x')
         form_frame.columnconfigure((0, 1), weight=1)
         self.themed_widgets.append((form_frame, 'kart'))
 
         # --- Row 0 ---
-        self.resmi_kupe_no_entry = self.modern_form_satir(form_frame, "🇹🇷 Resmi Küpe No", ttk.Entry, row=0, col=0, font=('Segoe UI', 11), style='TEntry')
-        self.ciftlik_kupe_no_entry = self.modern_form_satir(form_frame, "🏷️ Çiftlik Küpe No", ttk.Entry, row=0, col=1, font=('Segoe UI', 11), style='TEntry')
+        self.resmi_kupe_no_entry = self.modern_form_satir(form_frame, "Resmi Küpe No", ttk.Entry, row=0, col=0, font=('Segoe UI', 11), style='TEntry')
+        self.ciftlik_kupe_no_entry = self.modern_form_satir(form_frame, "Çiftlik Küpe No", ttk.Entry, row=0, col=1, font=('Segoe UI', 11), style='TEntry')
 
         # --- Row 1 ---
-        self.dogum_tarihi_entry = self.modern_form_satir(form_frame, "📅 Doğum Tarihi (GG/AA/YYYY)", ttk.Entry, row=1, col=0, font=('Segoe UI', 11), style='TEntry')
+        self.dogum_tarihi_entry = self.modern_form_satir(form_frame, "Doğum Tarihi (GG/AA/YYYY)", ttk.Entry, row=1, col=0, font=('Segoe UI', 11), style='TEntry')
         self.dogum_tarihi_entry.bind('<KeyRelease>', self.tarih_formatlama)
-        self.cins_combo = self.modern_form_satir(form_frame, "🐄 Cinsi", ttk.Combobox, row=1, col=1, values=["Dişi Buzağı", "Erkek Buzağı", "Dana", "Düve", "Sağmal İnek", "Kuru İnek"], font=('Segoe UI', 11), style='TCombobox')
+        self.cins_combo = self.modern_form_satir(form_frame, "Cinsi", ttk.Combobox, row=1, col=1, values=["Dişi Buzağı", "Erkek Buzağı", "Dana", "Düve", "Sağmal İnek", "Kuru İnek"], font=('Segoe UI', 11), style='TCombobox')
 
         # --- Row 2 ---
-        self.anne_kupe_entry = self.modern_form_satir(form_frame, "👩 Anne Çiftlik Küpe No", ttk.Entry, row=2, col=0, font=('Segoe UI', 11), style='TEntry')
+        self.anne_kupe_entry = self.modern_form_satir(form_frame, "Anne Çiftlik Küpe No", ttk.Entry, row=2, col=0, font=('Segoe UI', 11), style='TEntry')
 
         # --- Row 3 (Dinamik Gizli Alanlar) ---
         self.laktasyon_container = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
@@ -3371,8 +3480,8 @@ class HayvanTakipSistemi:
         self.laktasyon_container.columnconfigure((0, 1), weight=1)
         self.themed_widgets.append((self.laktasyon_container, 'kart'))
 
-        self.laktasyon_no_entry = self.modern_form_satir(self.laktasyon_container, "🔢 Laktasyon Numarası", ttk.Entry, row=0, col=0, font=('Segoe UI', 11), style='TEntry')
-        self.son_dogum_tarihi_entry = self.modern_form_satir(self.laktasyon_container, "📅 Son Doğum Tarihi", ttk.Entry, row=0, col=1, font=('Segoe UI', 11), style='TEntry')
+        self.laktasyon_no_entry = self.modern_form_satir(self.laktasyon_container, "Laktasyon Numarası", ttk.Entry, row=0, col=0, font=('Segoe UI', 11), style='TEntry')
+        self.son_dogum_tarihi_entry = self.modern_form_satir(self.laktasyon_container, "Son Doğum Tarihi", ttk.Entry, row=0, col=1, font=('Segoe UI', 11), style='TEntry')
         self.son_dogum_tarihi_entry.bind('<KeyRelease>', self.tarih_formatlama)
 
         self.laktasyon_container.grid_remove() # Başlangıçta gizli
@@ -3381,11 +3490,47 @@ class HayvanTakipSistemi:
 
         # Buton Container
         btn_frame = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=(40, 10))
+        btn_frame.grid(row=4, column=0, columnspan=2, pady=(28, 4), sticky='e')
         self.themed_widgets.append((btn_frame, 'kart'))
 
-        kaydet_btn = self.modern_buton(btn_frame, "💾 HAYVANI KAYDET", self.hayvan_kaydet, purpose='success', width=25)
+        kaydet_btn = self.modern_buton(btn_frame, "HAYVANI KAYDET", self.hayvan_kaydet, purpose='success', width=25)
         kaydet_btn.pack()
+
+        ozet_card = self.modern_kart(govde)
+        ozet_card.grid(row=0, column=1, sticky='nsew')
+        ozet_card.configure(width=280)
+        ozet_card.grid_propagate(False)
+        tk.Label(
+            ozet_card,
+            text="Sürü Özeti",
+            font=('Segoe UI', 15, 'bold'),
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+        ).pack(anchor='w', padx=20, pady=(20, 4))
+        tk.Label(
+            ozet_card,
+            text="Seçili çiftlikteki anlık durum",
+            font=('Segoe UI', 9),
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+        ).pack(anchor='w', padx=20, pady=(0, 14))
+
+        def ozet_satir(anahtar, baslik, renk):
+            satir = tk.Frame(ozet_card, bg=self.renkler["kart_ikincil"], padx=14, pady=12,
+                             highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+            satir.pack(fill='x', padx=20, pady=6)
+            self.themed_widgets.append((satir, 'soft_panel'))
+            tk.Label(satir, text=baslik, font=('Segoe UI', 9, 'bold'),
+                     bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"]).pack(anchor='w')
+            deger = tk.Label(satir, text="0", font=('Segoe UI', 22, 'bold'),
+                             bg=self.renkler["kart_ikincil"], fg=renk)
+            deger.pack(anchor='w')
+            setattr(self, f"kayit_ozet_{anahtar}_label", deger)
+
+        ozet_satir("aktif", "AKTİF HAYVAN", self.renkler["button_success_bg"])
+        ozet_satir("gebe", "GEBE", self.renkler["button_primary_bg"])
+        ozet_satir("arsivli", "ARŞİV", self.renkler["muted"])
+        self.header_ozet_guncelle()
 
     # #################################################################
     # ### YENİ FONKSİYON: _on_cins_change
@@ -3400,39 +3545,47 @@ class HayvanTakipSistemi:
 
     def tohumlama_sekmesi(self):
         tohumlama_frame = ttk.Frame(self.notebook, style='TFrame')
-        self.notebook.add(tohumlama_frame, text="💉 Tohumlama")
+        self.notebook.add(tohumlama_frame, text="Tohumlama")
 
-        main_card = self.modern_kart(tohumlama_frame)
-        main_card.pack(fill='both', expand=True, padx=16, pady=16)
+        sayfa = self.kaydirilabilir_sayfa(tohumlama_frame, padx=28, pady=22)
 
-        # ─── Bölüm Başlığı ───────────────────────────────────────────────────
-        header = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], pady=20)
-        header.pack(fill='x', padx=24)
+        self._sayfa_basligi(
+            sayfa,
+            "Tohumlama",
+            "Yeni tohumlama kaydı ve gebelik sonucu işlemleri."
+        )
+
+        main_card = self.modern_kart(sayfa, accent=self.renkler["button_primary_bg"])
+        main_card.pack(fill='x')
+
+        #  Bölüm Başlığı 
+        header = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], pady=18)
+        header.pack(fill='x', padx=28)
         self.themed_widgets.append((header, 'kart'))
 
-        baslik_lbl = tk.Label(header, text="💉 Tohumlama İşlemleri",
-                               font=('Segoe UI', 18, 'bold'),
+        baslik_lbl = tk.Label(header, text="İşlem Bilgileri",
+                               font=('Segoe UI', 16, 'bold'),
                                bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
         baslik_lbl.pack(side='left')
         self.themed_widgets.append((baslik_lbl, 'label'))
 
         sep = tk.Frame(main_card, bg=self.renkler["kenarlik"], height=1)
-        sep.pack(fill='x', padx=24)
+        sep.pack(fill='x', padx=28)
         self.themed_widgets.append((sep, 'divider'))
 
         # Form Container
-        form_frame = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], padx=32, pady=28)
-        form_frame.pack(fill='both', expand=True)
+        form_frame = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], padx=28, pady=22)
+        form_frame.pack(fill='x')
         form_frame.columnconfigure((0, 1), weight=1)
         self.themed_widgets.append((form_frame, 'kart'))
 
         # --- Row 0 ---
-        self.tohumlama_hayvan_combo = self.modern_form_satir(form_frame, "🐄 Hayvan Küpe No", ttk.Combobox, row=0, col=0, font=('Segoe UI', 11), style='TCombobox')
+        self.tohumlama_hayvan_combo = self.modern_form_satir(form_frame, "Hayvan Küpe No", ttk.Combobox, row=0, col=0, font=('Segoe UI', 11), style='TCombobox')
         self.tohumlama_hayvan_combo.bind('<KeyRelease>', self.hayvan_ara)
         self.tohumlama_hayvan_combo.bind('<<ComboboxSelected>>', self.combo_secimi)
         self.tohumlama_hayvanlarini_guncelle()
         
-        self.tohumlama_sekli_combo = self.modern_form_satir(form_frame, "⚡ Tohumlama Şekli", ttk.Combobox, row=0, col=1, values=["Suni", "Boğa"], font=('Segoe UI', 11), style='TCombobox')
+        self.tohumlama_sekli_combo = self.modern_form_satir(form_frame, "Tohumlama Şekli", ttk.Combobox, row=0, col=1, values=["Suni", "Boğa"], font=('Segoe UI', 11), style='TCombobox')
         self.tohumlama_sekli_combo.bind('<<ComboboxSelected>>', self.tohumlama_sekli_degisti)
 
         # --- Row 1 ---
@@ -3440,27 +3593,27 @@ class HayvanTakipSistemi:
         self.suni_container.grid(row=1, column=0, sticky='ew', padx=0, pady=0)
         self.suni_container.columnconfigure(0, weight=1)
         self.themed_widgets.append((self.suni_container, 'kart'))
-        self.suni_entry = self.modern_form_satir(self.suni_container, "🧬 Suni Tohumlama İsmi", ttk.Entry, row=0, col=0, font=('Segoe UI', 11), style='TEntry')
+        self.suni_entry = self.modern_form_satir(self.suni_container, "Suni Tohumlama İsmi", ttk.Entry, row=0, col=0, font=('Segoe UI', 11), style='TEntry')
         
-        self.tohumlama_tarih_entry = self.modern_form_satir(form_frame, "📅 Tohumlama Tarihi (GG/AA/YYYY)", ttk.Entry, row=1, col=1, font=('Segoe UI', 11), style='TEntry')
+        self.tohumlama_tarih_entry = self.modern_form_satir(form_frame, "Tohumlama Tarihi (GG/AA/YYYY)", ttk.Entry, row=1, col=1, font=('Segoe UI', 11), style='TEntry')
         self.tohumlama_tarih_entry.insert(0, datetime.now().strftime("%d/%m/%Y"))
         self.tohumlama_tarih_entry.bind('<KeyRelease>', self.tarih_formatlama)
 
         # Buton Container
         btn_frame = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
-        btn_frame.grid(row=2, column=0, columnspan=2, pady=(40, 10))
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=(28, 4), sticky='e')
         self.themed_widgets.append((btn_frame, 'kart'))
 
-        self.modern_buton(btn_frame, "💉 TOHUMLAMA KAYDET", self.tohumlama_kaydet, purpose='default', width=20).pack(side='left', padx=10)
-        self.modern_buton(btn_frame, "✅ GEBELİK POZİTİF", self.gebelik_pozitif, purpose='success', width=20).pack(side='left', padx=10)
-        self.modern_buton(btn_frame, "❌ GEBELİK NEGATİF", self.gebelik_negatif, purpose='danger', width=20).pack(side='left', padx=10)
+        self.modern_buton(btn_frame, "TOHUMLAMA KAYDET", self.tohumlama_kaydet, purpose='primary', width=22).pack(side='left', padx=(0, 10))
+        self.modern_buton(btn_frame, "GEBELİK POZİTİF", self.gebelik_pozitif, purpose='success', width=20).pack(side='left', padx=10)
+        self.modern_buton(btn_frame, "GEBELİK NEGATİF", self.gebelik_negatif, purpose='danger', width=20).pack(side='left', padx=(10, 0))
 
 
     def hayvan_listesi_sekmesi(self):
         liste_frame = ttk.Frame(self.notebook, style='TFrame')
-        self.notebook.add(liste_frame, text="📊 Hayvan Listesi")
+        self.notebook.add(liste_frame, text="Hayvan Listesi")
 
-        # ─── TOOLBAR ─────────────────────────────────────────────────────────
+        #  TOOLBAR 
         toolbar = tk.Frame(
             liste_frame,
             bg=self.renkler["kart_arkaplan"],
@@ -3512,12 +3665,12 @@ class HayvanTakipSistemi:
         sag = tk.Frame(toolbar, bg=self.renkler["kart_arkaplan"])
         sag.pack(side='right', fill='y', padx=16)
         self.themed_widgets.append((sag, 'kart'))
-        self.modern_buton(sag, "🔄 Yenile", self.api_verilerini_yenile,
+        self.modern_buton(sag, "Yenile", self.api_verilerini_yenile,
                           purpose='success', small=True).pack(side='right', padx=(6, 0), pady=18)
-        self.modern_buton(sag, "✖ Temizle", self.filtreleri_temizle,
+        self.modern_buton(sag, "Temizle", self.filtreleri_temizle,
                           purpose='danger', small=True).pack(side='right', padx=6, pady=18)
 
-        # ─── TABLO ───────────────────────────────────────────────────────────
+        #  TABLO 
         liste_kart = self.modern_kart(liste_frame)
         liste_kart.pack(fill='both', expand=True, padx=12, pady=12)
 
@@ -3553,7 +3706,7 @@ class HayvanTakipSistemi:
 
     def raporlama_sekmesi(self):
         rapor_sekme_frame = ttk.Frame(self.notebook, style='TFrame')
-        self.notebook.add(rapor_sekme_frame, text="📈 Raporlama")
+        self.notebook.add(rapor_sekme_frame, text="Raporlama")
 
         main_card = self.modern_kart(rapor_sekme_frame)
         main_card.pack(fill='both', expand=True, padx=16, pady=16)
@@ -3562,11 +3715,11 @@ class HayvanTakipSistemi:
         header.pack(fill='x', padx=24)
         self.themed_widgets.append((header, 'kart'))
 
-        rapor_baslik_label = tk.Label(header, text="📊 Sürü Genel Durum Raporu", font=('Segoe UI', 18, 'bold'), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
+        rapor_baslik_label = tk.Label(header, text="Sürü Genel Durum Raporu", font=('Segoe UI', 18, 'bold'), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
         rapor_baslik_label.pack(side='left')
         self.themed_widgets.append((rapor_baslik_label, 'label'))
 
-        self.modern_buton(header, "🔄 Raporları Yenile", self.raporlari_guncelle, purpose='success', small=True).pack(side='right')
+        self.modern_buton(header, "Raporları Yenile", self.raporlari_guncelle, purpose='success', small=True).pack(side='right')
 
         cizgi = tk.Frame(main_card, bg=self.renkler["kenarlik"], height=1)
         cizgi.pack(fill='x', padx=24, pady=(0, 10))
@@ -3663,7 +3816,7 @@ class HayvanTakipSistemi:
         
         ax.axis('equal')
 
-        legend_labels = [f'{l} ({s})' for l, s in zip(labels, sizes)]
+        legend_labels = [f'{l} ({s})'for l, s in zip(labels, sizes)]
         ax.legend(wedges, legend_labels,
                   loc="lower center",
                   bbox_to_anchor=(0.5, -0.15),
@@ -3683,7 +3836,7 @@ class HayvanTakipSistemi:
 
     def asi_prosedur_sekmesi(self):
         asi_frame = ttk.Frame(self.notebook, style='TFrame')
-        self.notebook.add(asi_frame, text="💉 Aşı/Prosedür")
+        self.notebook.add(asi_frame, text="Aşı/Prosedür")
 
         self.asi_main_card = self.modern_kart(asi_frame)
         self.asi_main_card.pack(fill='both', expand=True, padx=16, pady=16)
@@ -3692,7 +3845,7 @@ class HayvanTakipSistemi:
         header.pack(fill='x', padx=24)
         self.themed_widgets.append((header, 'kart'))
 
-        baslik = tk.Label(header, text="💉 Aşı ve Prosedür Takibi", font=('Segoe UI', 18, 'bold'), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
+        baslik = tk.Label(header, text="Aşı ve Prosedür Takibi", font=('Segoe UI', 18, 'bold'), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
         baslik.pack(side='left')
         self.themed_widgets.append((baslik, 'label'))
         
@@ -3727,8 +3880,8 @@ class HayvanTakipSistemi:
             
             self.modern_buton(dialog, "SEÇ VE İLERLE", on_ok, purpose='success').pack(pady=10)
 
-        self.modern_buton(header, "💉 YENİ AŞI EKLE", yeni_asi_dialog, purpose='primary', small=True).pack(side='right', padx=(6, 0))
-        self.modern_buton(header, "🔄 YENİLE", self.asi_prosedur_listesini_guncelle, purpose='success', small=True).pack(side='right', padx=6)
+        self.modern_buton(header, "YENİ AŞI EKLE", yeni_asi_dialog, purpose='primary', small=True).pack(side='right', padx=(6, 0))
+        self.modern_buton(header, "YENİLE", self.asi_prosedur_listesini_guncelle, purpose='success', small=True).pack(side='right', padx=6)
 
         cizgi = tk.Frame(self.asi_main_card, bg=self.renkler["kenarlik"], height=1)
         cizgi.pack(fill='x', padx=24, pady=(0, 10))
@@ -3969,7 +4122,7 @@ class HayvanTakipSistemi:
     
     def uyari_sekmesi(self):
         uyari_frame = ttk.Frame(self.notebook, style='TFrame')
-        self.notebook.add(uyari_frame, text="⚠️ Uyarılar")
+        self.notebook.add(uyari_frame, text="Uyarılar")
         
         main_card = self.modern_kart(uyari_frame)
         main_card.pack(fill='both', expand=True, padx=16, pady=16)
@@ -3978,11 +4131,11 @@ class HayvanTakipSistemi:
         header.pack(fill='x', padx=24)
         self.themed_widgets.append((header, 'kart'))
 
-        uyari_baslik_label = tk.Label(header, text="⚠️ Aktif Uyarılar ve Bildirimler", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 18, 'bold'))
+        uyari_baslik_label = tk.Label(header, text="Aktif Uyarılar ve Bildirimler", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 18, 'bold'))
         uyari_baslik_label.pack(side='left')
         self.themed_widgets.append((uyari_baslik_label, 'label'))
         
-        self.modern_buton(header, "👁️ TÜMÜNÜ OKUNDU İŞARETLE", self.uyarilari_okundu_isaretle, purpose='success', small=True).pack(side='right')
+        self.modern_buton(header, "TÜMÜNÜ OKUNDU İŞARETLE", self.uyarilari_okundu_isaretle, purpose='success', small=True).pack(side='right')
         
         cizgi = tk.Frame(main_card, bg=self.renkler["kenarlik"], height=1)
         cizgi.pack(fill='x', padx=24, pady=(0, 10))
@@ -4085,10 +4238,10 @@ class HayvanTakipSistemi:
         if item_id:
             self.hayvan_tree.selection_set(item_id)
             popup = tk.Menu(self.root, tearoff=0, bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
-            popup.add_command(label="📋 Detayları Göster", command=lambda: self.hayvan_detay_ac(None))
-            popup.add_command(label="💉 Tohumlama Yap", command=self.hizli_tohumlama)
+            popup.add_command(label="Detayları Göster", command=lambda: self.hayvan_detay_ac(None))
+            popup.add_command(label="Tohumlama Yap", command=self.hizli_tohumlama)
             popup.add_separator()
-            popup.add_command(label="❌ İptal")
+            popup.add_command(label=" İptal")
             popup.tk_popup(event.x_root, event.y_root)
 
     def hizli_tohumlama(self):
@@ -4168,7 +4321,7 @@ class HayvanTakipSistemi:
         
         self.okunan_uyarilar_kaydet()
         self.uyarilari_guncelle()
-        messagebox.showinfo("Başarılı", "✅ Tüm aktif uyarılar okundu olarak işaretlendi.")
+        messagebox.showinfo("Başarılı", "Tüm aktif uyarılar okundu olarak işaretlendi.")
 
     def uyari_detay_ac(self, event):
         selection = self.uyari_tree.selection()
@@ -4304,7 +4457,7 @@ class HayvanTakipSistemi:
             'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         }
         self.veri_kaydet()
-        messagebox.showinfo("Başarılı", f"🎉 Hayvan {gorunen_kupe} başarıyla kaydedildi!")
+        messagebox.showinfo("Başarılı", f"Hayvan {gorunen_kupe} başarıyla kaydedildi!")
         
         for entry in [self.resmi_kupe_no_entry, self.ciftlik_kupe_no_entry, self.dogum_tarihi_entry, self.anne_kupe_entry, self.laktasyon_no_entry, self.son_dogum_tarihi_entry]:
             entry.delete(0, tk.END)
@@ -4312,6 +4465,7 @@ class HayvanTakipSistemi:
         self._on_cins_change() 
         
         self.hayvan_listesini_guncelle()
+        self.header_ozet_guncelle()
         self.raporlari_guncelle()
 
     def otomatik_cins_guncelle(self, mevcut_cins, yas_gun):
@@ -4381,7 +4535,7 @@ class HayvanTakipSistemi:
         self.hayvanlar[kupe_no]['tohumlamalar'].append(tohumlama_bilgi)
         self.hayvanlar[kupe_no]['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         self.veri_kaydet()
-        messagebox.showinfo("Başarılı", f"💉 Tohumlama kaydı başarılı!\nTohumlama ID: {tohumlama_id}")
+        messagebox.showinfo("Başarılı", f"Tohumlama kaydı başarılı!\nTohumlama ID: {tohumlama_id}")
         self.tohumlama_hayvan_combo.set('')
         self.suni_entry.delete(0, tk.END)
         self.tohumlama_sekli_combo.set('')
@@ -4417,7 +4571,7 @@ class HayvanTakipSistemi:
             hayvan['durum'] = 'Gebe'
 
         self.veri_kaydet()
-        messagebox.showinfo("Başarılı", f"🎉 {gorunen} numaralı hayvan gebe olarak işaretlendi!")
+        messagebox.showinfo("Başarılı", f"{gorunen} numaralı hayvan gebe olarak işaretlendi!")
         self.hayvan_listesini_guncelle()
         self.uyarilari_guncelle()
         self.raporlari_guncelle()
@@ -4447,7 +4601,7 @@ class HayvanTakipSistemi:
         hayvan.update({'gebe_mi': False, 'gebelik_tarihi': None, 'aktif_tohumlama_id': None, 'durum': yeni_durum})
         
         self.veri_kaydet()
-        messagebox.showinfo("Başarılı", f"📋 {gorunen} numaralı hayvan boş olarak işaretlendi!")
+        messagebox.showinfo("Başarılı", f"{gorunen} numaralı hayvan boş olarak işaretlendi!")
         self.hayvan_listesini_guncelle()
         self.raporlari_guncelle()
 
@@ -4505,7 +4659,7 @@ class HayvanTakipSistemi:
         gorunen_kupe = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or anne_kupe
         
         dogum_window = tk.Toplevel(self.root)
-        dogum_window.title(f"🍼 Doğum Kaydı - {gorunen_kupe}")
+        dogum_window.title(f"Doğum Kaydı - {gorunen_kupe}")
         dogum_window.geometry("700x700")
         dogum_window.configure(bg=self.renkler["arkaplan"])
         dogum_window.transient(self.root)
@@ -4514,7 +4668,7 @@ class HayvanTakipSistemi:
         title_frame = tk.Frame(dogum_window, bg=self.renkler["ana_kirmizi"], height=80)
         title_frame.pack(fill='x', expand=False)
         title_frame.pack_propagate(False)
-        tk.Label(title_frame, text=f"🍼 {anne_kupe} - Yeni Doğum Kaydı", bg=self.renkler["ana_kirmizi"], fg=self.renkler["beyaz"], font=('Segoe UI', 18, 'bold')).pack(expand=True)
+        tk.Label(title_frame, text=f"{anne_kupe} - Yeni Doğum Kaydı", bg=self.renkler["ana_kirmizi"], fg=self.renkler["beyaz"], font=('Segoe UI', 18, 'bold')).pack(expand=True)
         
         form_kart = self.modern_kart(dogum_window)
         form_kart.pack(fill='both', expand=True, padx=25, pady=25)
@@ -4524,21 +4678,21 @@ class HayvanTakipSistemi:
         
         tk.Label(form_frame, text="DOĞUM BİLGİLERİ", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 16, 'bold')).pack(pady=10)
         
-        tk.Label(form_frame, text="📅 Doğum Tarihi:", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).pack(pady=(15, 5))
+        tk.Label(form_frame, text="Doğum Tarihi:", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).pack(pady=(15, 5))
         dogum_tarih_entry = ttk.Entry(form_frame, font=('Segoe UI', 11), width=25, justify='center', style='TEntry')
         dogum_tarih_entry.pack(pady=5)
         dogum_tarih_entry.insert(0, datetime.now().strftime("%d/%m/%Y"))
 
-        tk.Label(form_frame, text="🔢 Yavru Sayısı:", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).pack(pady=(15, 5))
+        tk.Label(form_frame, text="Yavru Sayısı:", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).pack(pady=(15, 5))
         yavru_sayi_entry = ttk.Entry(form_frame, font=('Segoe UI', 11), width=25, justify='center', style='TEntry')
         yavru_sayi_entry.pack(pady=5)
         yavru_sayi_entry.insert(0, "1")
         
-        tk.Label(form_frame, text="🐄 1. Yavru Cinsi:", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).pack(pady=(15, 5))
+        tk.Label(form_frame, text="1. Yavru Cinsi:", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).pack(pady=(15, 5))
         yavru_cins_combo = ttk.Combobox(form_frame, values=["Dişi Buzağı", "Erkek Buzağı"], width=22, font=('Segoe UI', 11), justify='center', style='TCombobox')
         yavru_cins_combo.pack(pady=5)
         
-        tk.Label(form_frame, text="🏷️ 1. Yavru Küpe No (isteğe bağlı):", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).pack(pady=(15, 5))
+        tk.Label(form_frame, text="1. Yavru Küpe No (isteğe bağlı):", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).pack(pady=(15, 5))
         yavru_kupe_entry = ttk.Entry(form_frame, font=('Segoe UI', 11), width=25, justify='center', style='TEntry')
         yavru_kupe_entry.pack(pady=5)
         
@@ -4630,7 +4784,7 @@ class HayvanTakipSistemi:
                 
                 self.veri_kaydet()
                 kaydedilen_kupeler = [y['kupe'] for y in kaydedilen_yavrular_bilgi]
-                messagebox.showinfo("Başarılı", f"🍼 Doğum kaydı başarılı!\nKaydedilen Yavrular: {', '.join(kaydedilen_kupeler)}")
+                messagebox.showinfo("Başarılı", f"Doğum kaydı başarılı!\nKaydedilen Yavrular: {', '.join(kaydedilen_kupeler)}")
                 dogum_window.destroy()
                 self.hayvan_listesini_guncelle()
                 self.raporlari_guncelle()
@@ -4638,8 +4792,8 @@ class HayvanTakipSistemi:
             except Exception as e:
                 messagebox.showerror("Hata", f"Doğum kaydı sırasında bir hata oluştu: {str(e)}", parent=dogum_window)
 
-        self.modern_buton(btn_frame, "👶 DOĞUM KAYDET", dogum_kaydet, purpose='success').pack(side='left', padx=15)
-        self.modern_buton(btn_frame, "❌ İPTAL", dogum_window.destroy, purpose='danger').pack(side='left', padx=15)
+        self.modern_buton(btn_frame, "DOĞUM KAYDET", dogum_kaydet, purpose='success').pack(side='left', padx=15)
+        self.modern_buton(btn_frame, " İPTAL", dogum_window.destroy, purpose='danger').pack(side='left', padx=15)
 
     def kuruda_yap(self, kupe_no, pencere):
         if kupe_no not in self.hayvanlar: return
@@ -4658,7 +4812,7 @@ class HayvanTakipSistemi:
         })
         
         self.veri_kaydet()
-        messagebox.showinfo("Başarılı", f"🛑 {kupe_no} numaralı hayvan kuruya ayrıldı!")
+        messagebox.showinfo("Başarılı", f"{kupe_no} numaralı hayvan kuruya ayrıldı!")
         pencere.destroy()
         self.hayvan_listesini_guncelle()
         self.raporlari_guncelle()
@@ -4704,13 +4858,13 @@ class HayvanTakipSistemi:
             })
 
             self.veri_kaydet()
-            messagebox.showinfo("Başarılı", f"🔪 {kupe_no} küpeli hayvan kesildi olarak kaydedildi.")
+            messagebox.showinfo("Başarılı", f"{kupe_no} küpeli hayvan kesildi olarak kaydedildi.")
             pencere.destroy()
             self.hayvan_listesini_guncelle()
             self.raporlari_guncelle()
 
     def hayvan_sil_detay(self, kupe_no, pencere):
-        uyari = f"⚠️ DİKKAT!\n\n{kupe_no} küpeli hayvan aktif sürüden arşive alınacak.\n\nKayıt geçmişi korunur; hayvan listesinde sadece 'Arşivli' filtresinde görünür."
+        uyari = f"DİKKAT!\n\n{kupe_no} küpeli hayvan aktif sürüden arşive alınacak.\n\nKayıt geçmişi korunur; hayvan listesinde sadece 'Arşivli' filtresinde görünür."
         if messagebox.askyesno("Hayvan Arşivleme Onayı", uyari):
             self.islem_kaydi_baslat(f"Hayvan arşive alındı: {kupe_no}")
             self.hayvanlar[kupe_no].update({
@@ -4723,7 +4877,7 @@ class HayvanTakipSistemi:
                 'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             })
             self.veri_kaydet()
-            messagebox.showinfo("Başarılı", f"🗄️ {kupe_no} numaralı hayvan arşive alındı.")
+            messagebox.showinfo("Başarılı", f"{kupe_no} numaralı hayvan arşive alındı.")
             pencere.destroy()
             self.hayvan_listesini_guncelle()
             self.raporlari_guncelle()
@@ -4731,7 +4885,7 @@ class HayvanTakipSistemi:
     def hayvan_kalici_sil(self, kupe_no, pencere):
         if kupe_no not in self.hayvanlar:
             return
-        uyari = f"⚠️ DİKKAT!\n\n{kupe_no} küpeli arşivli hayvan kalıcı olarak silinecek.\n\nBu işlem geri alma geçmişine alınır ama aktif kayıttan tamamen kaldırılır."
+        uyari = f"DİKKAT!\n\n{kupe_no} küpeli arşivli hayvan kalıcı olarak silinecek.\n\nBu işlem geri alma geçmişine alınır ama aktif kayıttan tamamen kaldırılır."
         if not messagebox.askyesno("Kalıcı Silme Onayı", uyari, parent=pencere):
             return
         self.islem_kaydi_baslat(f"Arşivli hayvan kalıcı silindi: {kupe_no}")
@@ -5068,27 +5222,27 @@ class HayvanTakipSistemi:
         baslik_frame = tk.Frame(detay_window, bg=self.renkler["siyah"], height=90)
         baslik_frame.pack(fill='x', expand=False)
         baslik_frame.pack_propagate(False)
-        tk.Label(baslik_frame, text=f"🐄 {gorunen_kupe} Numaralı Hayvanın Profili", bg=self.renkler["siyah"], fg=self.renkler["beyaz"], font=('Segoe UI', 20, 'bold')).pack(side='left', padx=30)
+        tk.Label(baslik_frame, text=f"{gorunen_kupe} Numaralı Hayvanın Profili", bg=self.renkler["siyah"], fg=self.renkler["beyaz"], font=('Segoe UI', 20, 'bold')).pack(side='left', padx=30)
         
         btn_frame = tk.Frame(baslik_frame, bg=self.renkler["siyah"])
         btn_frame.pack(side='right', padx=20, pady=15)
         
-        self.modern_buton(btn_frame, "🛠️ DÜZENLE", lambda: self.hayvan_duzenle_penceresi(kupe_no, detay_window), purpose='default').pack(side='left', padx=5)
-        self.modern_buton(btn_frame, "💉 AŞI/PROSEDÜR", lambda: self.asi_prosedur_penceresi(kupe_no), purpose='success').pack(side='left', padx=5)
+        self.modern_buton(btn_frame, "DÜZENLE", lambda: self.hayvan_duzenle_penceresi(kupe_no, detay_window), purpose='default').pack(side='left', padx=5)
+        self.modern_buton(btn_frame, "AŞI/PROSEDÜR", lambda: self.asi_prosedur_penceresi(kupe_no), purpose='success').pack(side='left', padx=5)
         
         if not hayvan.get('olu', False) and not hayvan.get('kesildi', False) and not hayvan.get('arsivli', False):
             if not is_male:
-                if hayvan.get('gebe_mi', False): self.modern_buton(btn_frame, "🍼 DOĞUM KAYDET", lambda: self.dogum_kayit_olustur(kupe_no, detay_window), purpose='success').pack(side='left', padx=5)
+                if hayvan.get('gebe_mi', False): self.modern_buton(btn_frame, "DOĞUM KAYDET", lambda: self.dogum_kayit_olustur(kupe_no, detay_window), purpose='success').pack(side='left', padx=5)
                 if hayvan.get('durum') == 'Sağmal İnek': 
-                    self.modern_buton(btn_frame, "🛑 KURUYA AYIR", lambda: self.kuruda_yap(kupe_no, detay_window), purpose='warning').pack(side='left', padx=5)
+                    self.modern_buton(btn_frame, "KURUYA AYIR", lambda: self.kuruda_yap(kupe_no, detay_window), purpose='warning').pack(side='left', padx=5)
             
-            self.modern_buton(btn_frame, "🔪 KESİLDİ", lambda: self.hayvan_kesildi(kupe_no, detay_window), purpose='warning').pack(side='left', padx=5)
-            self.modern_buton(btn_frame, "💀 ÖLDÜ", lambda: self.hayvan_oldu(kupe_no, detay_window), purpose='danger').pack(side='left', padx=5)
+            self.modern_buton(btn_frame, "KESİLDİ", lambda: self.hayvan_kesildi(kupe_no, detay_window), purpose='warning').pack(side='left', padx=5)
+            self.modern_buton(btn_frame, "ÖLDÜ", lambda: self.hayvan_oldu(kupe_no, detay_window), purpose='danger').pack(side='left', padx=5)
 
         if not hayvan.get('arsivli', False):
-            self.modern_buton(btn_frame, "🗄️ ARŞİVLE", lambda: self.hayvan_sil_detay(kupe_no, detay_window), purpose='danger').pack(side='left', padx=5)
+            self.modern_buton(btn_frame, "ARŞİVLE", lambda: self.hayvan_sil_detay(kupe_no, detay_window), purpose='danger').pack(side='left', padx=5)
         else:
-            self.modern_buton(btn_frame, "🗑️ KALICI SİL", lambda: self.hayvan_kalici_sil(kupe_no, detay_window), purpose='danger').pack(side='left', padx=5)
+            self.modern_buton(btn_frame, "KALICI SİL", lambda: self.hayvan_kalici_sil(kupe_no, detay_window), purpose='danger').pack(side='left', padx=5)
         
         ana_frame = tk.Frame(detay_window, bg=self.renkler["arkaplan"])
         ana_frame.pack(fill='both', expand=True, padx=20, pady=20)
@@ -5096,7 +5250,7 @@ class HayvanTakipSistemi:
         sol_panel = tk.Frame(ana_frame, bg=self.renkler["kart_arkaplan"])
         sol_panel.pack(side='left', fill='both', expand=True, padx=(0, 10 if not is_male else 0))
         
-        tk.Label(sol_panel, text="📋 GENEL BİLGİLER", bg=self.renkler["gri"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 14, 'bold'), pady=15).pack(fill='x')
+        tk.Label(sol_panel, text="GENEL BİLGİLER", bg=self.renkler["gri"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 14, 'bold'), pady=15).pack(fill='x')
         bilgi_frame = tk.Frame(sol_panel, bg=self.renkler["kart_arkaplan"], padx=20, pady=15)
         bilgi_frame.pack(fill='both', expand=True, anchor='n')
         
@@ -5105,29 +5259,29 @@ class HayvanTakipSistemi:
         yas_gun = hayvan.get('yas_gun', 0)
         
         if hayvan.get('arsivli', False):
-            mevcut_durum_str = "🗄️ Arşivli"
+            mevcut_durum_str = "Arşivli"
         elif hayvan.get('olu', False):
-            mevcut_durum_str = "💀 Ölü"
+            mevcut_durum_str = " Ölü"
         elif hayvan.get('kesildi', False):
-            mevcut_durum_str = "🔪 Kesildi"
+            mevcut_durum_str = "Kesildi"
         elif hayvan.get('gebe_mi', False):
-            mevcut_durum_str = "🤰 Gebe"
+            mevcut_durum_str = "Gebe"
         else:
-            mevcut_durum_str = "✅ Hayatta"
+            mevcut_durum_str = "Hayatta"
 
-        bilgi_text = (f"🇹🇷 Resmi Küpe No: {hayvan.get('resmi_kupe_no') or '-'}\n"
-                      f"🏷️ Çiftlik Küpe No: {hayvan.get('ciftlik_kupe_no') or '-'}\n"
-                      f"📅 Doğum Tarihi: {hayvan.get('dogum_tarihi', '-')}\n"
-                      f"🎂 Yaş: {yas_gun // 365} yıl {(yas_gun % 365) // 30} ay\n"
-                      f"🐄 Cinsi: {hayvan.get('cins', '-')}\n"
-                      f"📊 Mevcut Durum: {mevcut_durum_str}\n"
-                      f"👩 Anne Küpe: {hayvan.get('anne_kupe') or 'Bilinmiyor'}\n"
-                      f"🍼 Laktasyon Sayısı: {laktasyon_sayisi}")
+        bilgi_text = (f"Resmi Küpe No: {hayvan.get('resmi_kupe_no') or '-'}\n"
+                      f" Çiftlik Küpe No: {hayvan.get('ciftlik_kupe_no') or '-'}\n"
+                      f"Doğum Tarihi: {hayvan.get('dogum_tarihi', '-')}\n"
+                      f"Yaş: {yas_gun // 365} yıl {(yas_gun % 365) // 30} ay\n"
+                      f"Cinsi: {hayvan.get('cins', '-')}\n"
+                      f"Mevcut Durum: {mevcut_durum_str}\n"
+                      f"Anne Küpe: {hayvan.get('anne_kupe') or 'Bilinmiyor'}\n"
+                      f"Laktasyon Sayısı: {laktasyon_sayisi}")
 
         laktasyon_gun_bilgisi = ""
         if laktasyon_sayisi > 0:
             toplam_sagim_gunu = 0
-            laktasyon_gun_bilgisi += "\n\n🥛 LAKTASYON SÜRELERİ"
+            laktasyon_gun_bilgisi += "\n\n LAKTASYON SÜRELERİ"
             for i, dogum in enumerate(dogumlar):
                 # --- YENİ LAKTASYON SÜRESİ GÖSTERİMİ ---
                 if dogum.get('not') == 'Geçmiş kayıt, süre bilinmiyor':
@@ -5176,24 +5330,24 @@ class HayvanTakipSistemi:
             kesim_bilgisi = hayvan['kesim_bilgisi']
             yas = kesim_bilgisi.get('yas_gun', 0)
             yas_str = f"{yas // 365} yıl {(yas % 365) // 30} ay"
-            bilgi_text += (f"\n\n➖➖➖➖ KESİM BİLGİSİ ➖➖➖➖\n"
-                           f"🔪 Durumu: KESİLDİ\n"
-                           f"📅 Kesim Tarihi: {kesim_bilgisi.get('tarih', '-')}\n"
-                           f"⚖️ Kesim Ağırlığı: {kesim_bilgisi.get('kilo', '-')} kg\n"
-                           f"🗓️ Kesim Yaşı: {yas_str}")
+            bilgi_text += (f"\n\n KESİM BİLGİSİ \n"
+                           f"Durumu: KESİLDİ\n"
+                           f"Kesim Tarihi: {kesim_bilgisi.get('tarih', '-')}\n"
+                           f"Kesim Ağırlığı: {kesim_bilgisi.get('kilo', '-')} kg\n"
+                           f"Kesim Yaşı: {yas_str}")
         elif not is_male and hayvan.get('gebe_mi', False) and hayvan.get('gebelik_tarihi'):
             try:
                 g_tarihi = datetime.strptime(hayvan['gebelik_tarihi'], "%d/%m/%Y"); d_tarihi = g_tarihi + timedelta(days=283); kalan_gun = (d_tarihi - datetime.now()).days
-                bilgi_text += f"\n\n🤰 Gebelik Durumu: GEBE ✅\n  - Tahmini Doğum: {d_tarihi.strftime('%d/%m/%Y')} ({kalan_gun} gün kaldı)"
-            except: bilgi_text += "\n\n🤰 Gebelik Durumu: GEBE ✅"
+                bilgi_text += f"\n\n Gebelik Durumu: GEBE \n  - Tahmini Doğum: {d_tarihi.strftime('%d/%m/%Y')} ({kalan_gun} gün kaldı)"
+            except: bilgi_text += "\n\n Gebelik Durumu: GEBE "
             
         elif hayvan.get('olu', False):
-            bilgi_text += f"\n\n💀 Hayat Durumu: ÖLÜ ({hayvan.get('olum_tarihi', '-')})"
+            bilgi_text += f"\n\n Hayat Durumu: ÖLÜ ({hayvan.get('olum_tarihi', '-')})"
         
         tk.Label(bilgi_frame, text=bilgi_text, font=('Segoe UI', 12), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], justify='left', anchor='nw').pack(fill='x', pady=5, anchor='n')
 
         if not is_male:
-            tk.Label(sol_panel, text="🍼 DOĞUM GEÇMİŞİ", bg=self.renkler["gri"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 14, 'bold'), pady=15).pack(fill='x')
+            tk.Label(sol_panel, text="DOĞUM GEÇMİŞİ", bg=self.renkler["gri"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 14, 'bold'), pady=15).pack(fill='x')
             dogum_frame = tk.Frame(sol_panel, bg=self.renkler["kart_arkaplan"], padx=20, pady=10)
             dogum_frame.pack(fill='both', expand=True)
             if dogumlar:
@@ -5202,7 +5356,7 @@ class HayvanTakipSistemi:
                     if dogum.get('not') == 'Geçmiş kayıt, süre bilinmiyor':
                          dogum_txt = f"{i}. Doğum: {dogum.get('not')}"
                     else:
-                        yavrular_str_list = [f"{y.get('cins', 'Bilinmiyor')} (Küpe: {y.get('kupe', 'Bilinmiyor')})" for y in dogum.get('yavrular', [])]
+                        yavrular_str_list = [f"{y.get('cins', 'Bilinmiyor')} (Küpe: {y.get('kupe', 'Bilinmiyor')})"for y in dogum.get('yavrular', [])]
                         yavrular_str = ", ".join(yavrular_str_list) if yavrular_str_list else "Yavru bilgisi yok"
                         dogum_txt = f"{i}. Doğum ({dogum.get('tarih','-')}): {yavrular_str}"
                     # --- YENİLİK SONU ---
@@ -5212,7 +5366,7 @@ class HayvanTakipSistemi:
         if not is_male:
             sag_panel = tk.Frame(ana_frame, bg=self.renkler["kart_arkaplan"])
             sag_panel.pack(side='right', fill='both', expand=True, padx=(10, 0))
-            tk.Label(sag_panel, text="💉 TOHUMLAMA GEÇMİŞİ", bg=self.renkler["gri"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 14, 'bold'), pady=15).pack(fill='x')
+            tk.Label(sag_panel, text="TOHUMLAMA GEÇMİŞİ", bg=self.renkler["gri"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 14, 'bold'), pady=15).pack(fill='x')
             tohumlama_tree_frame = tk.Frame(sag_panel, bg=self.renkler["kart_arkaplan"])
             tohumlama_tree_frame.pack(fill='both', expand=True, padx=1, pady=1)
             toh_cols = ('#', 'Tarih', 'Şekil', 'Suni İsim', 'Sonuç')
@@ -5222,8 +5376,8 @@ class HayvanTakipSistemi:
             if hayvan.get('tohumlamalar'):
                 for i, tohumlama in enumerate(reversed(hayvan['tohumlamalar']), 1):
                     sonuc = "Beklemede";
-                    if tohumlama.get('gebe_mi') is True: sonuc = "✅ Başarılı"
-                    elif tohumlama.get('gebe_mi') is False: sonuc = "❌ Başarısız"
+                    if tohumlama.get('gebe_mi') is True: sonuc = "Başarılı"
+                    elif tohumlama.get('gebe_mi') is False: sonuc = "Başarısız"
                     toh_tree.insert('', 'end', values=(len(hayvan['tohumlamalar']) - i + 1, tohumlama.get('tarih', '-'), tohumlama.get('sekil', '-'), tohumlama.get('suni_isim', '-'), sonuc))
             toh_tree.pack(fill='both', expand=True)
 
@@ -5257,15 +5411,15 @@ class HayvanTakipSistemi:
             yas_gun = hayvan.get('yas_gun', 0); yas_str = f"{yas_gun // 365} yıl {(yas_gun % 365) // 30} ay"
             
             if arsivli:
-                mevcut_durum = "🗄️ Arşivli"
+                mevcut_durum = "Arşivli"
             elif hayvan.get('olu', False):
-                mevcut_durum = "💀 Ölü"
+                mevcut_durum = " Ölü"
             elif hayvan.get('kesildi', False):
-                mevcut_durum = "🔪 Kesildi"
+                mevcut_durum = "Kesildi"
             elif hayvan.get('gebe_mi', False):
-                mevcut_durum = "🤰 Gebe"
+                mevcut_durum = "Gebe"
             else:
-                mevcut_durum = "✅ Hayatta"
+                mevcut_durum = "Hayatta"
 
             son_tohumlama, dogum_tahmini, uyarilar, sagim_gun_str = "Yok", "-", "", "-"
             
@@ -5317,7 +5471,7 @@ class HayvanTakipSistemi:
             self.hayvan_tree.insert('', 'end', values=(kupe_no, ciftlik_ad, resmi, ciftlik, yas_str, hayvan['cins'], mevcut_durum, son_tohumlama, dogum_tahmini, sagim_gun_str, uyarilar), tags=tuple(final_tags))
             row_idx += 1
 
-        # ─── TAG RENKLERI ──────────────────────────────────────────────────
+        #  TAG RENKLERI 
         # Zebra stripes için temel renkler
         zebra_odd  = self.renkler["kart_arkaplan"]
         zebra_even = self._lighten_color(self.renkler["kart_arkaplan"], 8) if self.theme_mode == 'dark' else self.koyu_renk(self.renkler["kart_arkaplan"])
@@ -5386,19 +5540,19 @@ class HayvanTakipSistemi:
                             uyari_key = self.uyari_key_olustur(kupe_no, "gebelik_kontrol", tohumlama_id, kalan_kontrol)
                             okundu_mu = uyari_key in self.okunan_uyarilar if uyari_key else False
                             if kalan_kontrol <= 0:
-                                durum, tip = "🔴 ACİL", "🚨 GEBELİK KONTROLÜ"
+                                durum, tip = "ACİL", "GEBELİK KONTROLÜ"
                             else:
-                                durum, tip = "🟠 ÖNEMLİ", "📋 GEBELİK KONTROLÜ YAKIN"
+                                durum, tip = "ÖNEMLİ", "GEBELİK KONTROLÜ YAKIN"
                             gorunen_kupe = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or kupe_no
                             if not okundu_mu:
-                                uyari_metni += f"📋 {gorunen_kupe}: Gebelik kontrolü! "
+                                uyari_metni += f" {gorunen_kupe}: Gebelik kontrolü! "
                             uyarilar.append({
                                 'kupe_no': gorunen_kupe,
                                 'tip': tip,
                                 'mesaj': f"Kontrol tarihi: {kontrol_tarihi.strftime('%d/%m/%Y')}",
                                 'kalan_gun': kalan_kontrol,
                                 'durum': durum,
-                                'uyari_durumu': "👁️ OKUNDU" if okundu_mu else "🔔 YENİ",
+                                'uyari_durumu': "OKUNDU" if okundu_mu else "YENİ",
                                 'okundu': okundu_mu
                             })
                     except: pass
@@ -5413,12 +5567,12 @@ class HayvanTakipSistemi:
                         
                         gorunen_kupe = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or kupe_no
                         if not okundu_mu:
-                            uyari_metni += f"🐮 {gorunen_kupe}: Kuruya Al! "
+                            uyari_metni += f"{gorunen_kupe}: Kuruya Al! "
                         uyarilar.append({
-                            'kupe_no': gorunen_kupe, 'tip': "🚨 KURUYA ALINMALI", 
+                            'kupe_no': gorunen_kupe, 'tip': "KURUYA ALINMALI", 
                             'mesaj': f"Doğuma {kalan_gun_doguma} gün kaldı. Kuruya ayrılmalı!", 
-                            'kalan_gun': kalan_gun_doguma, 'durum': "🔴 ACİL", 
-                            'uyari_durumu': "👁️ OKUNDU" if okundu_mu else "🔔 YENİ", 'okundu': okundu_mu})
+                            'kalan_gun': kalan_gun_doguma, 'durum': "ACİL", 
+                            'uyari_durumu': "OKUNDU" if okundu_mu else "YENİ", 'okundu': okundu_mu})
                 except: pass
 
             if aktif_tohumlama_id and hayvan.get('gebe_mi', False):
@@ -5429,16 +5583,16 @@ class HayvanTakipSistemi:
                     if uyari_key:
                         okundu_mu = uyari_key in self.okunan_uyarilar
 
-                        if kalan_gun <= 0: durum, tip = "🔴 ACİL", "🚨 DOĞUM VAKTİ"
-                        elif kalan_gun <= 7: durum, tip = "🔴 ACİL", "🚨 DOĞUM ÇOK YAKIN"
-                        elif kalan_gun <= 30: durum, tip = "🟠 ÖNEMLİ", "⚠️ DOĞUM YAKIN"
-                        else: durum, tip = "🟡 DİKKAT", "📢 DOĞUM HAZIRLIĞI"
+                        if kalan_gun <= 0: durum, tip = "ACİL", "DOĞUM VAKTİ"
+                        elif kalan_gun <= 7: durum, tip = "ACİL", "DOĞUM ÇOK YAKIN"
+                        elif kalan_gun <= 30: durum, tip = "ÖNEMLİ", "DOĞUM YAKIN"
+                        else: durum, tip = "DİKKAT", "DOĞUM HAZIRLIĞI"
                         
                         gorunen_kupe = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or kupe_no
                         if not okundu_mu and 'ACİL' in durum: 
-                            uyari_metni += f"🚨 {gorunen_kupe}: {kalan_gun} gün! "
+                            uyari_metni += f" {gorunen_kupe}: {kalan_gun} gün! "
                             
-                        uyarilar.append({'kupe_no': gorunen_kupe, 'tip': tip, 'mesaj': f"Doğuma {kalan_gun} gün" if kalan_gun > 0 else "DOĞUM VAKTİ!", 'kalan_gun': kalan_gun, 'durum': durum, 'uyari_durumu': "👁️ OKUNDU" if okundu_mu else "🔔 YENİ", 'okundu': okundu_mu})
+                        uyarilar.append({'kupe_no': gorunen_kupe, 'tip': tip, 'mesaj': f"Doğuma {kalan_gun} gün" if kalan_gun > 0 else "DOĞUM VAKTİ!", 'kalan_gun': kalan_gun, 'durum': durum, 'uyari_durumu': "OKUNDU" if okundu_mu else "YENİ", 'okundu': okundu_mu})
                 except: pass
 
             for prosedur in hayvan.get('asi_prosedurler', []):
@@ -5453,12 +5607,12 @@ class HayvanTakipSistemi:
                         uyari_key = self.uyari_key_olustur(kupe_no, "asi_prosedur", prosedur_id, kalan_prosedur)
                         okundu_mu = uyari_key in self.okunan_uyarilar if uyari_key else False
                         if kalan_prosedur <= 0:
-                            durum, tip = "🔴 ACİL", "🚨 AŞI/PROSEDÜR GECİKTİ"
+                            durum, tip = "ACİL", "AŞI/PROSEDÜR GECİKTİ"
                         else:
-                            durum, tip = "🟡 DİKKAT", "💉 AŞI/PROSEDÜR YAKIN"
+                            durum, tip = "DİKKAT", "AŞI/PROSEDÜR YAKIN"
                         if not okundu_mu:
                             gorunen_kupe = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or kupe_no
-                            uyari_metni += f"💉 {gorunen_kupe}: {prosedur.get('ad', 'Prosedür')}! "
+                            uyari_metni += f" {gorunen_kupe}: {prosedur.get('ad', 'Prosedür')}! "
                         else:
                             gorunen_kupe = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or kupe_no
                         uyarilar.append({
@@ -5467,13 +5621,13 @@ class HayvanTakipSistemi:
                             'mesaj': f"{prosedur.get('ad', 'Prosedür')} - tarih: {sonraki_tarih}",
                             'kalan_gun': kalan_prosedur,
                             'durum': durum,
-                            'uyari_durumu': "👁️ OKUNDU" if okundu_mu else "🔔 YENİ",
+                            'uyari_durumu': "OKUNDU" if okundu_mu else "YENİ",
                             'okundu': okundu_mu
                         })
                 except: pass
         
         okunmamis_uyarilar = [u for u in uyarilar if not u['okundu']]
-        okunmamis_kritik = [u for u in okunmamis_uyarilar if '🔴' in u['durum']]
+        okunmamis_kritik = [u for u in okunmamis_uyarilar if 'ACİL' in u['durum']]
 
         def _set_band(bg, fg, ikon, ind_renk, metin, puls=False):
             self.uyari_frame.config(bg=bg)
@@ -5485,28 +5639,32 @@ class HayvanTakipSistemi:
             if hasattr(self, '_uyari_ikon_lbl'):
                 self._uyari_ikon_lbl.config(text=ikon, bg=bg)
             # Pulse animasyonu
+            onceki_puls = getattr(self, '_puls_aktif', False)
             self._puls_aktif = puls
             if puls:
-                self._puls_animasyon()
+                if not onceki_puls or not getattr(self, "_puls_after_id", None):
+                    self._puls_animasyon()
+            else:
+                self._puls_zamanlayici_iptal_et()
 
         if okunmamis_kritik:
             _set_band(
                 bg=self.renkler["band_critical_bg"], fg=self.renkler["band_critical_fg"],
-                ikon='🚨', ind_renk=self.renkler["koyu_kirmizi"],
+                ikon='', ind_renk=self.renkler["button_danger_bg"],
                 metin=f"KRİTİK: {len(okunmamis_kritik)} uyarı aktif  —  {uyari_metni.strip()}",
                 puls=True
             )
         elif okunmamis_uyarilar:
             _set_band(
                 bg=self.renkler["band_warning_bg"], fg=self.renkler["band_warning_fg"],
-                ikon='⚠️', ind_renk='#F59E0B',
+                ikon='', ind_renk='#F59E0B',
                 metin=f"{len(okunmamis_uyarilar)} okunmamış uyarı var  —  Uyarılar sekmesini kontrol edin",
                 puls=False
             )
         else:
             _set_band(
                 bg=self.renkler["band_normal_bg"], fg=self.renkler["band_normal_fg"],
-                ikon='✅', ind_renk=self.renkler["yesil"],
+                ikon='', ind_renk=self.renkler["yesil"],
                 metin="Tüm sistemler normal  —  Kritik uyarı bulunmuyor",
                 puls=False
             )
@@ -5535,8 +5693,8 @@ class HayvanTakipSistemi:
                 tag = "read"
                 if not uyari['okundu']:
                     if 'KURUYA ALINMALI' in uyari['tip']: tag = "dryoff_new"
-                    elif '🔴' in uyari['durum']: tag = "critical_new"
-                    elif '🟠' in uyari['durum']: tag = "important_new"
+                    elif 'ACİL' in uyari['durum']: tag = "critical_new"
+                    elif 'ÖNEMLİ' in uyari['durum']: tag = "important_new"
                     else: tag = "warning_new"
                 self.uyari_tree.insert('', 'end', values=(uyari['kupe_no'], uyari['tip'], uyari['mesaj'], uyari['kalan_gun'], uyari['durum'], uyari['uyari_durumu']), tags=(tag,))
 
