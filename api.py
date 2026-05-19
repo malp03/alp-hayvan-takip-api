@@ -624,8 +624,11 @@ def kupe_cakismasi_kontrol(
             raise HTTPException(status_code=400, detail=f"{kupe} küpe numarası bu çiftlikte zaten kayıtlı.")
 
 
-def varsayilan_ciftlik_ve_kayitlari_hazirla(db: Session) -> models.Ciftlik:
+def varsayilan_ciftlik_ve_kayitlari_hazirla(db: Session) -> Optional[models.Ciftlik]:
     ciftlik = db.query(models.Ciftlik).filter(models.Ciftlik.id == DEFAULT_CIFTLIK_ID).first()
+    ciftliksiz_hayvan_sayisi = db.query(models.Hayvan).filter(models.Hayvan.ciftlik_id.is_(None)).count()
+    if ciftliksiz_hayvan_sayisi == 0:
+        return ciftlik
     if not ciftlik:
         ciftlik = models.Ciftlik(
             id=DEFAULT_CIFTLIK_ID,
