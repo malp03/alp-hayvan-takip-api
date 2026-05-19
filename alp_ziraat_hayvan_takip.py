@@ -1073,9 +1073,7 @@ class HayvanTakipSistemi:
             return False
 
     def bekleyen_senkron_gonder_ui(self):
-        if self.bekleyen_senkron_gonder(sessiz=False):
-            self.ekranlari_guncelle()
-            self.header_ozet_guncelle()
+        return self.api_senkronize_et_ui()
 
     def api_baglantiyi_yenile_sessiz(self):
         if not getattr(self, "api_modu", False):
@@ -1092,21 +1090,33 @@ class HayvanTakipSistemi:
         self.api_durum_guncelle()
         return True
 
-    def api_baglantiyi_yenile_ui(self):
+    def api_senkronize_et_ui(self):
         if not getattr(self, "api_modu", False):
-            return messagebox.showinfo("Baglanti", "Uygulama yerel veri modunda.", parent=getattr(self, "root", None))
+            return messagebox.showinfo("Senkronizasyon", "Uygulama yerel veri modunda.", parent=getattr(self, "root", None))
+        bekleyen_once = self.bekleyen_senkron_sayisi()
         try:
             if self.api_baglantiyi_yenile_sessiz():
-                messagebox.showinfo("Baglanti", "API baglantisi yenilendi ve veriler guncellendi.", parent=getattr(self, "root", None))
+                if bekleyen_once:
+                    mesaj = (
+                        "API baglantisi yenilendi.\n"
+                        f"{bekleyen_once} bekleyen degisiklik API'ye gonderildi.\n"
+                        "Veriler guncellendi."
+                    )
+                else:
+                    mesaj = "API baglantisi yenilendi ve veriler guncellendi."
+                messagebox.showinfo("Senkronizasyon", mesaj, parent=getattr(self, "root", None))
         except ApiHatasi as e:
             self.api_cevrimdisi = True
             self._api_son_hata = str(e)
             self.api_durum_guncelle()
             messagebox.showwarning(
-                "Baglanti",
-                f"API baglantisi hala kurulamadi:\n{e}\n\nYerel onbellekle devam ediliyor.",
+                "Senkronizasyon",
+                f"API baglantisi kurulamadi:\n{e}\n\nBekleyen degisiklikler yerel kuyrukta tutuluyor.",
                 parent=getattr(self, "root", None),
             )
+
+    def api_baglantiyi_yenile_ui(self):
+        return self.api_senkronize_et_ui()
 
     def _api_giris_penceresi_popup_eski(self):
         sonuc = {"ok": False}
@@ -1762,7 +1772,7 @@ class HayvanTakipSistemi:
             if state.get("offline_cache"):
                 messagebox.showwarning(
                     "Admin Merkezi",
-                    "Offline modda tum suru verisi guvenli sekilde yenilenemez. Internet gelince Baglantiyi Yenile ile tekrar deneyin.",
+                    "Offline modda tum suru verisi guvenli sekilde yenilenemez. Internet gelince Senkronize Et ile tekrar deneyin.",
                     parent=self.root,
                 )
                 return
@@ -1774,7 +1784,7 @@ class HayvanTakipSistemi:
             if state.get("offline_cache"):
                 messagebox.showwarning(
                     "Admin Merkezi",
-                    "Offline modda ciftlik degistirmek yerine sadece son kayitli ciftlik listesi gosterilir. Internet gelince Baglantiyi Yenile ile suruye girin.",
+                    "Offline modda ciftlik degistirmek yerine sadece son kayitli ciftlik listesi gosterilir. Internet gelince Senkronize Et ile suruye girin.",
                     parent=self.root,
                 )
                 return
@@ -1839,11 +1849,11 @@ class HayvanTakipSistemi:
             verileri_yenile(sessiz=True)
             ekrani_yenile()
 
-        def admin_baglantiyi_yenile():
+        def admin_senkronize_et():
             online = verileri_yenile(sessiz=False)
             ekrani_yenile()
             if online:
-                messagebox.showinfo("Admin Merkezi", "API baglantisi yenilendi.", parent=self.root)
+                messagebox.showinfo("Admin Merkezi", "API baglantisi yenilendi ve yonetim listesi guncellendi.", parent=self.root)
 
         admin_buton(sag, "Ciftlikleri yonet", ciftlikleri_yonet).pack(fill="x", pady=5)
         admin_buton(sag, "Kullanicilari yonet", lambda: kullanicilari_yonet(False)).pack(fill="x", pady=5)
@@ -1851,7 +1861,7 @@ class HayvanTakipSistemi:
         admin_buton(sag, "Son islemleri gor", self.admin_islem_gecmisi_penceresi).pack(fill="x", pady=5)
         admin_buton(sag, "Online yedek indir", lambda: self.admin_online_yedek_indir(self.root), self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Sifremi degistir", lambda: self.sifre_degistir_penceresi(self.root)).pack(fill="x", pady=5)
-        admin_buton(sag, "Baglantiyi Yenile", admin_baglantiyi_yenile, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
+        admin_buton(sag, "Senkronize Et", admin_senkronize_et, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Listeyi yenile", lambda: (verileri_yenile(), ekrani_yenile())).pack(fill="x", pady=5)
 
         alt = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
@@ -3018,10 +3028,8 @@ class HayvanTakipSistemi:
         if getattr(self, "api_modu", False):
             self.modern_buton(sag_grup, "Sifre", self.sifre_degistir_penceresi,
                               purpose='default', small=True).pack(side='right', padx=4, pady=18)
-            self.modern_buton(sag_grup, "Baglanti Yenile", self.api_baglantiyi_yenile_ui,
+            self.modern_buton(sag_grup, "Senkronize Et", self.api_senkronize_et_ui,
                               purpose='primary', small=True).pack(side='right', padx=4, pady=18)
-            self.modern_buton(sag_grup, "Senkron Et", self.bekleyen_senkron_gonder_ui,
-                              purpose='success', small=True).pack(side='right', padx=4, pady=18)
 
         for metin, komut, amac in [
             ("🔗 API",          self.api_ayar_penceresi,          'primary'),
