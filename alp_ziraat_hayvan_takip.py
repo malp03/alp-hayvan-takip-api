@@ -141,6 +141,10 @@ class HayvanTakipSistemi:
             self.api_kullanici = None
             self.admin_aktif_ciftlik_id = None
             self.admin_aktif_ciftlik_ad = None
+            self._otomatik_baglanti_after_id = None
+            self._otomatik_baglanti_kontrol_ediliyor = False
+            self.otomatik_baglanti_araligi_ms = 60 * 1000
+            self.otomatik_baglanti_ilk_gecikme_ms = 30 * 1000
             if self.api_modu:
                 if not self.api_giris_penceresi():
                     self.root.destroy()
@@ -162,6 +166,7 @@ class HayvanTakipSistemi:
             self._saat_after_id = None
             self._baslangic_after_id = None
             self._puls_after_id = None
+            self._otomatik_baglanti_after_id = None
             self._kapanis_istegi = False
             self.ana_interface_olustur()
             self.uyari_sistemi_baslat()
@@ -587,6 +592,7 @@ class HayvanTakipSistemi:
         self.api_config_file = os.path.join(self.data_dir, "api_ayarlar.json")
         self.offline_auth_file = os.path.join(self.data_dir, "offline_oturum.json")
         self.pending_sync_file = os.path.join(self.data_dir, "bekleyen_senkron.json")
+        self.admin_cache_file = os.path.join(self.data_dir, "admin_onbellek.json")
         os.makedirs(self.islem_yedek_dir, exist_ok=True)
 
         self.eski_veriyi_tasi("hayvan_verileri.json", self.data_file)
@@ -600,6 +606,7 @@ class HayvanTakipSistemi:
         self._offline_kullanici_adi = None
         self._offline_sifre = None
         self.bekleyen_senkron = self.bekleyen_senkron_yukle()
+        self.admin_onbellek = self.admin_onbellek_yukle()
 
     def api_url_yukle(self):
         api_url = os.environ.get("ALP_API_URL", "").strip()
@@ -828,6 +835,34 @@ class HayvanTakipSistemi:
             self.bekleyen_senkron_upsert(h_id, veri)
         return self.bekleyen_senkron_kaydet()
 
+    def admin_onbellek_yukle(self):
+        veri = self.json_dosyasi_yukle(
+            getattr(self, "admin_cache_file", ""),
+            {"ciftlikler": [], "kullanicilar": [], "updated_at": None},
+            "admin_onbellek",
+        )
+        if not isinstance(veri, dict):
+            veri = {}
+        veri.setdefault("ciftlikler", [])
+        veri.setdefault("kullanicilar", [])
+        veri.setdefault("updated_at", None)
+        return veri
+
+    def admin_onbellek_kaydet(self, ciftlikler=None, kullanicilar=None):
+        onbellek = copy.deepcopy(getattr(self, "admin_onbellek", {}) or {})
+        if ciftlikler is not None:
+            onbellek["ciftlikler"] = ciftlikler if isinstance(ciftlikler, list) else []
+        if kullanicilar is not None:
+            onbellek["kullanicilar"] = kullanicilar if isinstance(kullanicilar, list) else []
+        onbellek["updated_at"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        self.admin_onbellek = onbellek
+        return self.json_dosyasi_kaydet(
+            self.admin_cache_file,
+            onbellek,
+            "admin_onbellek",
+            "Admin Onbellek Kayit Hatasi",
+        )
+
     def api_ref(self, deger):
         return urllib.parse.quote(str(deger), safe="")
 
@@ -958,6 +993,8 @@ class HayvanTakipSistemi:
             try:
                 kayit = self.api_istek("POST", "/api/hayvanlar", payload)
             except ApiHatasi as e:
+                if e.status == 409 and "eski offline" in str(e).lower():
+                    return h_id, None
                 if e.status not in (400, 404, 409):
                     raise
                 kayit = self.api_istek("PATCH", f"/api/hayvanlar/{self.api_ref(h_id)}", payload)
@@ -981,16 +1018,31 @@ class HayvanTakipSistemi:
             onceki_idler = set(getattr(self, "_api_son_idler", set()))
 
             for h_id in sorted(deletes.keys()):
+                silme_zamani = (deletes.get(h_id) or {}).get("zaman")
+                delete_path = f"/api/hayvanlar/{self.api_ref(h_id)}?kalici=true"
+                if silme_zamani:
+                    delete_path += f"&degisiklik_zamani={self.api_ref(silme_zamani)}"
                 try:
-                    self.api_istek("DELETE", f"/api/hayvanlar/{self.api_ref(h_id)}?kalici=true", timeout=20)
+                    sonuc = self.api_istek("DELETE", delete_path, timeout=20)
                 except ApiHatasi as e:
                     if e.status != 404:
                         raise
+                    sonuc = None
+                if isinstance(sonuc, dict) and sonuc.get("status") == "skipped":
+                    kayit = self.api_istek("GET", f"/api/hayvanlar/{self.api_ref(h_id)}", timeout=20)
+                    kayit_id = str((kayit or {}).get("id") or h_id)
+                    self.hayvanlar[kayit_id] = self.hayvan_kayit_tamamla(kayit_id, kayit or {})
+                    onceki_idler.add(kayit_id)
+                    continue
                 onceki_idler.discard(str(h_id))
                 self.hayvanlar.pop(str(h_id), None)
 
             for h_id, veri in upserts.items():
                 kayit_id, tamamlanmis = self.api_hayvan_kayit_gonder(h_id, veri, onceki_idler)
+                if tamamlanmis is None:
+                    onceki_idler.discard(str(h_id))
+                    self.hayvanlar.pop(str(h_id), None)
+                    continue
                 onceki_idler.discard(str(h_id))
                 onceki_idler.add(kayit_id)
                 if str(h_id) in self.hayvanlar and str(h_id) != kayit_id:
@@ -1024,6 +1076,37 @@ class HayvanTakipSistemi:
         if self.bekleyen_senkron_gonder(sessiz=False):
             self.ekranlari_guncelle()
             self.header_ozet_guncelle()
+
+    def api_baglantiyi_yenile_sessiz(self):
+        if not getattr(self, "api_modu", False):
+            return False
+        if not getattr(self, "api_token", None) or getattr(self, "api_offline_oturum", False):
+            self.api_online_oturum_ac()
+        if self.bekleyen_senkron_var() and not self.bekleyen_senkron_gonder(sessiz=True):
+            return False
+        self.hayvanlar = self.api_hayvanlari_yukle()
+        self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
+        if hasattr(self, "notebook"):
+            self.ekranlari_guncelle()
+            self.header_ozet_guncelle()
+        self.api_durum_guncelle()
+        return True
+
+    def api_baglantiyi_yenile_ui(self):
+        if not getattr(self, "api_modu", False):
+            return messagebox.showinfo("Baglanti", "Uygulama yerel veri modunda.", parent=getattr(self, "root", None))
+        try:
+            if self.api_baglantiyi_yenile_sessiz():
+                messagebox.showinfo("Baglanti", "API baglantisi yenilendi ve veriler guncellendi.", parent=getattr(self, "root", None))
+        except ApiHatasi as e:
+            self.api_cevrimdisi = True
+            self._api_son_hata = str(e)
+            self.api_durum_guncelle()
+            messagebox.showwarning(
+                "Baglanti",
+                f"API baglantisi hala kurulamadi:\n{e}\n\nYerel onbellekle devam ediliyor.",
+                parent=getattr(self, "root", None),
+            )
 
     def _api_giris_penceresi_popup_eski(self):
         sonuc = {"ok": False}
@@ -1295,14 +1378,26 @@ class HayvanTakipSistemi:
 
     def api_ciftlikleri_yukle(self):
         ciftlikler = self.api_istek("GET", "/api/ciftlikler?aktif_dahil=true", timeout=20)
-        return ciftlikler if isinstance(ciftlikler, list) else []
+        ciftlikler = ciftlikler if isinstance(ciftlikler, list) else []
+        self.admin_onbellek_kaydet(ciftlikler=ciftlikler)
+        return ciftlikler
 
     def api_kullanicilari_yukle(self):
         kullanicilar = self.api_istek("GET", "/api/kullanicilar", timeout=20)
-        return kullanicilar if isinstance(kullanicilar, list) else []
+        kullanicilar = kullanicilar if isinstance(kullanicilar, list) else []
+        self.admin_onbellek_kaydet(kullanicilar=kullanicilar)
+        return kullanicilar
 
-    def api_islem_gecmisi_yukle(self, limit=100):
-        kayitlar = self.api_istek("GET", f"/api/islem-gecmisi?limit={int(limit)}", timeout=20)
+    def api_islem_gecmisi_yukle(self, limit=100, **filtreler):
+        params = {"limit": int(limit)}
+        for anahtar, deger in filtreler.items():
+            if deger is None:
+                continue
+            deger = str(deger).strip()
+            if deger:
+                params[anahtar] = deger
+        query = urllib.parse.urlencode(params)
+        kayitlar = self.api_istek("GET", f"/api/islem-gecmisi?{query}", timeout=20)
         return kayitlar if isinstance(kayitlar, list) else []
 
     def admin_online_yedek_indir(self, parent=None):
@@ -1364,10 +1459,11 @@ class HayvanTakipSistemi:
         pencere = tk.Toplevel(self.root)
         baslik = "Son Islemler" if self.admin_mi() else "Islem Gecmisim"
         pencere.title(baslik)
-        pencere.geometry("980x560")
+        pencere.geometry("1180x680")
         pencere.configure(bg=self.renkler["arkaplan"])
         pencere.transient(self.root)
         pencere.grab_set()
+        son_kayitlar = []
 
         ana = tk.Frame(pencere, bg=self.renkler["arkaplan"], padx=16, pady=16)
         ana.pack(fill="both", expand=True)
@@ -1378,6 +1474,28 @@ class HayvanTakipSistemi:
             fg=self.renkler["yazi_rengi"],
             font=("Segoe UI", 16, "bold"),
         ).pack(anchor="w", pady=(0, 12))
+
+        filtre = tk.Frame(ana, bg=self.renkler["kart_arkaplan"], padx=12, pady=10, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+        filtre.pack(fill="x", pady=(0, 12))
+        for col in range(6):
+            filtre.columnconfigure(col, weight=1)
+
+        def filtre_entry(label, row, col, width=16):
+            tk.Label(filtre, text=label, bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 8, "bold")).grid(row=row, column=col, sticky="w", padx=5)
+            entry = ttk.Entry(filtre, style="TEntry", width=width)
+            entry.grid(row=row + 1, column=col, sticky="ew", padx=5, pady=(2, 8))
+            return entry
+
+        arama_entry = filtre_entry("Arama", 0, 0)
+        kullanici_entry = filtre_entry("Kullanici", 0, 1)
+        tip_entry = filtre_entry("Islem tipi", 0, 2)
+        ciftlik_entry = filtre_entry("Ciftlik ID", 0, 3)
+        hedef_tipi_entry = filtre_entry("Hedef tipi", 0, 4)
+        hedef_id_entry = filtre_entry("Hedef ID", 0, 5)
+        baslangic_entry = filtre_entry("Baslangic (GG/AA/YYYY)", 2, 0)
+        bitis_entry = filtre_entry("Bitis (GG/AA/YYYY)", 2, 1)
+        limit_entry = filtre_entry("Limit", 2, 2)
+        limit_entry.insert(0, "200")
 
         tree = ttk.Treeview(
             ana,
@@ -1396,11 +1514,33 @@ class HayvanTakipSistemi:
             tree.column(col, width=genislik, anchor="w")
         tree.pack(fill="both", expand=True)
 
-        def liste_yenile():
+        def secili_filtreler():
             try:
-                kayitlar = self.api_islem_gecmisi_yukle(200)
+                limit = int(limit_entry.get().strip() or "200")
+            except ValueError:
+                limit = 200
+            limit = max(1, min(limit, 500))
+            return {
+                "limit": limit,
+                "q": arama_entry.get(),
+                "kullanici_adi": kullanici_entry.get(),
+                "islem_tipi": tip_entry.get(),
+                "ciftlik_id": ciftlik_entry.get(),
+                "hedef_tipi": hedef_tipi_entry.get(),
+                "hedef_id": hedef_id_entry.get(),
+                "tarih_baslangic": baslangic_entry.get(),
+                "tarih_bitis": bitis_entry.get(),
+            }
+
+        def liste_yenile():
+            nonlocal son_kayitlar
+            try:
+                filtreler = secili_filtreler()
+                limit = filtreler.pop("limit")
+                kayitlar = self.api_islem_gecmisi_yukle(limit, **filtreler)
             except ApiHatasi as e:
                 return messagebox.showerror("Son Islemler", str(e), parent=pencere)
+            son_kayitlar = kayitlar
             for item in tree.get_children():
                 tree.delete(item)
             for kayit in kayitlar:
@@ -1416,9 +1556,57 @@ class HayvanTakipSistemi:
                     ),
                 )
 
+        def filtre_temizle():
+            for entry in (arama_entry, kullanici_entry, tip_entry, ciftlik_entry, hedef_tipi_entry, hedef_id_entry, baslangic_entry, bitis_entry):
+                entry.delete(0, tk.END)
+            limit_entry.delete(0, tk.END)
+            limit_entry.insert(0, "200")
+            liste_yenile()
+
+        def export_rows():
+            return [
+                (
+                    kayit.get("zaman") or "",
+                    kayit.get("kullanici_adi") or "-",
+                    kayit.get("islem_tipi") or "-",
+                    kayit.get("ciftlik_id") or "-",
+                    kayit.get("hedef_tipi") or "-",
+                    kayit.get("hedef_id") or "-",
+                    kayit.get("detay") or "",
+                )
+                for kayit in son_kayitlar
+            ]
+
+        def excel_aktar():
+            if not son_kayitlar:
+                return messagebox.showwarning("Disari Aktar", "Once listeyi yenileyin.", parent=pencere)
+            dosya = filedialog.asksaveasfilename(parent=pencere, title="Islem Gecmisini Excel Aktar", defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")])
+            if not dosya:
+                return
+            try:
+                export_rows_to_excel(dosya, "ALP Ziraat Islem Gecmisi", ["Zaman", "Kullanici", "Islem", "Ciftlik", "Hedef Tipi", "Hedef ID", "Detay"], export_rows())
+                messagebox.showinfo("Disari Aktar", f"Excel kaydedildi:\n{dosya}", parent=pencere)
+            except Exception as e:
+                messagebox.showerror("Disari Aktar", str(e), parent=pencere)
+
+        def pdf_aktar():
+            if not son_kayitlar:
+                return messagebox.showwarning("Disari Aktar", "Once listeyi yenileyin.", parent=pencere)
+            dosya = filedialog.asksaveasfilename(parent=pencere, title="Islem Gecmisini PDF Aktar", defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+            if not dosya:
+                return
+            try:
+                export_rows_to_pdf(dosya, "ALP Ziraat Islem Gecmisi", ["Zaman", "Kullanici", "Islem", "Ciftlik", "Hedef Tipi", "Hedef ID", "Detay"], export_rows())
+                messagebox.showinfo("Disari Aktar", f"PDF kaydedildi:\n{dosya}", parent=pencere)
+            except Exception as e:
+                messagebox.showerror("Disari Aktar", str(e), parent=pencere)
+
         alt = tk.Frame(ana, bg=self.renkler["arkaplan"])
         alt.pack(fill="x", pady=(12, 0))
         tk.Button(alt, text="Yenile", command=liste_yenile, bg=self.renkler["button_primary_bg"], fg="#FFFFFF", relief="flat", padx=14, pady=8).pack(side="left")
+        tk.Button(alt, text="Filtreleri Temizle", command=filtre_temizle, bg=self.renkler["button_default_bg"], fg=self.renkler["button_default_fg"], relief="flat", padx=14, pady=8).pack(side="left", padx=8)
+        tk.Button(alt, text="Excel", command=excel_aktar, bg=self.renkler["button_success_bg"], fg="#FFFFFF", relief="flat", padx=14, pady=8).pack(side="left", padx=8)
+        tk.Button(alt, text="PDF", command=pdf_aktar, bg=self.renkler["button_success_bg"], fg="#FFFFFF", relief="flat", padx=14, pady=8).pack(side="left")
         tk.Button(alt, text="Kapat", command=pencere.destroy, bg=self.renkler["button_default_bg"], fg=self.renkler["button_default_fg"], relief="flat", padx=14, pady=8).pack(side="right")
         liste_yenile()
         pencere.wait_window()
@@ -1426,16 +1614,46 @@ class HayvanTakipSistemi:
     def admin_yonetim_merkezi(self):
         sonuc = {"ok": False}
         tamam = tk.BooleanVar(value=False)
-        state = {"ciftlikler": [], "kullanicilar": []}
+        state = {"ciftlikler": [], "kullanicilar": [], "offline_cache": False, "cache_time": None, "son_hata": None}
+
+        def admin_onbellekten_yukle():
+            onbellek = self.admin_onbellek_yukle()
+            self.admin_onbellek = onbellek
+            state["ciftlikler"] = onbellek.get("ciftlikler") or []
+            state["kullanicilar"] = onbellek.get("kullanicilar") or []
+            state["offline_cache"] = True
+            state["cache_time"] = onbellek.get("updated_at")
 
         def verileri_yenile(sessiz=False):
             try:
-                state["ciftlikler"] = self.api_ciftlikleri_yukle()
-                state["kullanicilar"] = self.api_kullanicilari_yukle()
+                if not getattr(self, "api_token", None) or getattr(self, "api_offline_oturum", False):
+                    self.api_online_oturum_ac()
+                ciftlikler = self.api_istek("GET", "/api/ciftlikler?aktif_dahil=true", timeout=20)
+                kullanicilar = self.api_istek("GET", "/api/kullanicilar", timeout=20)
+                state["ciftlikler"] = ciftlikler if isinstance(ciftlikler, list) else []
+                state["kullanicilar"] = kullanicilar if isinstance(kullanicilar, list) else []
+                state["offline_cache"] = False
+                state["cache_time"] = None
+                state["son_hata"] = None
+                self.api_cevrimdisi = False
+                self.api_offline_oturum = False
+                self._api_son_hata = None
+                self.admin_onbellek_kaydet(state["ciftlikler"], state["kullanicilar"])
                 return True
             except ApiHatasi as e:
+                self.api_cevrimdisi = True
+                self._api_son_hata = str(e)
+                state["son_hata"] = str(e)
+                admin_onbellekten_yukle()
                 if not sessiz:
-                    messagebox.showerror("Admin Merkezi", f"Yonetim verileri alinamadi:\n{e}", parent=self.root)
+                    if state["ciftlikler"] or state["kullanicilar"]:
+                        messagebox.showwarning(
+                            "Admin Merkezi",
+                            f"API baglantisi kurulamadi; son kayitli yonetim listesi gosteriliyor.\n\n{e}",
+                            parent=self.root,
+                        )
+                    else:
+                        messagebox.showerror("Admin Merkezi", f"Yonetim verileri alinamadi:\n{e}", parent=self.root)
                 return False
 
         verileri_yenile(sessiz=True)
@@ -1475,6 +1693,8 @@ class HayvanTakipSistemi:
         ozet.pack(fill="x", pady=(0, 18))
         ozet_label = tk.Label(ozet, text="", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 11, "bold"))
         ozet_label.pack(anchor="w")
+        admin_durum_label = tk.Label(ozet, text="", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9))
+        admin_durum_label.pack(anchor="w", pady=(4, 0))
 
         govde = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
         govde.pack(fill="both", expand=True)
@@ -1491,6 +1711,19 @@ class HayvanTakipSistemi:
 
         ciftlik_combo = ttk.Combobox(sol, state="readonly", font=("Segoe UI", 10), style="TCombobox")
         ciftlik_combo.pack(fill="x", pady=(0, 12), ipady=4)
+        ciftlik_liste = tk.Listbox(
+            sol,
+            height=7,
+            bg=self.renkler["input_bg"],
+            fg=self.renkler["yazi_rengi"],
+            selectbackground=self.renkler["button_primary_bg"],
+            selectforeground="#FFFFFF",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=self.renkler["kenarlik"],
+            font=("Segoe UI", 10),
+        )
+        ciftlik_liste.pack(fill="both", expand=True, pady=(0, 12))
 
         def admin_buton(parent, metin, komut, renk=None):
             return tk.Button(
@@ -1526,11 +1759,25 @@ class HayvanTakipSistemi:
             return liste[idx]
 
         def tum_suruye_gir():
+            if state.get("offline_cache"):
+                messagebox.showwarning(
+                    "Admin Merkezi",
+                    "Offline modda tum suru verisi guvenli sekilde yenilenemez. Internet gelince Baglantiyi Yenile ile tekrar deneyin.",
+                    parent=self.root,
+                )
+                return
             self.admin_aktif_ciftlik_id = None
             self.admin_aktif_ciftlik_ad = None
             bitir(True)
 
         def secili_suruye_gir():
+            if state.get("offline_cache"):
+                messagebox.showwarning(
+                    "Admin Merkezi",
+                    "Offline modda ciftlik degistirmek yerine sadece son kayitli ciftlik listesi gosterilir. Internet gelince Baglantiyi Yenile ile suruye girin.",
+                    parent=self.root,
+                )
+                return
             ciftlik = secili_ciftlik()
             if not ciftlik:
                 messagebox.showwarning("Admin Merkezi", "Once bir ciftlik secin.", parent=self.root)
@@ -1538,6 +1785,16 @@ class HayvanTakipSistemi:
             self.admin_aktif_ciftlik_id = ciftlik.get("id")
             self.admin_aktif_ciftlik_ad = ciftlik.get("ad")
             bitir(True)
+
+        def listeden_ciftlik_sec(event=None):
+            secim = ciftlik_liste.curselection()
+            if not secim:
+                return
+            idx = secim[0]
+            if idx < len(aktif_ciftlikler()):
+                ciftlik_combo.current(idx)
+
+        ciftlik_liste.bind("<<ListboxSelect>>", listeden_ciftlik_sec)
 
         admin_buton(sol, "Tum ciftliklerin suru takibine gir", tum_suruye_gir, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sol, "Secili ciftligin surusune gir", secili_suruye_gir, self.renkler["button_success_bg"]).pack(fill="x", pady=5)
@@ -1548,13 +1805,29 @@ class HayvanTakipSistemi:
         def ekrani_yenile():
             ciftlikler = aktif_ciftlikler()
             ciftlik_combo["values"] = [f"{c.get('ad', '-')} ({c.get('id', '-')})" for c in ciftlikler]
+            ciftlik_liste.delete(0, tk.END)
+            for c in ciftlikler:
+                ciftlik_liste.insert(tk.END, f"{c.get('ad', '-')} ({c.get('id', '-')})")
             if ciftlikler:
                 mevcut_id = getattr(self, "admin_aktif_ciftlik_id", None)
                 secim = next((i for i, c in enumerate(ciftlikler) if c.get("id") == mevcut_id), 0)
                 ciftlik_combo.current(secim)
+                ciftlik_liste.selection_clear(0, tk.END)
+                ciftlik_liste.selection_set(secim)
+                ciftlik_liste.see(secim)
+            else:
+                ciftlik_combo.set("")
             ozet_label.config(
                 text=f"{len(state['ciftlikler'])} ciftlik  |  {len(state['kullanicilar'])} kullanici  |  Admin: {(self.api_kullanici or {}).get('kullanici_adi', '-')}"
             )
+            if state.get("offline_cache"):
+                zaman = state.get("cache_time") or "bilinmiyor"
+                admin_durum_label.config(
+                    text=f"Offline: son kayitli liste gosteriliyor. Son guncelleme: {zaman}",
+                    fg=self.renkler["uyari"],
+                )
+            else:
+                admin_durum_label.config(text="API bagli: yonetim listesi guncel.", fg=self.renkler["yesil"])
 
         def ciftlikleri_yonet():
             self.admin_ciftlik_yonetim_penceresi()
@@ -1566,12 +1839,19 @@ class HayvanTakipSistemi:
             verileri_yenile(sessiz=True)
             ekrani_yenile()
 
+        def admin_baglantiyi_yenile():
+            online = verileri_yenile(sessiz=False)
+            ekrani_yenile()
+            if online:
+                messagebox.showinfo("Admin Merkezi", "API baglantisi yenilendi.", parent=self.root)
+
         admin_buton(sag, "Ciftlikleri yonet", ciftlikleri_yonet).pack(fill="x", pady=5)
         admin_buton(sag, "Kullanicilari yonet", lambda: kullanicilari_yonet(False)).pack(fill="x", pady=5)
         admin_buton(sag, "Yeni kullanici olustur", lambda: kullanicilari_yonet(True), self.renkler["button_success_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Son islemleri gor", self.admin_islem_gecmisi_penceresi).pack(fill="x", pady=5)
         admin_buton(sag, "Online yedek indir", lambda: self.admin_online_yedek_indir(self.root), self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Sifremi degistir", lambda: self.sifre_degistir_penceresi(self.root)).pack(fill="x", pady=5)
+        admin_buton(sag, "Baglantiyi Yenile", admin_baglantiyi_yenile, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Listeyi yenile", lambda: (verileri_yenile(), ekrani_yenile())).pack(fill="x", pady=5)
 
         alt = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
@@ -2028,6 +2308,8 @@ class HayvanTakipSistemi:
         for h_id, veri in list(self.hayvanlar.items()):
             h_id = str(h_id)
             kayit_id, tamamlanmis = self.api_hayvan_kayit_gonder(h_id, veri, onceki_idler)
+            if tamamlanmis is None:
+                continue
             if h_id in self.hayvanlar and isinstance(self.hayvanlar[h_id], dict):
                 self.hayvanlar[h_id].clear()
                 self.hayvanlar[h_id].update(tamamlanmis)
@@ -2736,6 +3018,8 @@ class HayvanTakipSistemi:
         if getattr(self, "api_modu", False):
             self.modern_buton(sag_grup, "Sifre", self.sifre_degistir_penceresi,
                               purpose='default', small=True).pack(side='right', padx=4, pady=18)
+            self.modern_buton(sag_grup, "Baglanti Yenile", self.api_baglantiyi_yenile_ui,
+                              purpose='primary', small=True).pack(side='right', padx=4, pady=18)
             self.modern_buton(sag_grup, "Senkron Et", self.bekleyen_senkron_gonder_ui,
                               purpose='success', small=True).pack(side='right', padx=4, pady=18)
 
@@ -2806,6 +3090,7 @@ class HayvanTakipSistemi:
         self._update_custom_tabs() # Başlangıçta ilk sekmeyi renklendir
 
         self._baslangic_after_id = self.root.after(500, self.baslangic_guncellemesi)
+        self.otomatik_baglanti_kontrol_baslat()
 
     def header_ozet_guncelle(self):
         if not hasattr(self, 'header_stats_label'):
@@ -2957,6 +3242,70 @@ class HayvanTakipSistemi:
         self.asi_prosedur_listesini_guncelle()
         if MATPLOTLIB_AVAILABLE: 
             self.raporlari_guncelle()
+
+    def otomatik_baglanti_kontrol_gerekli(self):
+        return bool(
+            getattr(self, "api_modu", False)
+            and (
+                getattr(self, "api_cevrimdisi", False)
+                or getattr(self, "api_offline_oturum", False)
+                or self.bekleyen_senkron_var()
+            )
+        )
+
+    def otomatik_baglanti_kontrol_baslat(self, ilk_gecikme_ms=None):
+        if not getattr(self, "api_modu", False) or getattr(self, "_kapanis_istegi", False):
+            return
+        try:
+            onceki = getattr(self, "_otomatik_baglanti_after_id", None)
+            if onceki:
+                self.root.after_cancel(onceki)
+        except tk.TclError:
+            pass
+        gecikme = ilk_gecikme_ms or getattr(self, "otomatik_baglanti_ilk_gecikme_ms", 30000)
+        try:
+            self._otomatik_baglanti_after_id = self.root.after(gecikme, self.otomatik_baglanti_kontrol)
+        except tk.TclError:
+            self._otomatik_baglanti_after_id = None
+
+    def otomatik_baglanti_kontrol(self):
+        self._otomatik_baglanti_after_id = None
+        if getattr(self, "_kapanis_istegi", False) or not getattr(self, "api_modu", False):
+            return
+        if getattr(self, "_otomatik_baglanti_kontrol_ediliyor", False):
+            self.otomatik_baglanti_kontrol_baslat(getattr(self, "otomatik_baglanti_araligi_ms", 60000))
+            return
+
+        if self.otomatik_baglanti_kontrol_gerekli():
+            self._otomatik_baglanti_kontrol_ediliyor = True
+            onceki_bekleyen = self.bekleyen_senkron_sayisi()
+            onceki_offline = self.offline_modda_mi()
+            try:
+                self.api_istek("GET", "/api/health", timeout=4, auth=False)
+                if self.api_baglantiyi_yenile_sessiz():
+                    self.api_durum_guncelle()
+                    if onceki_offline or onceki_bekleyen:
+                        self.otomatik_baglanti_bildir(onceki_bekleyen)
+            except ApiHatasi as e:
+                self.api_cevrimdisi = True
+                self._api_son_hata = str(e)
+                self.api_durum_guncelle()
+            finally:
+                self._otomatik_baglanti_kontrol_ediliyor = False
+
+        self.otomatik_baglanti_kontrol_baslat(getattr(self, "otomatik_baglanti_araligi_ms", 60000))
+
+    def otomatik_baglanti_bildir(self, onceki_bekleyen=0):
+        if not hasattr(self, "api_status_label"):
+            return
+        try:
+            metin = self.api_status_label.cget("text")
+            ek = " | otomatik yenilendi"
+            if onceki_bekleyen:
+                ek = f" | {onceki_bekleyen} kayit otomatik senkronlandi"
+            self.api_status_label.config(text=f"{metin}{ek}", fg=self.renkler["yesil"])
+        except tk.TclError:
+            pass
     
     # #################################################################
     # ### GÜNCELLENMİŞ FONKSİYON: hayvan_kayit_sekmesi
@@ -5198,7 +5547,7 @@ class HayvanTakipSistemi:
     def uygulamayi_kapat(self):
         self._kapanis_istegi = True
         self.uyari_thread_running = False
-        for after_attr in ("_uyari_after_id", "_saat_after_id", "_baslangic_after_id", "_puls_after_id"):
+        for after_attr in ("_uyari_after_id", "_saat_after_id", "_baslangic_after_id", "_puls_after_id", "_otomatik_baglanti_after_id"):
             after_id = getattr(self, after_attr, None)
             if after_id:
                 try:
