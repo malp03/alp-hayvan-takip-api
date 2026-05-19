@@ -1,0 +1,28 @@
+name: Daily API Backup
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "10 2 * * *"
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download API backup
+        env:
+          ALP_API_URL: ${{ secrets.ALP_API_URL }}
+          ALP_BACKUP_USERNAME: ${{ secrets.ALP_BACKUP_USERNAME }}
+          ALP_BACKUP_PASSWORD: ${{ secrets.ALP_BACKUP_PASSWORD }}
+          ALP_BACKUP_DIR: backups/server
+        run: python tools/server_backup.py
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alp-api-backup
+          path: backups/server/*.json
+          retention-days: 30
