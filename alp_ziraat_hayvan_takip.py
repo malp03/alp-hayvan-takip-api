@@ -5987,7 +5987,7 @@ class HayvanTakipSistemi:
     # #################################################################
     # ### GÜNCELLENMİŞ FONKSİYON: hayvan_detay_penceresi
     # #################################################################
-    def hayvan_detay_penceresi(self, kupe_no):
+    def hayvan_detay_penceresi_eski(self, kupe_no):
         if kupe_no not in self.hayvanlar: return
         hayvan = self.hayvanlar[kupe_no]
         
@@ -6177,6 +6177,412 @@ class HayvanTakipSistemi:
                     elif tohumlama.get('gebe_mi') is False: sonuc = "Başarısız"
                     toh_tree.insert('', 'end', values=(len(hayvan['tohumlamalar']) - i + 1, tohumlama.get('tarih', '-'), tohumlama.get('sekil', '-'), tohumlama.get('suni_isim', '-'), sonuc))
             toh_tree.pack(fill='both', expand=True)
+
+    def profil_kart_olustur(self, parent, baslik=None, accent=None, padx=16, pady=14):
+        kart = tk.Frame(
+            parent,
+            bg=self.renkler["kart_arkaplan"],
+            highlightthickness=1,
+            highlightbackground=self.renkler["kenarlik"],
+        )
+        if accent:
+            tk.Frame(kart, bg=accent, height=3).pack(fill="x")
+        govde = tk.Frame(kart, bg=self.renkler["kart_arkaplan"], padx=padx, pady=pady)
+        govde.pack(fill="both", expand=True)
+        if baslik:
+            tk.Label(
+                govde,
+                text=baslik,
+                bg=self.renkler["kart_arkaplan"],
+                fg=self.renkler["yazi_rengi"],
+                font=("Segoe UI", 13, "bold"),
+            ).pack(anchor="w", pady=(0, 10))
+        return kart, govde
+
+    def profil_bilgi_satiri(self, parent, etiket, deger):
+        satir = tk.Frame(parent, bg=self.renkler["kart_arkaplan"])
+        satir.pack(fill="x", pady=3)
+        tk.Label(
+            satir,
+            text=etiket,
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9, "bold"),
+            width=18,
+            anchor="w",
+        ).pack(side="left")
+        tk.Label(
+            satir,
+            text=str(deger or "-"),
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 10),
+            anchor="w",
+            justify="left",
+            wraplength=420,
+        ).pack(side="left", fill="x", expand=True)
+
+    def profil_metrik_karti(self, parent, baslik, deger, alt="", renk=None):
+        renk = renk or self.renkler["button_primary_bg"]
+        kart = tk.Frame(
+            parent,
+            bg=self.renkler["kart_ikincil"],
+            highlightthickness=1,
+            highlightbackground=self.renkler["kenarlik"],
+            padx=14,
+            pady=12,
+        )
+        tk.Label(
+            kart,
+            text=baslik.upper(),
+            bg=self.renkler["kart_ikincil"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            kart,
+            text=str(deger),
+            bg=self.renkler["kart_ikincil"],
+            fg=renk,
+            font=("Segoe UI", 18, "bold"),
+        ).pack(anchor="w", pady=(3, 0))
+        if alt:
+            tk.Label(
+                kart,
+                text=alt,
+                bg=self.renkler["kart_ikincil"],
+                fg=self.renkler["muted"],
+                font=("Segoe UI", 8),
+            ).pack(anchor="w", pady=(2, 0))
+        return kart
+
+    def profil_tablo_olustur(self, parent, kolonlar, genislikler=None, height=6):
+        genislikler = genislikler or {}
+        tablo_frame = tk.Frame(parent, bg=self.renkler["kart_arkaplan"])
+        tablo_frame.pack(fill="both", expand=True)
+        tree = ttk.Treeview(tablo_frame, columns=kolonlar, show="headings", height=height, style="Modern.Treeview")
+        for col in kolonlar:
+            tree.heading(col, text=col)
+            tree.column(col, width=genislikler.get(col, 120), minwidth=70, anchor="center")
+        scroll = ttk.Scrollbar(tablo_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
+        tablo_frame.grid_rowconfigure(0, weight=1)
+        tablo_frame.grid_columnconfigure(0, weight=1)
+        return tree
+
+    def profil_durum_metni(self, hayvan):
+        if hayvan.get("arsivli"):
+            return "Arşivli"
+        if hayvan.get("olu"):
+            return "Ölü"
+        if hayvan.get("kesildi"):
+            return "Kesildi"
+        if hayvan.get("gebe_mi"):
+            return "Gebe"
+        return hayvan.get("durum") or "Hayatta"
+
+    def profil_laktasyon_ozeti(self, hayvan):
+        dogumlar = hayvan.get("dogumlar") or []
+        toplam_sagim = 0
+        aktif_sagim = "-"
+        son_dogum = "-"
+        for index, dogum in enumerate(dogumlar):
+            tarih = dogum.get("tarih")
+            if not tarih or tarih == "Bilinmiyor":
+                continue
+            try:
+                baslangic = datetime.strptime(tarih, "%d/%m/%Y")
+            except (ValueError, TypeError):
+                continue
+            son_dogum = tarih
+            bitis = None
+            if dogum.get("laktasyon_bitis_tarihi") and dogum.get("laktasyon_bitis_tarihi") != "Bilinmiyor":
+                try:
+                    bitis = datetime.strptime(dogum["laktasyon_bitis_tarihi"], "%d/%m/%Y")
+                except (ValueError, TypeError):
+                    bitis = None
+            elif index == len(dogumlar) - 1 and hayvan.get("durum") == "Sağmal İnek":
+                bitis = datetime.now()
+                aktif_sagim = f"{max((bitis - baslangic).days, 0)} gün"
+            if bitis:
+                toplam_sagim += max((bitis - baslangic).days, 0)
+        return {
+            "laktasyon_sayisi": len(dogumlar),
+            "toplam_sagim": toplam_sagim,
+            "aktif_sagim": aktif_sagim,
+            "son_dogum": son_dogum,
+        }
+
+    def profil_dogum_tahmini(self, hayvan):
+        if not hayvan.get("gebe_mi") or not hayvan.get("gebelik_tarihi"):
+            return "-", None
+        try:
+            gebelik = datetime.strptime(hayvan["gebelik_tarihi"], "%d/%m/%Y")
+            dogum = gebelik + timedelta(days=283)
+            return dogum.strftime("%d/%m/%Y"), (dogum - datetime.now()).days
+        except (ValueError, TypeError):
+            return "Tarih hatası", None
+
+    def profil_uyarilari_hesapla(self, kupe_no, hayvan):
+        uyarilar = []
+        if hayvan.get("arsivli") or hayvan.get("olu") or hayvan.get("kesildi"):
+            return uyarilar
+
+        gorunen = self.hayvan_gorunen_kupe(kupe_no, hayvan)
+        son_tohumlama = (hayvan.get("tohumlamalar") or [None])[-1]
+        if son_tohumlama and son_tohumlama.get("gebe_mi") is None:
+            try:
+                tarih = datetime.strptime(son_tohumlama.get("tarih", ""), "%d/%m/%Y")
+                kontrol = tarih + timedelta(days=21)
+                kalan = (kontrol - datetime.now()).days
+                if kalan <= 7:
+                    uyarilar.append(("Gebelik kontrol", f"{gorunen} için kontrol tarihi yaklaştı.", kalan))
+            except (ValueError, TypeError):
+                pass
+
+        dogum_tahmini, kalan_dogum = self.profil_dogum_tahmini(hayvan)
+        if kalan_dogum is not None:
+            if kalan_dogum <= 60:
+                uyarilar.append(("Doğum", f"Tahmini doğum: {dogum_tahmini}", kalan_dogum))
+            if hayvan.get("durum") == "Sağmal İnek" and kalan_dogum <= 60:
+                uyarilar.append(("Kuruya alma", "Kuruya alma zamanı kontrol edilmeli.", kalan_dogum))
+
+        for prosedur in hayvan.get("asi_prosedurler") or []:
+            sonraki = prosedur.get("sonraki_tarih")
+            if not sonraki:
+                continue
+            try:
+                tarih = datetime.strptime(sonraki, "%d/%m/%Y")
+                kalan = (tarih - datetime.now()).days
+                if kalan <= 30:
+                    uyarilar.append((prosedur.get("ad") or "Aşı/Prosedür", f"Sonraki tarih: {sonraki}", kalan))
+            except (ValueError, TypeError):
+                pass
+        return sorted(uyarilar, key=lambda item: item[2])
+
+    def hayvan_detay_penceresi(self, kupe_no):
+        hayvan_id = self.hayvan_id_bul(kupe_no) or kupe_no
+        if hayvan_id not in self.hayvanlar:
+            return
+        hayvan = self.hayvanlar[hayvan_id]
+        cins = hayvan.get("cins", "")
+        is_male = cins in ["Erkek Buzağı", "Dana"]
+        gorunen_kupe = self.hayvan_gorunen_kupe(hayvan_id, hayvan)
+        durum = self.profil_durum_metni(hayvan)
+        yas_gun = max(int(hayvan.get("yas_gun", 0) or 0), 0)
+        yas_metin = f"{yas_gun // 365} yıl {(yas_gun % 365) // 30} ay"
+        laktasyon = self.profil_laktasyon_ozeti(hayvan)
+        dogum_tahmini, kalan_dogum = self.profil_dogum_tahmini(hayvan)
+        uyarilar = self.profil_uyarilari_hesapla(hayvan_id, hayvan)
+
+        detay_window = tk.Toplevel(self.root)
+        detay_window.title(f"Hayvan Profili - {gorunen_kupe}")
+        detay_window.geometry("1360x820")
+        detay_window.minsize(980, 680)
+        detay_window.configure(bg=self.renkler["arkaplan"])
+        detay_window.transient(self.root)
+        detay_window.grab_set()
+
+        def kapat():
+            try:
+                detay_window.grab_release()
+            except tk.TclError:
+                pass
+            try:
+                detay_window.destroy()
+            except tk.TclError:
+                pass
+
+        detay_window.protocol("WM_DELETE_WINDOW", kapat)
+
+        header = tk.Frame(detay_window, bg=self.renkler["siyah"], padx=22, pady=14)
+        header.pack(fill="x")
+        sol_header = tk.Frame(header, bg=self.renkler["siyah"])
+        sol_header.pack(side="left", fill="x", expand=True)
+        tk.Label(
+            sol_header,
+            text=f"{gorunen_kupe} Hayvan Profili",
+            bg=self.renkler["siyah"],
+            fg=self.renkler["beyaz"],
+            font=("Segoe UI", 21, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            sol_header,
+            text=f"{hayvan.get('cins') or '-'}  |  {durum}  |  Son güncelleme: {hayvan.get('son_guncelleme') or '-'}",
+            bg=self.renkler["siyah"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 10),
+        ).pack(anchor="w", pady=(3, 0))
+
+        aksiyon_frame = tk.Frame(header, bg=self.renkler["siyah"])
+        aksiyon_frame.pack(side="right", fill="x", padx=(12, 0))
+        aksiyonlar = [
+            ("Düzenle", lambda: self.hayvan_duzenle_penceresi(hayvan_id, detay_window), "default"),
+            ("Fotoğraf Değiştir" if hayvan.get("foto_data") else "Fotoğraf Ekle", lambda: self.hayvan_fotograf_sec(hayvan_id, detay_window), "primary"),
+            ("Aşı/Prosedür", lambda: self.asi_prosedur_penceresi(hayvan_id, detay_window), "success"),
+        ]
+        if self.hayvan_tohumlanabilir_mi(hayvan):
+            aksiyonlar.append(("Tohumla", lambda: self.tohumlama_ekranina_hayvanla_git(hayvan_id, detay_window), "primary"))
+        if not hayvan.get("olu") and not hayvan.get("kesildi") and not hayvan.get("arsivli"):
+            if not is_male and hayvan.get("gebe_mi"):
+                aksiyonlar.append(("Doğum Kaydet", lambda: self.dogum_kayit_olustur(hayvan_id, detay_window), "success"))
+            if not is_male and hayvan.get("durum") == "Sağmal İnek":
+                aksiyonlar.append(("Kuruya Ayır", lambda: self.kuruda_yap(hayvan_id, detay_window), "warning"))
+            aksiyonlar.extend([
+                ("Kesildi", lambda: self.hayvan_kesildi(hayvan_id, detay_window), "warning"),
+                ("Öldü", lambda: self.hayvan_oldu(hayvan_id, detay_window), "danger"),
+            ])
+        if hayvan.get("arsivli"):
+            aksiyonlar.append(("Arşivden Çıkar", lambda: self.hayvan_arsivden_cikar(hayvan_id, detay_window), "success"))
+            aksiyonlar.append(("Kalıcı Sil", lambda: self.hayvan_kalici_sil(hayvan_id, detay_window), "danger"))
+        else:
+            aksiyonlar.append(("Arşivle", lambda: self.hayvan_sil_detay(hayvan_id, detay_window), "danger"))
+        aksiyonlar.append(("Kapat", kapat, "default"))
+        self.responsive_buton_grubu(aksiyon_frame, aksiyonlar, gap=7, align="right")
+
+        sayfa = self.kaydirilabilir_sayfa(detay_window, padx=22, pady=18)
+
+        ust = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
+        ust.pack(fill="x")
+        ust.grid_columnconfigure(0, weight=0)
+        ust.grid_columnconfigure(1, weight=2)
+        ust.grid_columnconfigure(2, weight=2)
+
+        foto_kart, foto_body = self.profil_kart_olustur(ust, "Fotoğraf", accent=self.renkler["button_primary_bg"])
+        foto_kart.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        foto_img = self.foto_data_to_image(hayvan.get("foto_data"), max_size=(250, 190))
+        if foto_img:
+            foto_lbl = tk.Label(foto_body, image=foto_img, bg=self.renkler["kart_arkaplan"])
+            foto_lbl.image = foto_img
+            self._foto_referanslari.append(foto_img)
+            foto_lbl.pack(fill="both", expand=True)
+        else:
+            tk.Label(
+                foto_body,
+                text="Fotoğraf yok",
+                bg=self.renkler["input_bg"],
+                fg=self.renkler["muted"],
+                font=("Segoe UI", 12, "bold"),
+                width=28,
+                height=9,
+                highlightthickness=1,
+                highlightbackground=self.renkler["kenarlik"],
+            ).pack(fill="both", expand=True)
+
+        kimlik_kart, kimlik_body = self.profil_kart_olustur(ust, "Kimlik ve Durum", accent=self.renkler["button_success_bg"])
+        kimlik_kart.grid(row=0, column=1, sticky="nsew", padx=(0, 14))
+        self.profil_bilgi_satiri(kimlik_body, "Resmi Küpe", hayvan.get("resmi_kupe_no") or "-")
+        self.profil_bilgi_satiri(kimlik_body, "Çiftlik Küpesi", hayvan.get("ciftlik_kupe_no") or "-")
+        self.profil_bilgi_satiri(kimlik_body, "Doğum Tarihi", hayvan.get("dogum_tarihi") or "-")
+        self.profil_bilgi_satiri(kimlik_body, "Yaş", yas_metin)
+        self.profil_bilgi_satiri(kimlik_body, "Cinsi", hayvan.get("cins") or "-")
+        self.profil_bilgi_satiri(kimlik_body, "Anne Küpe", hayvan.get("anne_kupe") or "Bilinmiyor")
+        self.profil_bilgi_satiri(kimlik_body, "Durum", durum)
+
+        metrik_kart, metrik_body = self.profil_kart_olustur(ust, "Özet", accent=self.renkler["uyari"])
+        metrik_kart.grid(row=0, column=2, sticky="nsew")
+        metrik_grid = tk.Frame(metrik_body, bg=self.renkler["kart_arkaplan"])
+        metrik_grid.pack(fill="both", expand=True)
+        for col in range(2):
+            metrik_grid.grid_columnconfigure(col, weight=1)
+        metrikler = [
+            ("Durum", durum, hayvan.get("cins") or "-", self.renkler["button_success_bg"] if durum not in {"Arşivli", "Ölü", "Kesildi"} else self.renkler["button_warning_bg"]),
+            ("Doğum Tahmini", dogum_tahmini, f"{kalan_dogum} gün" if kalan_dogum is not None else "Gebe değil", self.renkler["uyari"]),
+            ("Laktasyon", laktasyon["laktasyon_sayisi"], f"Son doğum: {laktasyon['son_dogum']}", self.renkler["button_primary_bg"]),
+            ("Aktif Sağım", laktasyon["aktif_sagim"], f"Toplam: {laktasyon['toplam_sagim']} gün", self.renkler["button_success_bg"]),
+        ]
+        for idx, (baslik, deger, alt, renk) in enumerate(metrikler):
+            kart = self.profil_metrik_karti(metrik_grid, baslik, deger, alt, renk)
+            kart.grid(row=idx // 2, column=idx % 2, sticky="nsew", padx=5, pady=5)
+
+        alt = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
+        alt.pack(fill="both", expand=True, pady=(16, 0))
+        alt.grid_columnconfigure(0, weight=1)
+        alt.grid_columnconfigure(1, weight=1)
+
+        ureme_kart, ureme_body = self.profil_kart_olustur(alt, "Üreme ve Laktasyon", accent=self.renkler["button_primary_bg"])
+        ureme_kart.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 16))
+        if is_male:
+            tk.Label(ureme_body, text="Bu hayvan için üreme kaydı tutulmuyor.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 10, "italic")).pack(anchor="w")
+        else:
+            self.profil_bilgi_satiri(ureme_body, "Gebelik", "Gebe" if hayvan.get("gebe_mi") else "Gebe değil")
+            self.profil_bilgi_satiri(ureme_body, "Gebelik Tarihi", hayvan.get("gebelik_tarihi") or "-")
+            self.profil_bilgi_satiri(ureme_body, "Tahmini Doğum", dogum_tahmini)
+            self.profil_bilgi_satiri(ureme_body, "Aktif Sağım", laktasyon["aktif_sagim"])
+            self.profil_bilgi_satiri(ureme_body, "Toplam Sağım", f"{laktasyon['toplam_sagim']} gün")
+
+        uyari_kart, uyari_body = self.profil_kart_olustur(alt, "Aktif Uyarılar", accent=self.renkler["button_warning_bg"])
+        uyari_kart.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 16))
+        if uyarilar:
+            for tip, mesaj, kalan in uyarilar[:6]:
+                renk = self.renkler["button_danger_bg"] if kalan <= 0 else self.renkler["uyari"]
+                satir = tk.Frame(uyari_body, bg=self.renkler["kart_ikincil"], padx=10, pady=8, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+                satir.pack(fill="x", pady=4)
+                tk.Label(satir, text=tip, bg=self.renkler["kart_ikincil"], fg=renk, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+                kalan_metin = "Bugün/geçmiş" if kalan <= 0 else f"{kalan} gün kaldı"
+                tk.Label(satir, text=f"{mesaj}  |  {kalan_metin}", bg=self.renkler["kart_ikincil"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 9), wraplength=520, justify="left").pack(anchor="w", pady=(2, 0))
+        else:
+            tk.Label(uyari_body, text="Bu hayvan için aktif uyarı yok.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 10, "italic")).pack(anchor="w")
+
+        tohum_kart, tohum_body = self.profil_kart_olustur(alt, "Tohumlama Geçmişi", accent=self.renkler["button_primary_bg"])
+        tohum_kart.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(0, 16))
+        toh_tree = self.profil_tablo_olustur(tohum_body, ("#", "Tarih", "Şekil", "Suni İsim", "Sonuç"), {"#": 45, "Tarih": 110, "Şekil": 90, "Suni İsim": 150, "Sonuç": 110}, height=6)
+        tohumlamalar = hayvan.get("tohumlamalar") or []
+        if tohumlamalar:
+            for i, tohumlama in enumerate(reversed(tohumlamalar), 1):
+                sonuc = "Beklemede"
+                if tohumlama.get("gebe_mi") is True:
+                    sonuc = "Başarılı"
+                elif tohumlama.get("gebe_mi") is False:
+                    sonuc = "Başarısız"
+                toh_tree.insert("", "end", values=(len(tohumlamalar) - i + 1, tohumlama.get("tarih", "-"), tohumlama.get("sekil", "-"), tohumlama.get("suni_isim", "-"), sonuc))
+        else:
+            toh_tree.insert("", "end", values=("-", "-", "-", "-", "Kayıt yok"))
+
+        dogum_kart, dogum_body = self.profil_kart_olustur(alt, "Doğum ve Yavru Geçmişi", accent=self.renkler["button_success_bg"])
+        dogum_kart.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(0, 16))
+        dog_tree = self.profil_tablo_olustur(dogum_body, ("#", "Tarih", "Yavrular", "Not"), {"#": 45, "Tarih": 110, "Yavrular": 260, "Not": 180}, height=6)
+        dogumlar = hayvan.get("dogumlar") or []
+        if dogumlar:
+            for i, dogum in enumerate(dogumlar, 1):
+                yavrular = dogum.get("yavrular") or []
+                yavru_metin = ", ".join([f"{y.get('cins', '-')}: {self.yavru_gorunen_kupe(y)}" for y in yavrular]) or "Yavru bilgisi yok"
+                dog_tree.insert("", "end", values=(i, dogum.get("tarih", "-"), yavru_metin, dogum.get("not", "")))
+        else:
+            dog_tree.insert("", "end", values=("-", "-", "Kayıt yok", ""))
+
+        asi_kart, asi_body = self.profil_kart_olustur(alt, "Aşı ve Prosedürler", accent=self.renkler["uyari"])
+        asi_kart.grid(row=2, column=0, sticky="nsew", padx=(0, 8))
+        asi_tree = self.profil_tablo_olustur(asi_body, ("#", "Ad", "Tarih", "Sonraki", "Not"), {"#": 45, "Ad": 160, "Tarih": 110, "Sonraki": 110, "Not": 220}, height=6)
+        prosedurler = hayvan.get("asi_prosedurler") or []
+        if prosedurler:
+            for i, prosedur in enumerate(prosedurler, 1):
+                asi_tree.insert("", "end", values=(i, prosedur.get("ad", "-"), prosedur.get("tarih", "-"), prosedur.get("sonraki_tarih") or "-", prosedur.get("not", "")))
+        else:
+            asi_tree.insert("", "end", values=("-", "Kayıt yok", "-", "-", ""))
+
+        not_kart, not_body = self.profil_kart_olustur(alt, "Notlar ve Son İşlemler", accent=self.renkler["button_default_bg"])
+        not_kart.grid(row=2, column=1, sticky="nsew", padx=(8, 0))
+        if hayvan.get("ek_notlar"):
+            tk.Label(not_body, text=hayvan.get("ek_notlar"), bg=self.renkler["kart_ikincil"], fg=self.renkler["yazi_rengi"], justify="left", wraplength=560, padx=10, pady=8).pack(fill="x", pady=(0, 10))
+        kimlikler = {str(hayvan_id), str(gorunen_kupe), str(hayvan.get("resmi_kupe_no") or ""), str(hayvan.get("ciftlik_kupe_no") or "")}
+        ilgili_gecmis = []
+        for kayit in self.islem_gecmisi[:200]:
+            aciklama = str(kayit.get("aciklama") or kayit.get("detay") or "")
+            if any(k and k in aciklama for k in kimlikler):
+                ilgili_gecmis.append(kayit)
+            if len(ilgili_gecmis) >= 8:
+                break
+        if ilgili_gecmis:
+            for kayit in ilgili_gecmis:
+                tk.Label(not_body, text=f"{kayit.get('zaman', '-')}: {kayit.get('aciklama') or kayit.get('detay')}", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], anchor="w", justify="left", wraplength=560, font=("Segoe UI", 9)).pack(fill="x", pady=2)
+        else:
+            tk.Label(not_body, text="Bu hayvan için yakın işlem kaydı yok.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 10, "italic")).pack(anchor="w")
+
+        detay_window.lift(self.root)
+        detay_window.focus_force()
 
     # --- Kalan Fonksiyonlar ---
     def hayvan_listesini_guncelle(self):

@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+import tkinter as tk
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +48,21 @@ def make_animal(**overrides):
     }
     data.update(overrides)
     return data
+
+
+def widget_texts(widget):
+    texts = []
+    try:
+        value = widget.cget("text")
+        if value:
+            texts.append(str(value))
+    except tk.TclError:
+        pass
+    except Exception:
+        pass
+    for child in widget.winfo_children():
+        texts.extend(widget_texts(child))
+    return texts
 
 
 def main():
@@ -105,6 +121,37 @@ def main():
         app.tohumlama_ekranina_hayvanla_git(created_id)
         assert app.tohumlama_hayvan_combo.get() == "C001", app.tohumlama_hayvan_combo.get()
         assert app.tohumlama_tarih_entry.get()
+
+        created.setdefault("tohumlamalar", []).append({
+            "id": "smoke-toh",
+            "tarih": "01/02/2026",
+            "sekil": "Suni",
+            "suni_isim": "Smoke",
+            "gebe_mi": True,
+        })
+        created["gebe_mi"] = True
+        created["gebelik_tarihi"] = "01/02/2026"
+        created.setdefault("dogumlar", []).append({
+            "tarih": "01/05/2026",
+            "yavrular": [{"cins": "Di\u015fi Buza\u011f\u0131", "resmi_kupe_no": "TRY1", "ciftlik_kupe_no": "CY1"}],
+        })
+        created.setdefault("asi_prosedurler", []).append({
+            "ad": "Smoke A\u015f\u0131",
+            "tarih": "01/05/2026",
+            "sonraki_tarih": "01/06/2026",
+            "not": "test",
+        })
+        app.hayvan_detay_penceresi(created_id)
+        app.root.update()
+        profiles = [
+            child for child in app.root.winfo_children()
+            if isinstance(child, tk.Toplevel) and "Hayvan Profili" in child.title()
+        ]
+        assert profiles, "profile window not opened"
+        profile_text = "\n".join(widget_texts(profiles[-1]))
+        for expected in ("Kimlik ve Durum", "\u00d6zet", "Tohumlama Ge\u00e7mi\u015fi", "Do\u011fum ve Yavru Ge\u00e7mi\u015fi", "A\u015f\u0131 ve Prosed\u00fcrler"):
+            assert expected in profile_text, expected
+        profiles[-1].destroy()
 
         male = make_animal(id="male", kupe_no="M1", resmi_kupe_no="TRM", ciftlik_kupe_no="M1", cins="Dana")
         assert not app.hayvan_tohumlanabilir_mi(male)
