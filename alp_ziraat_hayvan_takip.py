@@ -5592,7 +5592,7 @@ class HayvanTakipSistemi:
             self.hayvan_gebelik_durumunu_senkronla(kupe_no)
         self.veri_kaydet()
         messagebox.showinfo("Arşivden Çıkar", f"{gorunen} aktif sürü listesine alındı.", parent=pencere or self.root)
-        if pencere is not None:
+        if pencere is not None and pencere is not self.root:
             try:
                 pencere.destroy()
             except tk.TclError:
@@ -5619,7 +5619,7 @@ class HayvanTakipSistemi:
             self.islem_kaydi_baslat(f"Hayvan fotoğrafı güncellendi: {gorunen}")
             self.veri_kaydet()
             self.ekranlari_guncelle()
-            if pencere is not None:
+            if pencere is not None and pencere is not self.root:
                 try:
                     pencere.destroy()
                 except tk.TclError:
