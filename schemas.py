@@ -75,6 +75,15 @@ class LoginResponse(AlpModel):
     kullanici: KullaniciResponse
 
 
+class DeviceLoginRequest(AlpModel):
+    device_token: str
+
+
+class DeviceTokenResponse(AlpModel):
+    device_token: str
+    token_type: str = "device"
+
+
 class SifreDegistirRequest(AlpModel):
     eski_sifre: str
     yeni_sifre: str
@@ -136,6 +145,8 @@ class AsiProsedurResponse(AsiProsedurBase):
 
 class YavruBilgi(AlpModel):
     kupe: Optional[str] = None
+    resmi_kupe_no: Optional[str] = None
+    ciftlik_kupe_no: Optional[str] = None
     cins: Optional[str] = None
 
 
@@ -189,6 +200,8 @@ class HayvanBase(AlpModel):
     kesim_bilgisi: Optional[KesimBilgisi] = None
     arsivli: bool = False
     arsiv_tarihi: Optional[str] = None
+    foto_data: Optional[str] = None
+    foto_url: Optional[str] = None
     son_guncelleme: Optional[str] = None
     tohumlamalar: List[TohumlamaCreate] = Field(default_factory=list)
     dogumlar: List[DogumCreate] = Field(default_factory=list)
@@ -226,6 +239,8 @@ class HayvanUpdate(AlpModel):
     kesim_bilgisi: Optional[KesimBilgisi] = None
     arsivli: Optional[bool] = None
     arsiv_tarihi: Optional[str] = None
+    foto_data: Optional[str] = None
+    foto_url: Optional[str] = None
     son_guncelleme: Optional[str] = None
     tohumlamalar: Optional[List[TohumlamaCreate]] = None
     dogumlar: Optional[List[DogumCreate]] = None

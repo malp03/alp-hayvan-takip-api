@@ -55,6 +55,7 @@ DEFAULT_CIFTLIK_ID = os.getenv("ALP_DEFAULT_CIFTLIK_ID", "varsayilan-ciftlik")
 DEFAULT_CIFTLIK_ADI = os.getenv("ALP_DEFAULT_CIFTLIK_ADI", "Varsayılan Çiftlik")
 AUTH_SECRET = os.getenv("ALP_AUTH_SECRET", "alp-ziraat-dev-secret-change-me")
 TOKEN_TTL_SECONDS = int(os.getenv("ALP_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
+DEVICE_TOKEN_TTL_SECONDS = int(os.getenv("ALP_DEVICE_TOKEN_TTL_SECONDS", str(90 * 24 * 60 * 60)))
 
 
 def simdi() -> str:
@@ -130,7 +131,21 @@ def token_uret(kullanici: models.Kullanici) -> str:
         "sub": kullanici.id,
         "rol": kullanici.rol,
         "ciftlik_id": kullanici.ciftlik_id,
+        "typ": "access",
         "exp": int(time.time()) + TOKEN_TTL_SECONDS,
+    }
+    payload_b64 = b64_encode(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    imza = hmac.new(AUTH_SECRET.encode("utf-8"), payload_b64.encode("ascii"), hashlib.sha256).digest()
+    return f"{payload_b64}.{b64_encode(imza)}"
+
+
+def device_token_uret(kullanici: models.Kullanici) -> str:
+    payload = {
+        "sub": kullanici.id,
+        "rol": kullanici.rol,
+        "ciftlik_id": kullanici.ciftlik_id,
+        "typ": "device",
+        "exp": int(time.time()) + DEVICE_TOKEN_TTL_SECONDS,
     }
     payload_b64 = b64_encode(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     imza = hmac.new(AUTH_SECRET.encode("utf-8"), payload_b64.encode("ascii"), hashlib.sha256).digest()
@@ -180,6 +195,8 @@ def get_current_user(
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Giriş yapılmalıdır.")
     payload = token_coz(authorization.split(" ", 1)[1].strip())
+    if payload.get("typ") == "device":
+        raise HTTPException(status_code=401, detail="Cihaz tokeniyle işlem yapılamaz; önce oturum yenileyin.")
     kullanici = db.query(models.Kullanici).filter(models.Kullanici.id == payload.get("sub")).first()
     if not kullanici or not kullanici.aktif:
         raise HTTPException(status_code=401, detail="Kullanıcı aktif değil veya bulunamadı.")
@@ -399,10 +416,17 @@ def normalize_dogum(veri: Dict[str, Any], *, yeni: bool = False) -> Dict[str, An
         parse_tarih(sonuc.get("laktasyon_bitis_tarihi"), "Laktasyon bitiş tarihi")
     yavrular = []
     for yavru in sonuc.get("yavrular") or []:
+        resmi = metin(yavru.get("resmi_kupe_no"), upper=True)
+        ciftlik = metin(yavru.get("ciftlik_kupe_no"), upper=True)
+        eski_kupe = metin(yavru.get("kupe"), upper=True)
+        if not resmi and not ciftlik and eski_kupe:
+            resmi = eski_kupe
         yavrular.append(
             {
                 **dict(yavru),
-                "kupe": metin(yavru.get("kupe"), upper=True),
+                "kupe": ciftlik or resmi or eski_kupe,
+                "resmi_kupe_no": resmi,
+                "ciftlik_kupe_no": ciftlik,
                 "cins": metin(yavru.get("cins")) or "Bilinmiyor",
             }
         )
@@ -462,6 +486,8 @@ def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -
     sonuc["arsiv_tarihi"] = bos_yoksa_none(sonuc.get("arsiv_tarihi"))
     if sonuc["arsiv_tarihi"]:
         parse_tarih(sonuc["arsiv_tarihi"], "Arşiv tarihi")
+    sonuc["foto_data"] = bos_yoksa_none(sonuc.get("foto_data"))
+    sonuc["foto_url"] = bos_yoksa_none(sonuc.get("foto_url"))
     for alan, etiket in [
         ("dogum_tarihi", "Doğum tarihi"),
         ("gebelik_tarihi", "Gebelik tarihi"),
@@ -915,6 +941,25 @@ def login(giris: schemas.LoginRequest, db: Session = Depends(get_db)):
 @app.get("/api/auth/me", response_model=schemas.KullaniciResponse)
 def me(kullanici: models.Kullanici = Depends(get_current_user)):
     return kullanici_payload(kullanici)
+
+
+@app.post("/api/auth/device-token", response_model=schemas.DeviceTokenResponse)
+def create_device_token(kullanici: models.Kullanici = Depends(get_current_user)):
+    return {"device_token": device_token_uret(kullanici)}
+
+
+@app.post("/api/auth/device-login", response_model=schemas.LoginResponse)
+def device_login(istek: schemas.DeviceLoginRequest, db: Session = Depends(get_db)):
+    payload = token_coz(istek.device_token)
+    if payload.get("typ") != "device":
+        raise HTTPException(status_code=401, detail="Cihaz oturumu geçersiz.")
+    kullanici = db.query(models.Kullanici).filter(models.Kullanici.id == payload.get("sub")).first()
+    if not kullanici or not kullanici.aktif:
+        raise HTTPException(status_code=401, detail="Kullanıcı aktif değil veya bulunamadı.")
+    kullanici.son_giris = simdi()
+    db.commit()
+    db.refresh(kullanici)
+    return {"access_token": token_uret(kullanici), "kullanici": kullanici_payload(kullanici)}
 
 
 @app.post("/api/auth/change-password", response_model=schemas.IslemSonucResponse)
@@ -1525,7 +1570,15 @@ def create_dogum(
     if gebelik_tarihi and dogum_tarihi < gebelik_tarihi:
         raise HTTPException(status_code=400, detail="Doğum tarihi gebelik başlangıcından önce olamaz.")
 
-    yavru_kupeleri = [y["kupe"] for y in yeni.get("yavrular") or [] if y.get("kupe")]
+    yavru_kupeleri = []
+    for yavru in yeni.get("yavrular") or []:
+        alanlar = ["resmi_kupe_no", "ciftlik_kupe_no"]
+        if not any(yavru.get(alan) for alan in alanlar):
+            alanlar = ["kupe"]
+        for alan in alanlar:
+            kupe = yavru.get(alan)
+            if kupe:
+                yavru_kupeleri.append(kupe)
     if len(yavru_kupeleri) != len(set(yavru_kupeleri)):
         raise HTTPException(status_code=400, detail="Yavru küpe numaraları kendi içinde tekrar edemez.")
     for kupe in yavru_kupeleri:
@@ -1546,14 +1599,16 @@ def create_dogum(
     kaydedilen_yavrular = []
     for yavru in yeni.get("yavrular") or []:
         yavru_id = yeni_id()
-        yavru_kupe = yavru.get("kupe") or yavru_id
+        yavru_resmi = yavru.get("resmi_kupe_no") or ""
+        yavru_ciftlik = yavru.get("ciftlik_kupe_no") or ""
+        yavru_kupe = yavru_ciftlik or yavru_resmi or yavru.get("kupe") or yavru_id
         yavru_veri = normalize_hayvan(
             {
                 "id": yavru_id,
                 "ciftlik_id": anne.get("ciftlik_id"),
                 "kupe_no": yavru_kupe,
-                "resmi_kupe_no": yavru_kupe if yavru.get("kupe") else "",
-                "ciftlik_kupe_no": "",
+                "resmi_kupe_no": yavru_resmi,
+                "ciftlik_kupe_no": yavru_ciftlik,
                 "dogum_tarihi": yeni["tarih"],
                 "cins": yavru.get("cins") or "Bilinmiyor",
                 "anne_kupe": anne.get("kupe_no") or anne.get("id"),
@@ -1571,7 +1626,12 @@ def create_dogum(
         yavru_db = models.Hayvan(id=yavru_id)
         db.add(yavru_db)
         db_hayvana_yaz(db, yavru_db, yavru_veri)
-        kaydedilen_yavrular.append({"kupe": yavru_kupe, "cins": yavru_veri["cins"]})
+        kaydedilen_yavrular.append({
+            "kupe": yavru_kupe,
+            "resmi_kupe_no": yavru_resmi,
+            "ciftlik_kupe_no": yavru_ciftlik,
+            "cins": yavru_veri["cins"],
+        })
 
     yeni["yavrular"] = kaydedilen_yavrular
     anne.setdefault("dogumlar", []).append(yeni)
