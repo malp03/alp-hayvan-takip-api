@@ -150,6 +150,7 @@ class HayvanTakipSistemi:
             self.admin_aktif_ciftlik_ad = None
             self._login_yeniden_iste = False
             self._otomatik_baglanti_after_id = None
+            self._tracked_after_ids = []
             self._otomatik_baglanti_kontrol_ediliyor = False
             self.otomatik_baglanti_araligi_ms = 60 * 1000
             self.otomatik_baglanti_ilk_gecikme_ms = 30 * 1000
@@ -390,7 +391,7 @@ class HayvanTakipSistemi:
         for p in parts:
             canvas.itemconfig(p, fill=hex_col)
             
-        canvas.after(15, lambda: self._animate_canvas_bg(canvas, parts, current_rgb, target_rgb, step + 1, total_steps))
+            self._track_after(canvas, 15, lambda: self._animate_canvas_bg(canvas, parts, current_rgb, target_rgb, step + 1, total_steps))
 
     def modern_buton(self, parent, text, command, purpose='default', width=None, small=False):
         bg_color = self.renkler.get(f"button_{purpose}_bg", self.renkler["button_default_bg"])
@@ -451,8 +452,8 @@ class HayvanTakipSistemi:
                 click_color = self._lighten_color(hover_hex, 30) if self.theme_mode == 'dark' else self.koyu_renk(hover_hex)
                 for p in parts: canvas.itemconfig(p, fill=click_color)
                 canvas.update_idletasks()
-                canvas.after(50, lambda: self._animate_canvas_bg(canvas, parts, self._hex_to_rgb(click_color), hover_rgb))
-                canvas.after(100, command)
+                self._track_after(canvas, 50, lambda: self._animate_canvas_bg(canvas, parts, self._hex_to_rgb(click_color), hover_rgb))
+                self._track_after(canvas, 100, command)
                 
         # Bindings only on the canvas widget to prevent event bubbling/double-firing
         canvas.bind("<Enter>", on_enter)
@@ -496,8 +497,26 @@ class HayvanTakipSistemi:
                 return
 
         parent.bind("<Configure>", yerlestir)
-        self.root.after(50, yerlestir)
+        self._track_after(self.root, 50, yerlestir)
         return olusan_butonlar
+
+    def _track_after(self, widget, delay_ms, callback):
+        try:
+            after_id = widget.after(delay_ms, callback)
+            if hasattr(self, "_tracked_after_ids"):
+                self._tracked_after_ids.append((widget, after_id))
+            return after_id
+        except tk.TclError:
+            return None
+
+    def _cancel_tracked_afters(self):
+        for widget, after_id in list(getattr(self, "_tracked_after_ids", [])):
+            try:
+                if widget.winfo_exists():
+                    widget.after_cancel(after_id)
+            except tk.TclError:
+                pass
+        self._tracked_after_ids = []
 
     def kaydirilabilir_sayfa(self, parent, padx=28, pady=22):
         kapsayici = tk.Frame(parent, bg=self.renkler["arkaplan"])
@@ -1375,6 +1394,7 @@ class HayvanTakipSistemi:
 
     def aktif_zamanlayicilari_durdur(self):
         self.uyari_thread_running = False
+        self._cancel_tracked_afters()
         for after_attr in ("_uyari_after_id", "_saat_after_id", "_baslangic_after_id", "_puls_after_id", "_otomatik_baglanti_after_id"):
             after_id = getattr(self, after_attr, None)
             if after_id:
@@ -1581,7 +1601,7 @@ class HayvanTakipSistemi:
         sifre_entry.bind("<Return>", lambda event: giris())
         kullanici_entry.bind("<Return>", lambda event: sifre_entry.focus_set())
         pencereyi_ortala()
-        self.root.after(100, kullanici_entry.focus_force)
+        self._track_after(self.root, 100, kullanici_entry.focus_force)
 
         try:
             self.root.wait_variable(tamam)
@@ -2009,7 +2029,7 @@ class HayvanTakipSistemi:
                 sag.grid(row=0, column=1, sticky="nsew", padx=(9, 0), pady=0)
 
         govde.bind("<Configure>", admin_govde_yerlestir)
-        self.root.after(50, admin_govde_yerlestir)
+        self._track_after(self.root, 50, admin_govde_yerlestir)
 
         tk.Label(sol, text="Suruye Giris", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w")
         tk.Label(sol, text="Tum kayitlari gorebilir veya belirli bir ciftlige odaklanabilirsiniz.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9), wraplength=320, justify="left").pack(anchor="w", pady=(4, 14))
@@ -3383,7 +3403,7 @@ class HayvanTakipSistemi:
                 return
 
         self.root.bind("<Configure>", header_aksiyon_yerlestir, add="+")
-        self.root.after(80, header_aksiyon_yerlestir)
+        self._track_after(self.root, 80, header_aksiyon_yerlestir)
 
         #  BİLDİRİM BANDI 
         self.uyari_frame = tk.Frame(self.root, bg=self.renkler["band_normal_bg"], height=38)
@@ -3457,7 +3477,7 @@ class HayvanTakipSistemi:
                 return
 
         self.custom_tab_bar.bind("<Configure>", tablari_yerlestir)
-        self.root.after(50, tablari_yerlestir)
+        self._track_after(self.root, 50, tablari_yerlestir)
             
         self.notebook.bind('<<NotebookTabChanged>>', self._update_custom_tabs)
         self._update_custom_tabs() # Başlangıçta ilk sekmeyi renklendir
@@ -5604,7 +5624,7 @@ class HayvanTakipSistemi:
                     pencere.destroy()
                 except tk.TclError:
                     pass
-                self.root.after(60, lambda: self.hayvan_detay_penceresi(kupe_no))
+                self._track_after(self.root, 60, lambda: self.hayvan_detay_penceresi(kupe_no))
             else:
                 messagebox.showinfo("Fotoğraf", f"{gorunen} için fotoğraf eklendi.", parent=parent)
         except Exception as e:
@@ -6490,6 +6510,7 @@ class HayvanTakipSistemi:
     def uygulamayi_kapat(self):
         self._kapanis_istegi = True
         self.uyari_thread_running = False
+        self._cancel_tracked_afters()
         for after_attr in ("_uyari_after_id", "_saat_after_id", "_baslangic_after_id", "_puls_after_id", "_otomatik_baglanti_after_id"):
             after_id = getattr(self, after_attr, None)
             if after_id:
