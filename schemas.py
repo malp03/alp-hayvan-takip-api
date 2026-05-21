@@ -201,6 +201,7 @@ class HayvanBase(AlpModel):
     arsivli: bool = False
     arsiv_tarihi: Optional[str] = None
     foto_data: Optional[str] = None
+    foto_datas: List[str] = Field(default_factory=list)
     foto_url: Optional[str] = None
     son_guncelleme: Optional[str] = None
     tohumlamalar: List[TohumlamaCreate] = Field(default_factory=list)
@@ -240,6 +241,7 @@ class HayvanUpdate(AlpModel):
     arsivli: Optional[bool] = None
     arsiv_tarihi: Optional[str] = None
     foto_data: Optional[str] = None
+    foto_datas: Optional[List[str]] = None
     foto_url: Optional[str] = None
     son_guncelleme: Optional[str] = None
     tohumlamalar: Optional[List[TohumlamaCreate]] = None

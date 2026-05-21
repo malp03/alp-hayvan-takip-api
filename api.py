@@ -487,6 +487,14 @@ def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -
     if sonuc["arsiv_tarihi"]:
         parse_tarih(sonuc["arsiv_tarihi"], "Arşiv tarihi")
     sonuc["foto_data"] = bos_yoksa_none(sonuc.get("foto_data"))
+    foto_datas = sonuc.get("foto_datas") or []
+    if not isinstance(foto_datas, list):
+        foto_datas = []
+    foto_datas = [foto for foto in foto_datas if foto]
+    if sonuc["foto_data"] and sonuc["foto_data"] not in foto_datas:
+        foto_datas.insert(0, sonuc["foto_data"])
+    sonuc["foto_datas"] = foto_datas[:3]
+    sonuc["foto_data"] = sonuc["foto_datas"][0] if sonuc["foto_datas"] else None
     sonuc["foto_url"] = bos_yoksa_none(sonuc.get("foto_url"))
     for alan, etiket in [
         ("dogum_tarihi", "Doğum tarihi"),

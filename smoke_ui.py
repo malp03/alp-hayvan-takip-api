@@ -65,6 +65,18 @@ def widget_texts(widget):
     return texts
 
 
+def assert_main_layout(app):
+    app.root.geometry("1280x820")
+    app.root.update_idletasks()
+    app.root.update()
+    assert hasattr(app, "custom_tab_bar"), "custom tab bar missing"
+    assert hasattr(app, "notebook"), "notebook missing"
+    assert len(getattr(app, "tab_buttons", [])) >= 7, "main tabs missing"
+    tab_y = app.custom_tab_bar.winfo_rooty()
+    notebook_y = app.notebook.winfo_rooty()
+    assert tab_y < notebook_y, f"tab bar is below content: tab_y={tab_y}, notebook_y={notebook_y}"
+
+
 def main():
     tmp = prepare_local_appdata()
     messagebox = patch_dialogs()
@@ -79,6 +91,7 @@ def main():
 
     app = appmod.HayvanTakipSistemi()
     try:
+        assert_main_layout(app)
         app.root.withdraw()
         assert app.api_modu is False
 
@@ -94,6 +107,9 @@ def main():
         created = app.hayvanlar[created_id]
         assert created["resmi_kupe_no"] == "TR001"
         assert created["ciftlik_kupe_no"] == "C001"
+        app.hayvan_fotograflari_ata(created, ["foto-1", "foto-2", "foto-3", "foto-4"])
+        assert len(created["foto_datas"]) == 3
+        assert created["foto_data"] == "foto-1"
 
         app.hayvanlar["arch"] = make_animal(
             id="arch",
@@ -149,7 +165,7 @@ def main():
         ]
         assert profiles, "profile window not opened"
         profile_text = "\n".join(widget_texts(profiles[-1]))
-        for expected in ("Kimlik ve Durum", "\u00d6zet", "Tohumlama Ge\u00e7mi\u015fi", "Do\u011fum ve Yavru Ge\u00e7mi\u015fi", "A\u015f\u0131 ve Prosed\u00fcrler"):
+        for expected in ("Foto\u011fraflar", "Kimlik ve Durum", "\u00d6zet", "Tohumlama Ge\u00e7mi\u015fi", "Do\u011fum ve Yavru Ge\u00e7mi\u015fi", "A\u015f\u0131 ve Prosed\u00fcrler"):
             assert expected in profile_text, expected
         profiles[-1].destroy()
 

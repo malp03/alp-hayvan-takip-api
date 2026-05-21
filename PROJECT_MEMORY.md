@@ -1,0 +1,234 @@
+# ALP Ziraat Proje Hafizasi
+
+Son guncelleme: 21 Mayis 2026
+
+Bu dosya projenin mevcut halini, yapilan degisiklikleri, testleri ve dagitim notlarini hatirlamak icin tutulur. Yeni bir isleme baslamadan once burayi oku.
+
+## Proje Ozeti
+
+ALP Ziraat Hayvan Takip uygulamasi, ciftliklerin suru kayitlarini yonetmesi icin yazilmis bir masaustu uygulamasidir.
+
+- Masaustu uygulamasi: `alp_ziraat_hayvan_takip.py`
+- Arayuz: Tkinter tabanli koyu dashboard tasarimi
+- Online API: FastAPI
+- Online veritabani: Render uzerinde calisan API'nin baglandigi online database
+- Yerel veri: Windows `APPDATA/ALP Ziraat/HayvanTakip` altinda cache, offline oturum, bekleyen senkron, islem gecmisi ve ayarlar
+- Hedef: Desktop tarafini stabil hale getirip Android uygulamaya ayni API ile gecmek
+
+## Ana Dosyalar
+
+- `alp_ziraat_hayvan_takip.py`: Desktop uygulamanin ana dosyasi. UI, login, offline mod, senkron, admin paneli, hayvan kayitlari burada.
+- `api.py`: Lokal/API kaynak dosyasi.
+- `api_deploy/`: Render'a deploy edilecek API dosyalari.
+- `models.py`, `schemas.py`, `database.py`, `init_db.py`: API model, schema, database ve baslangic islemleri.
+- `alp_ziraat_export.py`: Excel/PDF export yardimcilari.
+- `alp_ziraat_is_kurallari.py`: Hayvan durum/uyari gibi ortak is kurallari.
+- `installer/`: Kurulum dosyasi uretimi ve install/uninstall scriptleri.
+- `tools/`: Smoke testler, API testleri, server backup araclari.
+- `.github/workflows/daily-api-backup.yml`: Gunluk API yedegi alan GitHub Actions workflow'u.
+- `ANDROID_API_CONTRACT.md`: Android tarafina geciste API kontrati.
+- `SERVER_BACKUPS.md`: Sunucu yedek sistemi notlari.
+- `DEPLOY_RENDER.md`: Render deploy talimatlari.
+
+## Kullanici ve Ciftlik Modeli
+
+- Admin kullanici tum ciftlikleri, kullanicilari ve kayitlari gorebilir/duzenleyebilir.
+- Normal kullanici sadece kendi ciftliginin suru kayitlarini gorebilir/duzenleyebilir.
+- Admin panelinde ciftlik yonetimi, kullanici yonetimi, yeni kullanici olusturma, islem gecmisi, online yedek indirme, sifre degistirme ve senkron islemleri vardir.
+- Ciftlik silinirse o ciftlige ait hayvanlar da databaseden tamamen silinir; bu yuzden silme isleminde onay uyarisi vardir.
+- Kullanici silme ve ciftlik silme admin yetkisi ister.
+- Hassas bilgi: Admin sifresi gibi bilgiler repo notlarina yazilmamalidir.
+
+## Online API ve Database
+
+- Desktop ve ileride Android ayni API'ye baglanacak.
+- API adresi su an Render uzerinden kullaniliyor: `https://alp-hayvan-takip-api.onrender.com`
+- Database online oldugu icin baska bilgisayar veya Android tarafinda yapilan degisiklikler ayni merkezi kaynaga gider.
+- API degisirse Render redeploy gerekir.
+- Sadece desktop UI degisirse Render redeploy gerekmez; yeni EXE/setup uretmek yeterlidir.
+
+## Offline ve Senkron Mantigi
+
+- Internet yokken uygulama son basarili kullanici oturumuyla offline acilabilir.
+- Offline durumda hayvan ekleme, duzenleme ve silme yerel bekleyen senkron kuyruguna alinir.
+- Internet geri geldiginde `Senkronize` ile bekleyen degisiklikler API'ye gonderilir.
+- Otomatik baglanti kontrolu eklendi; uygulama periyodik olarak API health kontrol eder.
+- Degisikliklerde `updated_at` mantigi kullanilir: online ve offline farkli cihazlarda degisiklik varsa daha yeni degistirilme tarihi kazanmalidir.
+- Offline modda ciftlik/kullanici/sifre/online gecmis gibi guvenlik ve merkezi veri isteyen islemler kapali tutulur.
+
+## Islem Gecmisi
+
+- Islem gecmisi kullanici bazli degil, ayni ciftlik icindeki herkesin ortak gorebilecegi sekilde tasarlandi.
+- Adminin o ciftlikte yaptigi degisiklikler de ilgili ciftligin gecmisinde gorunur.
+- Iki normal kullanici ayni ciftlikteyse birbirlerinin yaptigi islemleri ayni gecmiste gorebilir.
+- Admin tum ciftliklerin gecmisini filtreleyebilir.
+
+## UI / UX Degisiklikleri
+
+- Eski koyu yesil/klasik gorunum yerine modern koyu dashboard tasarimina gecildi.
+- Beyaz tema ve tema degistirme butonu kaldirildi; uygulama sabit koyu tema ile calisir.
+- Header sade hale getirildi: istatistik, Online/Offline durumu ve ana aksiyonlar.
+- API adresi normal ciftlik ekraninda gereksiz gorunmesin diye sade durum metnine indirildi.
+- `Senkronize` ve baglanti yenileme mantigi birlestirildi.
+- Header butonlari responsive hale getirildi; dar ekranda alt satira duser.
+- Admin paneline scroll eklendi; kucuk pencerede alttaki butonlara erisilebilir.
+- Admin panelinde ciftlik listesine cift tiklayinca ilgili ciftlige girme eklendi.
+- Login ekranina logo eklendi, butonlar `Giris` ve `Cikis` olarak duzenlendi.
+- Pencere ve kisayol ikonlari logo bozulmasin diye iyilestirildi.
+- Hayvan duzenleme popup'inda kaydet butonu daha uygun konuma alindi.
+- Popup pencerelerin modern koyu tema ile uyumlu olmasi icin duzenlemeler yapildi.
+
+## Hayvan Kayit ve Profil Ozellikleri
+
+- Hayvan kaydi: resmi kupe no, ciftlik kupe no, dogum tarihi, cins, anne kupe no.
+- Hayvan listesi filtreleri: aktif, arsivli vb.
+- Arsivli hayvani arsivden cikarma eklendi.
+- Hayvan profilini zenginlestirme yapildi: kimlik/durum, ozet, tohumlama gecmisi, dogum-yavru gecmisi, asi/prosedur gecmisi.
+- Hayvan profilinin ust kismi kompakt hale getirildi: buyuk bos header kaldirildi, profil basligi/rozetler/aksiyon bar ayrildi.
+- Hayvan profilinden `Tohumla` akisi eklendi: hayvan profilindeyken tohumlama ekranina gidip hayvan otomatik secili gelir.
+- Tohumlanamayacak hayvanlarda, ornegin dana/erkek gibi uygun olmayan cinslerde, sag tik menude tohumlama secenegi cikmamali.
+- Hayvanlara fotograf ekleme destegi eklendi.
+- Onceden fotograf eklenmeyen hayvanlarin profilinden sonradan fotograf eklenebilir.
+- Hayvan fotograflari profil ekraninda gosterilmelidir.
+- Hayvan basina en fazla 3 fotograf desteklenir. Eski `foto_data` alanı korunur, yeni coklu alan `foto_datas` listesidir. Ilk fotograf geriye donuk uyumluluk icin `foto_data` olarak da tutulur.
+
+## Dogum ve Yavru Akisi
+
+- Yeni dogum kaydinda yavru bilgileri alinirken yeni kupe numarasi degisikliklerinin sorulmasi gerekiyor.
+- Dogum/yavru popup butonlari gorunur ve modern olmalidir.
+- Bu alan Android tarafina gecmeden once tekrar test edilmesi gereken onemli akislar arasinda.
+
+## Login ve Donma Duzeltmeleri
+
+Son kritik duzeltme login ekranindaki `Yanit Vermiyor` problemiydi.
+
+Yapilanlar:
+
+- Login sirasindaki API istegi ana Tkinter thread'inden ayrildi.
+- Login islemi arka planda `threading.Thread` ile calisir.
+- Worker thread sonucu dogrudan Tkinter'a yazmaz; `queue.Queue` ile UI thread'e aktarir.
+- UI thread `after` ile kuyrugu kontrol eder ve sonucu ekrana yansitir.
+- Giris sirasinda inputlar ve giris butonu kilitlenir, pencere yine yanit vermeye devam eder.
+- Buton animasyonundaki timer bug'i duzeltildi. `_animate_canvas_bg` icinde `after` yanlislikla buton parcalari kadar kez planlaniyordu; artik frame basina tek kez planlanir.
+- `Bu bilgisayari tani` otomatik giris denemelerindeki timeoutlar kisaltildi.
+- `tools/smoke_login_responsive.py` eklendi. Bu test login istegini bilerek geciktirir ve pencerenin yanit vermeye devam ettigini dogrular.
+
+## Testler
+
+Tam test komutu:
+
+```powershell
+python tools\run_smoke_tests.py
+```
+
+Bu komut sunlari calistirir:
+
+- Python syntax check
+- Pyflakes static check
+- Desktop UI smoke
+- Login UI smoke
+- Login responsiveness smoke
+- API HTTP smoke
+
+Son bilinen durum: 21 Mayis 2026 tarihinde tum smoke testler gecti.
+
+Tekil testler:
+
+```powershell
+python tools\smoke_ui.py
+python tools\smoke_login.py
+python tools\smoke_login_responsive.py
+python tools\smoke_api.py
+```
+
+## Build ve Kurulum
+
+EXE uretimi:
+
+```powershell
+python -m PyInstaller alp_ziraat_hayvan_takip.spec --noconfirm
+```
+
+Kurulum paketi uretimi:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\make_installer.ps1
+```
+
+Son uretilen dosyalar:
+
+- `dist/ALP_Ziraat_Hayvan_Takip.exe`
+- `dist/ALP_Ziraat_Hayvan_Takip_Setup.exe`
+- `dist/ALP_Ziraat_Hayvan_Takip_Kurulum.zip`
+
+Kullanici masaustu kisayolundan eski kurulu EXE'yi calistiriyorsa eski hatalari gormeye devam edebilir. Yeni duzeltmelerin kullanilmasi icin yeni `Setup.exe` ile tekrar kurulum yapilmalidir.
+
+## GitHub ve Release Notlari
+
+Bu bilgisayarda `git` komutu kurulu gorunmeyebilir; bu bir kod sorunu degildir. GitHub'a dosyalar web arayuzunden yuklenebilir veya bilgisayara Git kurulabilir.
+
+Desktop degisikligi varsa genelde push edilecek dosyalar:
+
+- `alp_ziraat_hayvan_takip.py`
+- Degisen `tools/*.py` dosyalari
+- Degisen `installer/*` dosyalari
+- Degisen dokumanlar
+
+API degisikligi varsa ayrica:
+
+- `api.py`
+- `api_deploy/`
+- `models.py`
+- `schemas.py`
+- `database.py`
+- `init_db.py`
+- `requirements-api.txt`
+- `render.yaml`
+
+Release icin GitHub Releases'a genelde sunlar yuklenir:
+
+- `dist/ALP_Ziraat_Hayvan_Takip_Setup.exe`
+- Istege bagli: `dist/ALP_Ziraat_Hayvan_Takip_Kurulum.zip`
+
+Yeni API kodu push edildiyse Render'da:
+
+```text
+Manual Deploy > Deploy latest commit
+```
+
+Sonra kontrol:
+
+```text
+https://alp-hayvan-takip-api.onrender.com/api/health
+```
+
+## Android Hazirlik
+
+Android uygulama desktop ile ayni merkezi API'yi kullanacak.
+
+Android icin onemli hazirliklar:
+
+- API kontrati `ANDROID_API_CONTRACT.md` icinde tutulur.
+- Mobil login ayni kullanici/ciftlik/admin modelini kullanmali.
+- Hayvan listesi, profil, fotograf ve tohumlama akislarinda desktop davranisi referans alinmali.
+- Kamera ile kupe numarasi tarama ve galeriden kupe okuma ileride Android tarafinda eklenecek.
+- Mobilde hayvan sekmesinde tarama sonrasi direkt ilgili profile gitme isteniyor.
+
+## Bilinen Oncelikler / Sonraki Iyilestirmeler
+
+- Dashboard ana sayfayi daha bilgi dolu yapmak.
+- Raporlari guclendirmek.
+- Islem gecmisini daha detayli ve kullanisli yapmak.
+- Dogum/yavru popup akislarini tekrar test edip guzellestirmek.
+- Fotograf ekleme/profilde gosterme akisini gercek kullanici senaryosuyla tekrar test etmek.
+- Android'e gecmeden once API kontratini son kez sabitlemek.
+- EXE kurulum sonrasi masaustu kisayolu ve ikon davranisini tekrar smoke test etmek.
+
+## Hata Ararken Ilk Bakilacak Yerler
+
+- Login donuyorsa: `api_giris_penceresi`, `api_giris_yap`, `taninan_bilgisayar_giris_dene`, `tools/smoke_login_responsive.py`
+- Sekmeler alta kaciyorsa: `ana_interface_olustur`, `custom_tab_bar`, `notebook.pack`
+- API yavas/cevap vermiyorsa: Render health endpoint ve `api_istek`
+- Offline/senkron sorunlari: `bekleyen_senkron_*`, `api_senkronize_et_ui`, `otomatik_baglanti_kontrol`
+- Admin paneli sorunlari: `admin_yonetim_merkezi`, ciftlik/kullanici yonetim popup'lari
+- Fotograf sorunlari: `foto_data_olustur`, `foto_data_to_image`, hayvan profil penceresi

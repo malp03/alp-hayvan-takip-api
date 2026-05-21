@@ -5881,12 +5881,23 @@ class HayvanTakipSistemi:
         tk.Label(foto_frame, text="Fotoğraf", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).grid(row=0, column=0, sticky="nw", padx=(0, 20))
         foto_preview = tk.Label(foto_frame, text="Fotoğraf yok", bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], width=22, height=5, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
         foto_preview.grid(row=0, column=1, sticky="w")
-        self.foto_onizleme_guncelle(foto_preview, hayvan.get('foto_data'), max_size=(160, 100))
+        duzenle_fotograflar = self.hayvan_fotograflari(hayvan)
+        self.foto_onizleme_guncelle(foto_preview, duzenle_fotograflar[0] if duzenle_fotograflar else None, max_size=(160, 100))
+        foto_sayac_label = tk.Label(foto_frame, text=f"{len(duzenle_fotograflar)}/3 fotoğraf", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=('Segoe UI', 9, 'bold'))
+        foto_sayac_label.grid(row=1, column=1, sticky="w", pady=(6, 0))
         foto_btn = tk.Frame(foto_frame, bg=self.renkler["kart_arkaplan"])
         foto_btn.grid(row=0, column=2, sticky="e", padx=(14, 0))
         self.themed_widgets.append((foto_btn, 'kart'))
 
+        def duzenle_foto_onizleme():
+            fotograflar = self.hayvan_fotograflari(hayvan)
+            self.foto_onizleme_guncelle(foto_preview, fotograflar[0] if fotograflar else None, max_size=(160, 100))
+            foto_sayac_label.config(text=f"{len(fotograflar)}/3 fotoğraf")
+
         def foto_sec():
+            fotograflar = self.hayvan_fotograflari(hayvan)
+            if len(fotograflar) >= 3:
+                return messagebox.showwarning("Fotoğraf", "Bu hayvan için en fazla 3 fotoğraf eklenebilir.", parent=pencere)
             dosya = filedialog.askopenfilename(
                 title="Hayvan fotoğrafı seç",
                 parent=pencere,
@@ -5895,21 +5906,19 @@ class HayvanTakipSistemi:
             if not dosya:
                 return
             try:
-                hayvan['foto_data'] = self.foto_data_olustur(dosya)
-                hayvan['foto_url'] = None
+                self.hayvan_fotograflari_ata(hayvan, fotograflar + [self.foto_data_olustur(dosya)])
                 hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                self.foto_onizleme_guncelle(foto_preview, hayvan.get('foto_data'), max_size=(160, 100))
+                duzenle_foto_onizleme()
             except Exception as e:
                 messagebox.showerror("Fotoğraf", f"Fotoğraf eklenemedi:\n{e}", parent=pencere)
 
         def foto_kaldir():
-            hayvan['foto_data'] = None
-            hayvan['foto_url'] = None
+            self.hayvan_fotograflari_ata(hayvan, [])
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.foto_onizleme_guncelle(foto_preview, None, max_size=(160, 100))
+            duzenle_foto_onizleme()
 
-        self.modern_buton(foto_btn, "Fotoğraf Seç", foto_sec, purpose='primary', small=True).pack(pady=(0, 6))
-        self.modern_buton(foto_btn, "Kaldır", foto_kaldir, purpose='default', small=True).pack()
+        self.modern_buton(foto_btn, "Fotoğraf Ekle", foto_sec, purpose='primary', small=True).pack(pady=(0, 6))
+        self.modern_buton(foto_btn, "Tümünü Kaldır", foto_kaldir, purpose='default', small=True).pack()
 
         def genel_kaydet():
             yeni_resmi = resmi_kupe_entry.get().strip().upper()
