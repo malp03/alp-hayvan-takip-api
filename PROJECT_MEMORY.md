@@ -241,6 +241,21 @@ Android icin onemli hazirliklar:
 - Dashboard guclendirildi: kompakt responsive metrik kartlari, `Yaklaşan İşler`, `Son İşlemler`, calisilan ciftlik/baglanti/senkron ve kritik durum icin `Oncelik Ozeti` eklendi. Onceki buyuk `Hizli Islemler` blogu kaldirildi.
 - Ana sekme butonlari `tab=True` boyutu ile biraz buyutuldu; kucuk aksiyon butonlari ayni kalir.
 - Rapor grafik kartlarinda halka grafik solda, aciklama/legend yazilari sagda kalir; legend genisligi sabitlenip yazilar wraplength ile kirpilmeyecek sekilde ayarlandi.
+- Excel/PDF export sistemi profesyonellestirildi: marka basligi, alt aciklama, tarih/kayit sayisi/metadata, zebra tablo, wrap text, Excel filtre/freeze pane/table ve PDF sayfa altligi eklendi.
+- Hayvan listesi export'unda gizli `ID` kolonu artik cikmaz; sadece kullanicinin gordugu temiz kolonlar export edilir.
+- Ana ekrandaki `Yedekten Yukle` butonu kaldirildi. O JSON'lar kullanicinin disari aktardigi dosyalar degil, yerel modda veri kaydindan once uygulamanin kendi aldigi otomatik kurtarma yedekleridir.
+- `tools/smoke_exports.py` eklendi ve `tools/run_smoke_tests.py` icine baglandi; Excel/PDF export dosyasi uretimi smoke test ile kontrol edilir.
+
+## 22 Mayis 2026 Zorunlu Guncelleme Akisi
+
+- Desktop uygulama surumu `alp_ziraat_hayvan_takip.py` icindeki `APP_VERSION` sabitinden okunur. Yeni release cikarken bu deger GitHub tag'iyle ayni olmalidir, ornek: `APP_VERSION = "1.9.0"` ve release tag `v1.9.0`.
+- Kurulu EXE calistiginda login tamamlanip ana ekran acildiktan sonra GitHub latest release kontrol edilir. Kaynak koddan/testten calisirken kontrol varsayilan olarak kapali; EXE icinde aktiftir. Test icin `ALP_FORCE_UPDATE_CHECK=1`, kapatmak icin `ALP_SKIP_UPDATE_CHECK=1` kullanilir.
+- Latest release mevcut surumden yeniyse modal popup acilir: kullanici uygulamayi kullanmadan once `Guncelle`ye basmak zorundadir veya uygulamadan cikar.
+- Guncelleme popup'i GitHub release asset'leri icinden once `ALP_Ziraat_Hayvan_Takip_Setup.exe` dosyasini arar; yoksa `setup` iceren `.exe`, o da yoksa herhangi `.exe` asset'e duser.
+- Uygulama setup dosyasini temp klasore indirir, release notlarini `bekleyen_guncelleme_notu.json` olarak AppData'ya yazar, setup'i `--launch --wait-pid <pid>` ile calistirir ve kapanir.
+- `installer/setup_installer.py` `--wait-pid` gelirse eski uygulama kapanana kadar bekler, EXE'yi kurar, `--launch` gelirse yeni uygulamayi tekrar baslatir.
+- Yeni surum acildiginda AppData'daki bekleyen release notu, `APP_VERSION` ile eslesiyorsa kullaniciya `Uygulama Guncellendi` penceresi olarak gosterilir ve sonra dosya temizlenir.
+- `tools/smoke_update.py` eklendi ve `tools/run_smoke_tests.py` icine baglandi; surum karsilastirma, asset secimi ve release notu kaydet/yukle akisi test edilir.
 - Hayvan Listesi filtre/arama alani sabit yukseklikten cikarildi; dar/orta genislikte butonlar alt satira akar. `Temizle` ve `Yenile` butonlari gorunur kalacak sekilde yerlestirildi.
 - Ana sekme butonlari kompakt hale getirildi; 1280 genislikte sekmeler sagdan tasmamali.
 - Kullanilmayan eski `hayvan_detay_penceresi_eski` blogu ve islevsiz `combo_secimi` callback'i kaldirildi.

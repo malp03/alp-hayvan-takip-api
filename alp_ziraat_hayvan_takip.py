@@ -9,9 +9,12 @@ import hmac
 import io
 import os
 import queue
+import re
 import shutil
 import secrets
 import socket
+import subprocess
+import tempfile
 import threading
 import uuid
 import urllib.error
@@ -40,7 +43,23 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
+APP_VERSION = "1.9.0"
+GITHUB_REPO = "malp03/alp-hayvan-takip-api"
+GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
 # --------------------------------------------------------------------
+
+
+def surum_parcalari(surum):
+    parcalar = re.findall(r"\d+", str(surum or ""))
+    sayilar = [int(p) for p in parcalar[:3]]
+    while len(sayilar) < 3:
+        sayilar.append(0)
+    return tuple(sayilar)
+
+
+def surum_daha_yeni_mi(yeni_surum, mevcut_surum):
+    return surum_parcalari(yeni_surum) > surum_parcalari(mevcut_surum)
 
 # --- Exe'de dosya yolunu doğru bulmak için fonksiyon ---
 def resource_path(relative_path):
@@ -138,6 +157,8 @@ class HayvanTakipSistemi:
             self.veri_klasoru_hazirla()
             self.api_token = None
             self.api_kullanici = None
+            self._pending_update_notes = None
+            self._guncelleme_kontrol_edildi = False
             self.yeni_hayvan_foto_data = None
             self.yeni_hayvan_foto_datas = []
             self._foto_referanslari = []
@@ -167,6 +188,8 @@ class HayvanTakipSistemi:
             self._kapanis_istegi = False
             self.ana_interface_olustur()
             self.uyari_sistemi_baslat()
+            self._pending_update_notes = self.guncelleme_notu_yukle()
+            self._track_after(self.root, 900, self.guncelleme_baslangic_akisi)
             self._baslatma_tamam = True
 
         except Exception as e:
@@ -938,6 +961,7 @@ class HayvanTakipSistemi:
         self._api_son_hata = None
         self._offline_kullanici_adi = None
         self._offline_sifre = None
+        self.pending_update_notes_file = os.path.join(self.data_dir, "bekleyen_guncelleme_notu.json")
         self.bekleyen_senkron = self.bekleyen_senkron_yukle()
         self.admin_onbellek = self.admin_onbellek_yukle()
 
@@ -966,6 +990,347 @@ class HayvanTakipSistemi:
             "api_ayarlar",
             "API Ayar Kayıt Hatası"
         )
+
+    def guncelleme_kontrolu_aktif_mi(self):
+        if os.environ.get("ALP_SKIP_UPDATE_CHECK") == "1":
+            return False
+        if os.environ.get("ALP_FORCE_UPDATE_CHECK") == "1":
+            return True
+        return bool(getattr(sys, "frozen", False))
+
+    def guncelleme_baslangic_akisi(self):
+        if getattr(self, "_kapanis_istegi", False):
+            return
+        if self._pending_update_notes:
+            self.guncelleme_notu_penceresi(self._pending_update_notes, on_close=self.guncelleme_kontrolunu_baslat)
+        else:
+            self.guncelleme_kontrolunu_baslat()
+
+    def guncelleme_kontrolunu_baslat(self):
+        if getattr(self, "_kapanis_istegi", False) or getattr(self, "_guncelleme_kontrol_edildi", False):
+            return
+        if not self.guncelleme_kontrolu_aktif_mi():
+            return
+        self._guncelleme_kontrol_edildi = True
+        q = queue.Queue()
+
+        def worker():
+            try:
+                release = self.guncelleme_latest_release_getir()
+                q.put(("ok", release))
+            except Exception as e:
+                q.put(("hata", e))
+
+        def poll():
+            if getattr(self, "_kapanis_istegi", False):
+                return
+            try:
+                durum, veri = q.get_nowait()
+            except queue.Empty:
+                self._track_after(self.root, 150, poll)
+                return
+            if durum == "hata":
+                self.guncelleme_kontrol_hatasi_penceresi(veri)
+                return
+            if self.guncelleme_var_mi(veri):
+                self.guncelleme_zorunlu_penceresi(veri)
+
+        threading.Thread(target=worker, daemon=True).start()
+        poll()
+
+    def guncelleme_latest_release_getir(self, timeout=10):
+        req = urllib.request.Request(
+            GITHUB_LATEST_RELEASE_API,
+            headers={
+                "User-Agent": f"ALP-Ziraat-Hayvan-Takip/{APP_VERSION}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            if response.status >= 400:
+                raise RuntimeError(f"GitHub release kontrolü başarısız: HTTP {response.status}")
+            return json.loads(response.read().decode("utf-8"))
+
+    def guncelleme_var_mi(self, release):
+        if not isinstance(release, dict) or release.get("draft"):
+            return False
+        tag = release.get("tag_name") or release.get("name") or ""
+        return surum_daha_yeni_mi(tag, APP_VERSION)
+
+    def guncelleme_asset_bul(self, release):
+        assets = release.get("assets") or []
+        for asset in assets:
+            if str(asset.get("name", "")).lower() == UPDATE_SETUP_ASSET.lower():
+                return asset
+        for asset in assets:
+            ad = str(asset.get("name", "")).lower()
+            if ad.endswith(".exe") and "setup" in ad:
+                return asset
+        for asset in assets:
+            if str(asset.get("name", "")).lower().endswith(".exe"):
+                return asset
+        return None
+
+    def guncelleme_setup_indir(self, release):
+        asset = self.guncelleme_asset_bul(release)
+        if not asset:
+            raise RuntimeError(
+                "Son GitHub release içinde kurulum dosyası bulunamadı.\n"
+                f"Release asset olarak {UPDATE_SETUP_ASSET} yüklenmeli."
+            )
+        url = asset.get("browser_download_url")
+        if not url:
+            raise RuntimeError("Release asset indirme bağlantısı boş.")
+
+        hedef_klasor = os.path.join(tempfile.gettempdir(), "ALP_Ziraat_Update")
+        os.makedirs(hedef_klasor, exist_ok=True)
+        hedef = os.path.join(hedef_klasor, UPDATE_SETUP_ASSET)
+        gecici = hedef + ".download"
+
+        req = urllib.request.Request(url, headers={"User-Agent": f"ALP-Ziraat-Hayvan-Takip/{APP_VERSION}"})
+        with urllib.request.urlopen(req, timeout=180) as response, open(gecici, "wb") as f:
+            shutil.copyfileobj(response, f)
+        if os.path.exists(hedef):
+            os.remove(hedef)
+        os.replace(gecici, hedef)
+        return hedef
+
+    def guncelleme_setup_calistir(self, setup_path):
+        args = [setup_path, "--launch", "--wait-pid", str(os.getpid())]
+        subprocess.Popen(args, cwd=os.path.dirname(setup_path), close_fds=True)
+
+    def guncelleme_notu_kaydet(self, release):
+        veri = {
+            "version": release.get("tag_name") or release.get("name") or "",
+            "title": release.get("name") or release.get("tag_name") or "Güncelleme",
+            "body": release.get("body") or "Bu sürüm için açıklama girilmemiş.",
+            "url": release.get("html_url") or "",
+            "saved_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        }
+        with open(self.pending_update_notes_file, "w", encoding="utf-8") as f:
+            json.dump(veri, f, ensure_ascii=False, indent=2)
+
+    def guncelleme_notu_yukle(self):
+        yol = getattr(self, "pending_update_notes_file", "")
+        if not yol or not os.path.exists(yol):
+            return None
+        try:
+            with open(yol, "r", encoding="utf-8-sig") as f:
+                veri = json.load(f) or {}
+            if surum_parcalari(veri.get("version")) != surum_parcalari(APP_VERSION):
+                return None
+            return veri
+        except Exception:
+            return None
+
+    def guncelleme_notu_temizle(self):
+        try:
+            if os.path.exists(getattr(self, "pending_update_notes_file", "")):
+                os.remove(self.pending_update_notes_file)
+        except Exception:
+            pass
+
+    def guncelleme_text_alani(self, parent, metin, yukseklik=12):
+        frame = tk.Frame(parent, bg=self.renkler["kart_arkaplan"])
+        frame.pack(fill="both", expand=True, padx=20, pady=(8, 12))
+        text = tk.Text(
+            frame,
+            height=yukseklik,
+            wrap="word",
+            bg=self.renkler["input_bg"],
+            fg=self.renkler["yazi_rengi"],
+            insertbackground=self.renkler["yazi_rengi"],
+            relief="flat",
+            padx=12,
+            pady=10,
+            font=("Segoe UI", 10),
+        )
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        text.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+        text.insert("1.0", metin or "-")
+        text.configure(state="disabled")
+        return text
+
+    def guncelleme_notu_penceresi(self, note, on_close=None):
+        pencere = tk.Toplevel(self.root)
+        pencere.title("Uygulama Güncellendi")
+        pencere.geometry("720x520")
+        pencere.minsize(560, 420)
+        pencere.configure(bg=self.renkler["arkaplan"])
+        pencere.transient(self.root)
+        pencere.grab_set()
+        self.pencere_ortala(pencere, self.root)
+
+        kart = self.modern_kart(pencere, accent=self.renkler["button_success_bg"])
+        kart.pack(fill="both", expand=True, padx=18, pady=18)
+        tk.Label(
+            kart,
+            text=f"Güncelleme tamamlandı: {note.get('title') or note.get('version')}",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 18, "bold"),
+            wraplength=640,
+            justify="left",
+        ).pack(anchor="w", padx=20, pady=(18, 6))
+        tk.Label(
+            kart,
+            text="Bu sürümde yapılan değişiklikler:",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 10),
+        ).pack(anchor="w", padx=20)
+        self.guncelleme_text_alani(kart, note.get("body") or "-", yukseklik=13)
+
+        def kapat():
+            self.guncelleme_notu_temizle()
+            try:
+                pencere.grab_release()
+            except tk.TclError:
+                pass
+            pencere.destroy()
+            if on_close:
+                on_close()
+
+        self.modern_buton(kart, "Tamam", kapat, purpose="primary", width=16).pack(anchor="e", padx=20, pady=(0, 18))
+        pencere.protocol("WM_DELETE_WINDOW", kapat)
+
+    def guncelleme_kontrol_hatasi_penceresi(self, hata):
+        pencere = tk.Toplevel(self.root)
+        pencere.title("Sürüm Kontrolü")
+        pencere.geometry("560x320")
+        pencere.configure(bg=self.renkler["arkaplan"])
+        pencere.transient(self.root)
+        pencere.grab_set()
+        self.pencere_ortala(pencere, self.root)
+
+        kart = self.modern_kart(pencere, accent=self.renkler["button_danger_bg"])
+        kart.pack(fill="both", expand=True, padx=18, pady=18)
+        tk.Label(kart, text="Sürüm kontrolü yapılamadı", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 17, "bold")).pack(anchor="w", padx=20, pady=(18, 8))
+        tk.Label(
+            kart,
+            text="Uygulamanın son sürüm olduğundan emin olmak için internet bağlantısı ve GitHub release kontrolü gerekli.",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 10),
+            wraplength=500,
+            justify="left",
+        ).pack(anchor="w", padx=20)
+        tk.Label(kart, text=str(hata), bg=self.renkler["kart_arkaplan"], fg=self.renkler["button_danger_bg"], font=("Segoe UI", 9), wraplength=500, justify="left").pack(anchor="w", padx=20, pady=(10, 0))
+
+        alt = tk.Frame(kart, bg=self.renkler["kart_arkaplan"])
+        alt.pack(fill="x", padx=20, pady=(22, 18))
+        self.themed_widgets.append((alt, "kart"))
+
+        def tekrar():
+            try:
+                pencere.grab_release()
+            except tk.TclError:
+                pass
+            pencere.destroy()
+            self._guncelleme_kontrol_edildi = False
+            self.guncelleme_kontrolunu_baslat()
+
+        def cik():
+            self.uygulamayi_kapat()
+
+        self.modern_buton(alt, "Çıkış", cik, purpose="danger", width=12, small=True).pack(side="right")
+        self.modern_buton(alt, "Tekrar Dene", tekrar, purpose="primary", width=14, small=True).pack(side="right", padx=(0, 8))
+        pencere.protocol("WM_DELETE_WINDOW", cik)
+
+    def guncelleme_zorunlu_penceresi(self, release):
+        tag = release.get("tag_name") or release.get("name") or "-"
+        body = release.get("body") or "Bu sürüm için açıklama girilmemiş."
+
+        pencere = tk.Toplevel(self.root)
+        pencere.title("Zorunlu Güncelleme")
+        pencere.geometry("760x560")
+        pencere.minsize(600, 460)
+        pencere.configure(bg=self.renkler["arkaplan"])
+        pencere.transient(self.root)
+        pencere.grab_set()
+        self.pencere_ortala(pencere, self.root)
+
+        kart = self.modern_kart(pencere, accent=self.renkler["button_warning_bg"])
+        kart.pack(fill="both", expand=True, padx=18, pady=18)
+        tk.Label(
+            kart,
+            text="Yeni sürüm var, güncellemeniz gerekiyor",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 18, "bold"),
+            wraplength=680,
+            justify="left",
+        ).pack(anchor="w", padx=20, pady=(18, 6))
+        tk.Label(
+            kart,
+            text=f"Mevcut sürüm: v{APP_VERSION}    |    Yeni sürüm: {tag}",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w", padx=20, pady=(0, 8))
+        tk.Label(
+            kart,
+            text="Güncelleme yapılmadan uygulama kullanılmayacak. Güncelle'ye bastığınızda kurulum dosyası indirilip çalıştırılır.",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 10),
+            wraplength=690,
+            justify="left",
+        ).pack(anchor="w", padx=20)
+        self.guncelleme_text_alani(kart, body, yukseklik=12)
+
+        durum_var = tk.StringVar(value="Hazır")
+        durum = tk.Label(kart, textvariable=durum_var, bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9), anchor="w")
+        durum.pack(fill="x", padx=20, pady=(0, 8))
+
+        alt = tk.Frame(kart, bg=self.renkler["kart_arkaplan"])
+        alt.pack(fill="x", padx=20, pady=(0, 18))
+        self.themed_widgets.append((alt, "kart"))
+
+        q = queue.Queue()
+
+        def indir_ve_kur():
+            guncelle_btn.enabled = False
+            guncelle_btn.itemconfig(guncelle_btn.text_item, text="İndiriliyor...")
+            durum_var.set("Kurulum dosyası indiriliyor. Lütfen bekleyin.")
+
+            def worker():
+                try:
+                    setup = self.guncelleme_setup_indir(release)
+                    self.guncelleme_notu_kaydet(release)
+                    self.guncelleme_setup_calistir(setup)
+                    q.put(("ok", None))
+                except Exception as e:
+                    q.put(("hata", e))
+
+            def poll():
+                try:
+                    sonuc, veri = q.get_nowait()
+                except queue.Empty:
+                    self._track_after(pencere, 150, poll)
+                    return
+                if sonuc == "ok":
+                    durum_var.set("Kurulum başlatıldı. Uygulama kapanıyor.")
+                    self._track_after(self.root, 700, self.uygulamayi_kapat)
+                    return
+                guncelle_btn.enabled = True
+                guncelle_btn.itemconfig(guncelle_btn.text_item, text="Güncelle")
+                durum_var.set(f"Güncelleme başlatılamadı: {veri}")
+
+            threading.Thread(target=worker, daemon=True).start()
+            poll()
+
+        def cik():
+            self.uygulamayi_kapat()
+
+        self.modern_buton(alt, "Çıkış", cik, purpose="danger", width=12, small=True).pack(side="right")
+        guncelle_btn = self.modern_buton(alt, "Güncelle", indir_ve_kur, purpose="primary", width=14, small=True)
+        guncelle_btn.pack(side="right", padx=(0, 8))
+        pencere.protocol("WM_DELETE_WINDOW", cik)
 
     def eski_veri_yollari(self, dosya_adi):
         adaylar = [
@@ -3504,7 +3869,27 @@ class HayvanTakipSistemi:
     def gorunen_hayvan_satirlari(self):
         columns = list(self.hayvan_tree["columns"])
         rows = [self.hayvan_tree.item(item, "values") for item in self.hayvan_tree.get_children()]
+        if columns and columns[0] == "ID":
+            columns = columns[1:]
+            rows = [tuple(row[1:]) for row in rows]
         return columns, rows
+
+    def export_metadata_olustur(self, kayit_tipi=None):
+        kullanici = (getattr(self, "api_kullanici", None) or {}).get("kullanici_adi") or "-"
+        ciftlik = (
+            getattr(self, "admin_aktif_ciftlik_ad", None)
+            or ((getattr(self, "api_kullanici", None) or {}).get("ciftlik") or {}).get("ad")
+            or ("Tüm çiftlikler" if self.admin_mi() else "Yerel veri")
+        )
+        baglanti = "Offline" if self.offline_modda_mi() else ("Online" if getattr(self, "api_modu", False) else "Yerel")
+        bilgiler = [
+            ("Kullanıcı", kullanici),
+            ("Çalışılan alan", ciftlik),
+            ("Bağlantı", baglanti),
+        ]
+        if kayit_tipi:
+            bilgiler.append(("Rapor türü", kayit_tipi))
+        return bilgiler
 
     def disa_aktar_penceresi(self):
         pencere = tk.Toplevel(self.root)
@@ -3529,7 +3914,20 @@ class HayvanTakipSistemi:
         if not dosya_yolu:
             return
         try:
-            export_rows_to_excel(dosya_yolu, "ALP Ziraat Hayvan Listesi", columns, rows)
+            metadata = self.export_metadata_olustur("Hayvan listesi")
+            if hasattr(self, "filtre_combo"):
+                metadata.append(("Filtre", self.filtre_combo.get() or "Tümü"))
+            if hasattr(self, "arama_entry"):
+                metadata.append(("Arama", self.arama_entry.get().strip() or "-"))
+            export_rows_to_excel(
+                dosya_yolu,
+                "ALP Ziraat Hayvan Listesi",
+                columns,
+                rows,
+                subtitle="Hayvan listesindeki mevcut görünüm",
+                metadata=metadata,
+                sheet_name="Hayvan Listesi",
+            )
             messagebox.showinfo("Başarılı", f"Excel dosyası oluşturuldu:\n{dosya_yolu}")
         except Exception as e:
             messagebox.showerror("Dışa Aktar", f"Excel çıktısı oluşturulamadı:\n{e}")
@@ -3546,7 +3944,20 @@ class HayvanTakipSistemi:
         if not dosya_yolu:
             return
         try:
-            export_rows_to_pdf(dosya_yolu, "ALP Ziraat Hayvan Listesi", columns, rows)
+            metadata = self.export_metadata_olustur("Hayvan listesi")
+            if hasattr(self, "filtre_combo"):
+                metadata.append(("Filtre", self.filtre_combo.get() or "Tümü"))
+            if hasattr(self, "arama_entry"):
+                metadata.append(("Arama", self.arama_entry.get().strip() or "-"))
+            export_rows_to_pdf(
+                dosya_yolu,
+                "ALP Ziraat Hayvan Listesi",
+                columns,
+                rows,
+                subtitle="Hayvan listesindeki mevcut görünüm",
+                metadata=metadata,
+                sheet_name="Hayvan Listesi",
+            )
             messagebox.showinfo("Başarılı", f"PDF dosyası oluşturuldu:\n{dosya_yolu}")
         except Exception as e:
             messagebox.showerror("Dışa Aktar", f"PDF çıktısı oluşturulamadı:\n{e}")
@@ -3773,7 +4184,6 @@ class HayvanTakipSistemi:
         self.themed_widgets.append((self.header_action_fallback, 'baslik_frame'))
 
         aksiyonlar = [
-            ("Yedekten Yükle", self.yedekten_yukle_penceresi, 'danger'),
             ("Dışa Aktar", self.disa_aktar_penceresi, 'success'),
             ("Geçmiş", self.islem_gecmisi_penceresi, 'default'),
             ("Geri Al", self.son_islemi_geri_al, 'warning'),
@@ -4879,7 +5289,10 @@ class HayvanTakipSistemi:
                 dosya_yolu,
                 "ALP Ziraat Sürü Özet Raporu",
                 ["Başlık", "Değer", "Not"],
-                self.ozet_rapor_satirlari()
+                self.ozet_rapor_satirlari(),
+                subtitle="Sürü durumu, uyarılar ve yaklaşan işler özeti",
+                metadata=self.export_metadata_olustur("Sürü özet raporu"),
+                sheet_name="Sürü Özeti",
             )
             messagebox.showinfo("Rapor", f"Excel raporu kaydedildi:\n{dosya_yolu}", parent=self.root)
         except Exception as e:
@@ -4898,7 +5311,10 @@ class HayvanTakipSistemi:
                 dosya_yolu,
                 "ALP Ziraat Sürü Özet Raporu",
                 ["Başlık", "Değer", "Not"],
-                self.ozet_rapor_satirlari()
+                self.ozet_rapor_satirlari(),
+                subtitle="Sürü durumu, uyarılar ve yaklaşan işler özeti",
+                metadata=self.export_metadata_olustur("Sürü özet raporu"),
+                sheet_name="Sürü Özeti",
             )
             messagebox.showinfo("Rapor", f"PDF raporu kaydedildi:\n{dosya_yolu}", parent=self.root)
         except Exception as e:

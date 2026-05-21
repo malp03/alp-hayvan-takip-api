@@ -24,7 +24,7 @@ $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "$appName
 $shortcut = $shell.CreateShortcut($desktopShortcut)
 $shortcut.TargetPath = Join-Path $InstallDir $exeName
 $shortcut.WorkingDirectory = $InstallDir
-$shortcut.IconLocation = Join-Path $InstallDir $exeName
+$shortcut.IconLocation = (Join-Path $InstallDir $exeName) + ",0"
 $shortcut.Save()
 
 $startDir = Join-Path ([Environment]::GetFolderPath("Programs")) "ALP Ziraat"
@@ -33,7 +33,7 @@ $startShortcut = Join-Path $startDir "$appName.lnk"
 $shortcut = $shell.CreateShortcut($startShortcut)
 $shortcut.TargetPath = Join-Path $InstallDir $exeName
 $shortcut.WorkingDirectory = $InstallDir
-$shortcut.IconLocation = Join-Path $InstallDir $exeName
+$shortcut.IconLocation = (Join-Path $InstallDir $exeName) + ",0"
 $shortcut.Save()
 
 $uninstallShortcut = Join-Path $startDir "ALP Ziraat Kaldir.lnk"

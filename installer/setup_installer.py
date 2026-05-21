@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -38,7 +39,7 @@ $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "$appName
 $shortcut = $shell.CreateShortcut($desktopShortcut)
 $shortcut.TargetPath = $exePath
 $shortcut.WorkingDirectory = $installDir
-$shortcut.IconLocation = $exePath
+$shortcut.IconLocation = "$exePath,0"
 $shortcut.Save()
 $startDir = Join-Path ([Environment]::GetFolderPath("Programs")) "ALP Ziraat"
 New-Item -ItemType Directory -Force -Path $startDir | Out-Null
@@ -46,7 +47,7 @@ $startShortcut = Join-Path $startDir "$appName.lnk"
 $shortcut = $shell.CreateShortcut($startShortcut)
 $shortcut.TargetPath = $exePath
 $shortcut.WorkingDirectory = $installDir
-$shortcut.IconLocation = $exePath
+$shortcut.IconLocation = "$exePath,0"
 $shortcut.Save()
 $uninstallShortcut = Join-Path $startDir "ALP Ziraat Kaldir.lnk"
 $shortcut = $shell.CreateShortcut($uninstallShortcut)
@@ -60,6 +61,19 @@ $shortcut.Save()
         check=True,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
+
+
+def wait_for_process(pid: int, timeout: int = 45) -> None:
+    if not pid:
+        return
+    try:
+        handle = ctypes.windll.kernel32.OpenProcess(0x00100000, False, int(pid))
+        if handle:
+            ctypes.windll.kernel32.WaitForSingleObject(handle, timeout * 1000)
+            ctypes.windll.kernel32.CloseHandle(handle)
+            time.sleep(0.6)
+    except Exception:
+        time.sleep(1.5)
 
 
 def install() -> None:
@@ -81,14 +95,41 @@ def install() -> None:
     create_shortcuts()
 
 
+def parse_args(argv: list[str]) -> dict:
+    args = {"launch": False, "wait_pid": 0}
+    index = 0
+    while index < len(argv):
+        value = argv[index]
+        if value == "--launch":
+            args["launch"] = True
+        elif value == "--wait-pid" and index + 1 < len(argv):
+            try:
+                args["wait_pid"] = int(argv[index + 1])
+            except ValueError:
+                args["wait_pid"] = 0
+            index += 1
+        index += 1
+    return args
+
+
+def launch_app() -> None:
+    exe_path = INSTALL_DIR / APP_EXE
+    if exe_path.exists():
+        subprocess.Popen([str(exe_path)], cwd=str(INSTALL_DIR), close_fds=True)
+
+
 def main() -> int:
+    args = parse_args(sys.argv[1:])
     try:
+        wait_for_process(args["wait_pid"])
         install()
     except Exception as exc:
         show_message(APP_NAME, f"Kurulum tamamlanamadi:\n{exc}", error=True)
         return 1
 
     show_message(APP_NAME, f"Kurulum tamamlandi:\n{INSTALL_DIR}")
+    if args["launch"]:
+        launch_app()
     return 0
 
 

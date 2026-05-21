@@ -23,6 +23,8 @@ PYTHON_FILES = [
     "tools/server_backup.py",
     "tools/smoke_api.py",
     "tools/smoke_admin_popups.py",
+    "tools/smoke_exports.py",
+    "tools/smoke_update.py",
     "tools/smoke_login.py",
     "tools/smoke_login_responsive.py",
     "tools/smoke_ui.py",
@@ -48,6 +50,8 @@ def main():
 
     run_step("Desktop UI smoke", [sys.executable, str(ROOT / "tools" / "smoke_ui.py")])
     run_step("Admin popup UI smoke", [sys.executable, str(ROOT / "tools" / "smoke_admin_popups.py")])
+    run_step("Export smoke", [sys.executable, str(ROOT / "tools" / "smoke_exports.py")])
+    run_step("Update smoke", [sys.executable, str(ROOT / "tools" / "smoke_update.py")])
     run_step("Login UI smoke", [sys.executable, str(ROOT / "tools" / "smoke_login.py")])
     run_step("Login responsiveness smoke", [sys.executable, str(ROOT / "tools" / "smoke_login_responsive.py")])
     run_step("API HTTP smoke", [sys.executable, str(ROOT / "tools" / "smoke_api.py")])
