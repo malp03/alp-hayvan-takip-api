@@ -388,15 +388,20 @@ class HayvanTakipSistemi:
 
         self._track_after(canvas, 15, lambda: self._animate_canvas_bg(canvas, parts, current_rgb, target_rgb, step + 1, total_steps))
 
-    def modern_buton(self, parent, text, command, purpose='default', width=None, small=False):
+    def modern_buton(self, parent, text, command, purpose='default', width=None, small=False, tab=False):
         bg_color = self.renkler.get(f"button_{purpose}_bg", self.renkler["button_default_bg"])
         fg_color = self.renkler.get(f"button_{purpose}_fg", self.renkler["button_default_fg"])
         hover_color = self._lighten_color(bg_color, 25) if self.theme_mode == 'dark' else self.koyu_renk(bg_color)
         _ = hover_color  # hover_color kullanımı canvas içindeki get_colors()'da dinamik olarak yapılıyor
         
-        pad_x = 12 if small else 30
-        pad_y = 7 if small else 12
-        font_size = 9 if small else 11
+        if tab:
+            pad_x = 18
+            pad_y = 9
+            font_size = 10
+        else:
+            pad_x = 12 if small else 30
+            pad_y = 7 if small else 12
+            font_size = 9 if small else 11
         font_spec = ('Segoe UI', font_size, 'bold')
         
         dummy = tk.Label(parent, text=text, font=font_spec)
@@ -3856,7 +3861,7 @@ class HayvanTakipSistemi:
         self.tab_buttons = []
         for i, tab_id in enumerate(self.notebook.tabs()):
             text = self.notebook.tab(tab_id, "text")
-            btn = self.modern_buton(self.custom_tab_bar, text, command=lambda idx=i: self._select_tab(idx), purpose='theme', small=True)
+            btn = self.modern_buton(self.custom_tab_bar, text, command=lambda idx=i: self._select_tab(idx), purpose='theme', tab=True)
             self.tab_buttons.append(btn)
 
         self.notebook.pack(fill='both', expand=True, padx=12, pady=(4, 12))
@@ -4173,11 +4178,37 @@ class HayvanTakipSistemi:
     def dashboard_metric_kart(self, parent, baslik, deger, renk):
         kart = self.modern_kart(parent)
         kart.configure(bg=self.renkler["kart_ikincil"])
+        kart.configure(width=176, height=76)
+        kart.pack_propagate(False)
         self.themed_widgets.append((kart, 'soft_panel'))
-        tk.Label(kart, text=baslik, bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=16, pady=(14, 4))
-        lbl = tk.Label(kart, text=str(deger), bg=self.renkler["kart_ikincil"], fg=renk, font=("Segoe UI", 24, "bold"))
-        lbl.pack(anchor="w", padx=16, pady=(0, 14))
+        ic = tk.Frame(kart, bg=self.renkler["kart_ikincil"], padx=14, pady=8)
+        ic.pack(fill="both", expand=True)
+        self.themed_widgets.append((ic, 'soft_panel'))
+        tk.Label(ic, text=baslik, bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        lbl = tk.Label(ic, text=str(deger), bg=self.renkler["kart_ikincil"], fg=renk, font=("Segoe UI", 20, "bold"))
+        lbl.pack(anchor="w", pady=(4, 0))
         return kart, lbl
+
+    def dashboard_metric_grid_yerlestir(self, parent, widgets):
+        def duzenle(event=None):
+            try:
+                width = max(parent.winfo_width(), 1)
+                hedef_genislik = 186
+                bosluk = 10
+                cols = max(1, min(len(widgets), (width + bosluk) // (hedef_genislik + bosluk)))
+                for widget in widgets:
+                    widget.grid_forget()
+                for idx, widget in enumerate(widgets):
+                    col = idx % cols
+                    row = idx // cols
+                    widget.grid(row=row, column=col, sticky="ew", padx=(0 if col == 0 else 10, 0), pady=(0, 10))
+                for col in range(6):
+                    parent.grid_columnconfigure(col, weight=1 if col < cols else 0, uniform="dashboard_metrics" if col < cols else "")
+            except tk.TclError:
+                pass
+
+        parent.bind("<Configure>", duzenle)
+        parent.after_idle(duzenle)
 
     def dashboard_sekmesi(self):
         self.dashboard_frame = ttk.Frame(self.notebook, style='TFrame')
@@ -4203,25 +4234,73 @@ class HayvanTakipSistemi:
             kart, lbl = self.dashboard_metric_kart(metric_grid, title, 0, color)
             metric_widgets.append(kart)
             self.dashboard_metric_labels[key] = lbl
-        self._rapor_responsive_grid(metric_grid, metric_widgets, min_width=500, max_cols=6, gap=10)
+        self.dashboard_metric_grid_yerlestir(metric_grid, metric_widgets)
 
         alt_grid = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
         alt_grid.pack(fill="both", expand=True)
+        alt_grid.columnconfigure(0, weight=3)
+        alt_grid.columnconfigure(1, weight=2)
+        alt_grid.rowconfigure(0, weight=1)
         self.themed_widgets.append((alt_grid, 'arkaplan'))
 
         isler_card = self.modern_kart(alt_grid, accent=self.renkler["button_primary_bg"])
+        isler_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         tk.Label(isler_card, text="Yaklaşan İşler", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=18, pady=(16, 8))
-        self.dashboard_isler_tree = ttk.Treeview(isler_card, columns=("tip", "hayvan", "tarih", "kalan"), show="headings", height=10, style="Modern.Treeview")
+        self.dashboard_isler_tree = ttk.Treeview(isler_card, columns=("tip", "hayvan", "tarih", "kalan"), show="headings", height=8, style="Modern.Treeview")
         for col, title, width in [("tip", "İşlem", 160), ("hayvan", "Hayvan", 160), ("tarih", "Tarih", 120), ("kalan", "Kalan", 100)]:
             self.dashboard_isler_tree.heading(col, text=title)
             self.dashboard_isler_tree.column(col, width=width, anchor="w")
         self.dashboard_isler_tree.pack(fill="both", expand=True, padx=18, pady=(0, 18))
 
+        sag_kolon = tk.Frame(alt_grid, bg=self.renkler["arkaplan"])
+        sag_kolon.grid(row=0, column=1, sticky="nsew")
+        sag_kolon.rowconfigure(1, weight=1)
+        sag_kolon.columnconfigure(0, weight=1)
+        self.themed_widgets.append((sag_kolon, 'arkaplan'))
+
+        oncelik_card = self.modern_kart(sag_kolon, accent=self.renkler["uyari"])
+        oncelik_card.grid(row=0, column=0, sticky="ew")
+        tk.Label(oncelik_card, text="Öncelik Özeti", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=18, pady=(16, 4))
+        self.dashboard_ciftlik_label = tk.Label(
+            oncelik_card,
+            text="-",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9),
+            justify="left",
+            anchor="w",
+        )
+        self.dashboard_ciftlik_label.pack(anchor="w", fill="x", padx=18, pady=(0, 8))
+        self.dashboard_risk_label = tk.Label(
+            oncelik_card,
+            text="-",
+            bg=self.renkler["kart_ikincil"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 10, "bold"),
+            padx=12,
+            pady=8,
+            anchor="w",
+            justify="left",
+        )
+        self.dashboard_risk_label.pack(fill="x", padx=18, pady=(0, 16))
+
+        def oncelik_metni_sar(event=None):
+            try:
+                wrap = max(oncelik_card.winfo_width() - 42, 220)
+                self.dashboard_ciftlik_label.configure(wraplength=wrap)
+                self.dashboard_risk_label.configure(wraplength=wrap)
+            except tk.TclError:
+                pass
+
+        oncelik_card.bind("<Configure>", oncelik_metni_sar)
+        oncelik_card.after_idle(oncelik_metni_sar)
+
         son_card = self.modern_kart(alt_grid, accent=self.renkler["button_success_bg"])
+        son_card.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
         tk.Label(son_card, text="Son İşlemler", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=18, pady=(16, 8))
         self.dashboard_son_list = tk.Listbox(
             son_card,
-            height=10,
+            height=7,
             bg=self.renkler["input_bg"],
             fg=self.renkler["yazi_rengi"],
             selectbackground=self.renkler["button_primary_bg"],
@@ -4233,45 +4312,29 @@ class HayvanTakipSistemi:
         )
         self.dashboard_son_list.pack(fill="both", expand=True, padx=18, pady=(0, 18))
 
-        aksiyon_card = self.modern_kart(alt_grid, accent=self.renkler["uyari"])
-        tk.Label(aksiyon_card, text="Hızlı İşlemler", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=18, pady=(16, 4))
-        self.dashboard_ciftlik_label = tk.Label(
-            aksiyon_card,
-            text="-",
-            bg=self.renkler["kart_arkaplan"],
-            fg=self.renkler["muted"],
-            font=("Segoe UI", 9),
-            justify="left",
-            wraplength=320,
-        )
-        self.dashboard_ciftlik_label.pack(anchor="w", fill="x", padx=18, pady=(0, 12))
-        self.dashboard_risk_label = tk.Label(
-            aksiyon_card,
-            text="-",
-            bg=self.renkler["kart_ikincil"],
-            fg=self.renkler["yazi_rengi"],
-            font=("Segoe UI", 10, "bold"),
-            padx=12,
-            pady=10,
-            anchor="w",
-            justify="left",
-        )
-        self.dashboard_risk_label.pack(fill="x", padx=18, pady=(0, 14))
-        hizli_butonlar = tk.Frame(aksiyon_card, bg=self.renkler["kart_arkaplan"])
-        hizli_butonlar.pack(fill="x", padx=18, pady=(0, 18))
-        self.themed_widgets.append((hizli_butonlar, 'kart'))
-        self.responsive_buton_grubu(
-            hizli_butonlar,
-            [
-                ("Yeni Hayvan", lambda: self._select_tab(1), "success"),
-                ("Hayvan Listesi", lambda: self._select_tab(3), "primary"),
-                ("Tohumlama", lambda: self._select_tab(2), "default"),
-                ("Raporlama", lambda: self._select_tab(4), "default"),
-                ("Senkronize", self.api_senkronize_et_ui, "primary"),
-            ],
-            align="left",
-        )
-        self._rapor_responsive_grid(alt_grid, [isler_card, son_card, aksiyon_card], min_width=420, max_cols=3, gap=12)
+        def alt_yerlesim(event=None):
+            try:
+                dar = alt_grid.winfo_width() < 980
+                isler_card.grid_forget()
+                sag_kolon.grid_forget()
+                son_card.grid_forget()
+                if dar:
+                    alt_grid.columnconfigure(0, weight=1)
+                    alt_grid.columnconfigure(1, weight=0)
+                    isler_card.grid(row=0, column=0, sticky="nsew")
+                    sag_kolon.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+                    son_card.grid(row=2, column=0, sticky="nsew", pady=(12, 0))
+                else:
+                    alt_grid.columnconfigure(0, weight=3)
+                    alt_grid.columnconfigure(1, weight=2)
+                    isler_card.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 12))
+                    sag_kolon.grid(row=0, column=1, sticky="ew")
+                    son_card.grid(row=1, column=1, sticky="nsew", pady=(12, 0))
+            except tk.TclError:
+                pass
+
+        alt_grid.bind("<Configure>", alt_yerlesim)
+        alt_grid.after_idle(alt_yerlesim)
         self.dashboard_guncelle()
 
     def dashboard_guncelle(self):
@@ -4311,13 +4374,13 @@ class HayvanTakipSistemi:
             dogum = ozet.get("yaklasan_dogum", 0)
             if kritik:
                 self.dashboard_risk_label.config(
-                    text=f"{kritik} kritik uyarı var. Gebelik kontrolü: {bekleyen}, yaklaşan doğum: {dogum}",
+                    text=f"{kritik} kritik · Kontrol {bekleyen} · Doğum {dogum}",
                     fg=self.renkler["button_danger_bg"],
                     bg=self.renkler["kart_ikincil"],
                 )
             else:
                 self.dashboard_risk_label.config(
-                    text=f"Kritik uyarı yok. Gebelik kontrolü: {bekleyen}, yaklaşan doğum: {dogum}",
+                    text=f"Kritik yok · Kontrol {bekleyen} · Doğum {dogum}",
                     fg=self.renkler["button_success_bg"],
                     bg=self.renkler["kart_ikincil"],
                 )
@@ -4962,7 +5025,7 @@ class HayvanTakipSistemi:
             self.create_pie_chart(charts_frame, cins_dagilimi, "Sürüdeki Hayvan Tipleri", 1, row=0),
             self.create_pie_chart(charts_frame, ozel_durum_dagilimi, "Özel Durumlar", 2, row=0),
         ]
-        self._rapor_responsive_grid(charts_frame, chart_cards, min_width=380, max_cols=3)
+        self._rapor_responsive_grid(charts_frame, chart_cards, min_width=470, max_cols=3)
 
 
     def create_pie_chart(self, parent, data, title, column, row=1):
@@ -4990,11 +5053,15 @@ class HayvanTakipSistemi:
 
         govde = tk.Frame(kart, bg=self.renkler["kart_ikincil"])
         govde.pack(fill="both", expand=True, pady=(12, 0))
+        govde.grid_rowconfigure(0, weight=1)
+        govde.grid_columnconfigure(0, weight=1, minsize=230)
+        govde.grid_columnconfigure(1, weight=0, minsize=172)
         self.themed_widgets.append((govde, 'soft_panel'))
-        canvas = tk.Canvas(govde, height=220, bg=self.renkler["kart_ikincil"], bd=0, highlightthickness=0)
-        canvas.pack(side="left", fill="both", expand=True)
-        legend = tk.Frame(govde, bg=self.renkler["kart_ikincil"], width=150)
-        legend.pack(side="right", fill="y", padx=(12, 0))
+        canvas = tk.Canvas(govde, height=210, bg=self.renkler["kart_ikincil"], bd=0, highlightthickness=0)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        legend = tk.Frame(govde, bg=self.renkler["kart_ikincil"], width=172)
+        legend.grid(row=0, column=1, sticky="nsw", padx=(12, 0))
+        legend.grid_propagate(False)
         self.themed_widgets.append((legend, 'soft_panel'))
 
         renkler = [
@@ -5018,7 +5085,9 @@ class HayvanTakipSistemi:
                     bg=self.renkler["kart_ikincil"],
                     fg=self.renkler["muted"],
                     font=("Segoe UI", 9),
-                ).pack(side="left", anchor="w")
+                    wraplength=140,
+                    justify="left",
+                ).pack(side="left", anchor="w", fill="x", expand=True)
         else:
             tk.Label(
                 legend,
@@ -5026,6 +5095,8 @@ class HayvanTakipSistemi:
                 bg=self.renkler["kart_ikincil"],
                 fg=self.renkler["muted"],
                 font=("Segoe UI", 9, "bold"),
+                wraplength=140,
+                justify="left",
             ).pack(anchor="w")
 
         def ciz(event=None):

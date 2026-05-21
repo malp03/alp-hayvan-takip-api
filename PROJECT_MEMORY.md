@@ -238,7 +238,9 @@ Android icin onemli hazirliklar:
 
 - Admin `Çiftlik Yönetimi` ve `Kullanıcı Yönetimi` popuplari yeniden duzenlendi: baslik/aciklama alani, kartli liste/form yapisi, tablo scrollbarlari, responsive yerlesim ve modern buton gruplari eklendi.
 - Admin popup icinde Tkinter `pack/grid` karisimi ve tuple `pady` hatalari yakalanip duzeltildi. Bu hatalar popup acilisinda runtime crash yaratabiliyordu.
-- Dashboard guclendirildi: responsive metrik kartlari, `Yaklaşan İşler`, `Son İşlemler`, `Hızlı İşlemler`, calisilan ciftlik/baglanti/senkron ozeti ve kritik uyari ozeti eklendi.
+- Dashboard guclendirildi: kompakt responsive metrik kartlari, `Yaklaşan İşler`, `Son İşlemler`, calisilan ciftlik/baglanti/senkron ve kritik durum icin `Oncelik Ozeti` eklendi. Onceki buyuk `Hizli Islemler` blogu kaldirildi.
+- Ana sekme butonlari `tab=True` boyutu ile biraz buyutuldu; kucuk aksiyon butonlari ayni kalir.
+- Rapor grafik kartlarinda halka grafik solda, aciklama/legend yazilari sagda kalir; legend genisligi sabitlenip yazilar wraplength ile kirpilmeyecek sekilde ayarlandi.
 - Hayvan Listesi filtre/arama alani sabit yukseklikten cikarildi; dar/orta genislikte butonlar alt satira akar. `Temizle` ve `Yenile` butonlari gorunur kalacak sekilde yerlestirildi.
 - Ana sekme butonlari kompakt hale getirildi; 1280 genislikte sekmeler sagdan tasmamali.
 - Kullanilmayan eski `hayvan_detay_penceresi_eski` blogu ve islevsiz `combo_secimi` callback'i kaldirildi.
