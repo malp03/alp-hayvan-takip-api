@@ -8,6 +8,7 @@ on:
 jobs:
   backup:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,6 +20,9 @@ jobs:
           ALP_BACKUP_USERNAME: ${{ secrets.ALP_BACKUP_USERNAME }}
           ALP_BACKUP_PASSWORD: ${{ secrets.ALP_BACKUP_PASSWORD }}
           ALP_BACKUP_DIR: backups/server
+          ALP_BACKUP_RETRIES: "5"
+          ALP_BACKUP_LOGIN_TIMEOUT: "90"
+          ALP_BACKUP_DOWNLOAD_TIMEOUT: "180"
         run: python tools/server_backup.py
       - name: Upload backup artifact
         uses: actions/upload-artifact@v4
