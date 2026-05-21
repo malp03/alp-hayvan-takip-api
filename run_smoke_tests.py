@@ -22,6 +22,8 @@ PYTHON_FILES = [
     "alp_ziraat_is_kurallari.py",
     "tools/server_backup.py",
     "tools/smoke_api.py",
+    "tools/smoke_login.py",
+    "tools/smoke_login_responsive.py",
     "tools/smoke_ui.py",
     "installer/setup_installer.py",
 ]
@@ -44,6 +46,8 @@ def main():
         print("\n== Pyflakes static check ==\npyflakes not installed, skipped.", flush=True)
 
     run_step("Desktop UI smoke", [sys.executable, str(ROOT / "tools" / "smoke_ui.py")])
+    run_step("Login UI smoke", [sys.executable, str(ROOT / "tools" / "smoke_login.py")])
+    run_step("Login responsiveness smoke", [sys.executable, str(ROOT / "tools" / "smoke_login_responsive.py")])
     run_step("API HTTP smoke", [sys.executable, str(ROOT / "tools" / "smoke_api.py")])
 
     print("\nAll smoke tests passed.", flush=True)

@@ -8,8 +8,11 @@ import hashlib
 import hmac
 import io
 import os
+import queue
 import shutil
 import secrets
+import socket
+import threading
 import uuid
 import urllib.error
 import urllib.parse
@@ -390,8 +393,8 @@ class HayvanTakipSistemi:
         hex_col = self._rgb_to_hex((r, g, b))
         for p in parts:
             canvas.itemconfig(p, fill=hex_col)
-            
-            self._track_after(canvas, 15, lambda: self._animate_canvas_bg(canvas, parts, current_rgb, target_rgb, step + 1, total_steps))
+
+        self._track_after(canvas, 15, lambda: self._animate_canvas_bg(canvas, parts, current_rgb, target_rgb, step + 1, total_steps))
 
     def modern_buton(self, parent, text, command, purpose='default', width=None, small=False):
         bg_color = self.renkler.get(f"button_{purpose}_bg", self.renkler["button_default_bg"])
@@ -429,6 +432,8 @@ class HayvanTakipSistemi:
         canvas.button_parts = parts
         canvas.text_item = text_id
         canvas.purpose = purpose
+        canvas.command = command
+        canvas.enabled = True
         
         def get_colors():
             bg_hex = self.renkler.get(f"button_{canvas.purpose}_bg", self.renkler["button_default_bg"])
@@ -447,13 +452,14 @@ class HayvanTakipSistemi:
                 self._animate_canvas_bg(canvas, parts, hover_rgb, bg_rgb)
             
         def on_click(e):
-            if command:
+            komut = getattr(canvas, "command", None)
+            if komut and getattr(canvas, "enabled", True):
                 bg_rgb, hover_rgb, hover_hex = get_colors()
                 click_color = self._lighten_color(hover_hex, 30) if self.theme_mode == 'dark' else self.koyu_renk(hover_hex)
                 for p in parts: canvas.itemconfig(p, fill=click_color)
                 canvas.update_idletasks()
                 self._track_after(canvas, 50, lambda: self._animate_canvas_bg(canvas, parts, self._hex_to_rgb(click_color), hover_rgb))
-                self._track_after(canvas, 100, command)
+                self._track_after(canvas, 100, komut)
                 
         # Bindings only on the canvas widget to prevent event bubbling/double-firing
         canvas.bind("<Enter>", on_enter)
@@ -501,8 +507,27 @@ class HayvanTakipSistemi:
         return olusan_butonlar
 
     def _track_after(self, widget, delay_ms, callback):
+        after_ref = {"id": None}
+
+        def guarded_callback():
+            try:
+                kayitlar = getattr(self, "_tracked_after_ids", [])
+                if after_ref["id"] is not None:
+                    self._tracked_after_ids = [
+                        item for item in kayitlar
+                        if not (item[0] is widget and item[1] == after_ref["id"])
+                    ]
+                if getattr(self, "_kapanis_istegi", False):
+                    return
+                if hasattr(widget, "winfo_exists") and not widget.winfo_exists():
+                    return
+                callback()
+            except tk.TclError:
+                return
+
         try:
-            after_id = widget.after(delay_ms, callback)
+            after_id = widget.after(delay_ms, guarded_callback)
+            after_ref["id"] = after_id
             if hasattr(self, "_tracked_after_ids"):
                 self._tracked_after_ids.append((widget, after_id))
             return after_id
@@ -701,6 +726,29 @@ class HayvanTakipSistemi:
         else:
             label.configure(image="", text=bos_metin)
             label.image = None
+
+    def hayvan_fotograflari(self, hayvan):
+        fotograflar = []
+        for foto in hayvan.get('foto_datas') or []:
+            if foto and foto not in fotograflar:
+                fotograflar.append(foto)
+        eski_foto = hayvan.get('foto_data')
+        if eski_foto and eski_foto not in fotograflar:
+            fotograflar.insert(0, eski_foto)
+        return fotograflar[:3]
+
+    def hayvan_fotograflari_ata(self, hayvan, fotograflar):
+        temiz = []
+        for foto in fotograflar or []:
+            if foto and foto not in temiz:
+                temiz.append(foto)
+            if len(temiz) >= 3:
+                break
+        hayvan['foto_datas'] = temiz
+        hayvan['foto_data'] = temiz[0] if temiz else None
+        if temiz:
+            hayvan['foto_url'] = None
+        return temiz
 
     def hayvan_gorunen_kupe(self, h_id, hayvan):
         return (hayvan or {}).get('ciftlik_kupe_no') or (hayvan or {}).get('resmi_kupe_no') or str(h_id)
@@ -994,7 +1042,7 @@ class HayvanTakipSistemi:
 
     def taninan_bilgisayar_token_al(self):
         try:
-            yanit = self.api_istek("POST", "/api/auth/device-token", {}, timeout=20)
+            yanit = self.api_istek("POST", "/api/auth/device-token", {}, timeout=8)
             return (yanit or {}).get("device_token")
         except ApiHatasi as e:
             print(f"Tanınan bilgisayar token alınamadı: {e}")
@@ -1014,7 +1062,7 @@ class HayvanTakipSistemi:
                 "POST",
                 "/api/auth/device-login",
                 {"device_token": device_token},
-                timeout=20,
+                timeout=6,
                 auth=False,
             )
             token = (yanit or {}).get("access_token")
@@ -1155,6 +1203,8 @@ class HayvanTakipSistemi:
             raise ApiHatasi(f"API {e.code}: {mesaj}", status=e.code) from e
         except urllib.error.URLError as e:
             raise ApiHatasi(f"API bağlantısı kurulamadı: {e.reason}") from e
+        except socket.timeout as e:
+            raise ApiHatasi("API isteği zaman aşımına uğradı.") from e
         except TimeoutError as e:
             raise ApiHatasi("API isteği zaman aşımına uğradı.") from e
 
@@ -1557,7 +1607,11 @@ class HayvanTakipSistemi:
         )
         durum_label.pack(anchor="w", fill="x", pady=(0, 6))
 
+        login_state = {"running": False, "finished": False, "tick": 0}
+        login_queue = queue.Queue()
+
         def bitir(ok, login_iste=False):
+            login_state["finished"] = True
             sonuc["ok"] = ok
             self._login_yeniden_iste = bool(login_iste)
             try:
@@ -1565,19 +1619,82 @@ class HayvanTakipSistemi:
             except tk.TclError:
                 pass
 
+        def form_kilitli(kilitli):
+            entry_state = "disabled" if kilitli else "normal"
+            check_state = "disabled" if kilitli else "normal"
+            cursor = "watch" if kilitli else "hand2"
+            try:
+                kullanici_entry.configure(state=entry_state)
+                sifre_entry.configure(state=entry_state)
+                beni_tani.configure(state=check_state)
+                giris_btn.configure(cursor=cursor)
+                giris_btn.enabled = not kilitli
+                cikis_btn.configure(cursor="hand2")
+                cikis_btn.enabled = True
+            except tk.TclError:
+                pass
+
+        def giris_animasyonu():
+            if not login_state.get("running") or login_state.get("finished"):
+                return
+            login_state["tick"] = login_state.get("tick", 0) + 1
+            noktalar = "." * ((login_state["tick"] % 3) + 1)
+            try:
+                durum_label.config(text=f"Giris yapiliyor{noktalar}", fg=self.renkler["muted"])
+                self._track_after(self.root, 350, giris_animasyonu)
+            except tk.TclError:
+                pass
+
+        def giris_sonuc_kontrol():
+            if login_state.get("finished"):
+                return
+            try:
+                hata = login_queue.get_nowait()
+            except queue.Empty:
+                if login_state.get("running"):
+                    self._track_after(self.root, 100, giris_sonuc_kontrol)
+                return
+
+            login_state["running"] = False
+            form_kilitli(False)
+            if hata:
+                durum_label.config(text=hata, fg=self.renkler["ana_kirmizi"])
+                try:
+                    sifre_entry.configure(state="normal")
+                    sifre_entry.delete(0, tk.END)
+                    sifre_entry.focus_force()
+                except tk.TclError:
+                    pass
+                return
+            bitir(True)
+
         def giris():
+            if login_state.get("running"):
+                return
             kullanici_adi = kullanici_entry.get().strip()
             sifre = sifre_entry.get()
             if not kullanici_adi or not sifre:
                 durum_label.config(text="Kullanici adi ve sifre zorunludur.")
                 return
-            durum_label.config(text="Giris yapiliyor...")
-            self.root.update_idletasks()
-            try:
-                self.api_giris_yap(kullanici_adi, sifre, bu_bilgisayari_tani=beni_tani_var.get())
-                bitir(True)
-            except ApiHatasi as e:
-                durum_label.config(text=str(e))
+            bu_bilgisayari_tani = bool(beni_tani_var.get())
+            login_state["running"] = True
+            login_state["tick"] = 0
+            form_kilitli(True)
+            durum_label.config(text="Giris yapiliyor...", fg=self.renkler["muted"])
+            giris_animasyonu()
+
+            def login_worker():
+                hata = None
+                try:
+                    self.api_giris_yap(kullanici_adi, sifre, bu_bilgisayari_tani=bu_bilgisayari_tani)
+                except ApiHatasi as e:
+                    hata = str(e)
+                except Exception as e:
+                    hata = f"Beklenmeyen giris hatasi: {e}"
+                login_queue.put(hata)
+
+            threading.Thread(target=login_worker, daemon=True).start()
+            self._track_after(self.root, 100, giris_sonuc_kontrol)
 
         def iptal():
             bitir(False)
@@ -1585,8 +1702,10 @@ class HayvanTakipSistemi:
         btn_frame = tk.Frame(kutu, bg=self.renkler["kart_arkaplan"])
         btn_frame.pack(fill="x", pady=(0, 0))
         self.themed_widgets.append((btn_frame, 'kart'))
-        self.modern_buton(btn_frame, "Giriş", giris, purpose='primary', width=13, small=True).pack(side="left", padx=(0, 10))
-        self.modern_buton(btn_frame, "Çıkış", iptal, purpose='default', width=13, small=True).pack(side="left")
+        giris_btn = self.modern_buton(btn_frame, "Giriş", giris, purpose='primary', width=13, small=True)
+        giris_btn.pack(side="left", padx=(0, 10))
+        cikis_btn = self.modern_buton(btn_frame, "Çıkış", iptal, purpose='default', width=13, small=True)
+        cikis_btn.pack(side="left")
 
         def pencereyi_ortala():
             self.root.update_idletasks()
@@ -1608,6 +1727,7 @@ class HayvanTakipSistemi:
         except tk.TclError:
             return False
 
+        self._cancel_tracked_afters()
         for child in self.root.winfo_children():
             child.destroy()
         self.root.unbind("<Escape>")
@@ -2219,6 +2339,7 @@ class HayvanTakipSistemi:
             self.root.unbind_all("<MouseWheel>")
         except tk.TclError:
             pass
+        self._cancel_tracked_afters()
         for child in self.root.winfo_children():
             child.destroy()
         return sonuc["ok"]
@@ -2757,6 +2878,7 @@ class HayvanTakipSistemi:
         veri.setdefault('arsiv_tarihi', None)
         veri.setdefault('foto_data', None)
         veri.setdefault('foto_url', None)
+        self.hayvan_fotograflari_ata(veri, self.hayvan_fotograflari(veri))
         veri.setdefault('son_guncelleme', "")
         return veri
 
@@ -3255,6 +3377,11 @@ class HayvanTakipSistemi:
 
     # --- Arayüz Oluşturma Fonksiyonları ---
     def ana_interface_olustur(self):
+        try:
+            self.root.title("ALP Ziraat - Sürü Takip Sistemi")
+        except tk.TclError:
+            pass
+
         #  ÜST BAŞLIK (HEADER) 
         # Header: net, düşük gürültülü operasyon barı
         header_accentstrip = tk.Frame(self.root, bg=self.renkler["ana_kirmizi"], height=4)
@@ -3432,7 +3559,6 @@ class HayvanTakipSistemi:
 
         #  NOTEBOOK 
         self.notebook = ttk.Notebook(self.root, style='Modern.TNotebook')
-        self.notebook.pack(fill='both', expand=True, padx=12, pady=(10, 12))
 
         self.dashboard_sekmesi()
         self.hayvan_kayit_sekmesi()
@@ -3447,7 +3573,7 @@ class HayvanTakipSistemi:
         style.layout('Modern.TNotebook.Tab', [])
         
         self.custom_tab_bar = tk.Frame(self.root, bg=self.renkler["arkaplan"])
-        self.custom_tab_bar.pack(fill='x', padx=12, pady=(10, 0), before=self.notebook)
+        self.custom_tab_bar.pack(fill='x', padx=12, pady=(10, 0))
         self.themed_widgets.append((self.custom_tab_bar, 'arkaplan'))
 
         self.tab_buttons = []
@@ -3455,6 +3581,8 @@ class HayvanTakipSistemi:
             text = self.notebook.tab(tab_id, "text")
             btn = self.modern_buton(self.custom_tab_bar, text, command=lambda idx=i: self._select_tab(idx), purpose='theme')
             self.tab_buttons.append(btn)
+
+        self.notebook.pack(fill='both', expand=True, padx=12, pady=(4, 12))
 
         def tablari_yerlestir(event=None):
             try:
@@ -5102,6 +5230,7 @@ class HayvanTakipSistemi:
             'asi_prosedurler': [],
             'arsivli': False, 'arsiv_tarihi': None,
             'foto_data': getattr(self, "yeni_hayvan_foto_data", None),
+            'foto_datas': [getattr(self, "yeni_hayvan_foto_data", None)] if getattr(self, "yeni_hayvan_foto_data", None) else [],
             'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         }
         self.veri_kaydet()
@@ -5603,6 +5732,11 @@ class HayvanTakipSistemi:
         if kupe_no not in self.hayvanlar:
             return
         parent = pencere or self.root
+        hayvan = self.hayvanlar[kupe_no]
+        mevcut_fotograflar = self.hayvan_fotograflari(hayvan)
+        if len(mevcut_fotograflar) >= 3:
+            messagebox.showwarning("Fotoğraf", "Bu hayvan için en fazla 3 fotoğraf eklenebilir.", parent=parent)
+            return
         dosya = filedialog.askopenfilename(
             title="Hayvan fotoğrafı seç",
             parent=parent,
@@ -5610,13 +5744,12 @@ class HayvanTakipSistemi:
         )
         if not dosya:
             return
-        hayvan = self.hayvanlar[kupe_no]
         gorunen = self.hayvan_gorunen_kupe(kupe_no, hayvan)
         try:
-            hayvan['foto_data'] = self.foto_data_olustur(dosya)
-            hayvan['foto_url'] = None
+            yeni_foto = self.foto_data_olustur(dosya)
+            self.hayvan_fotograflari_ata(hayvan, mevcut_fotograflar + [yeni_foto])
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.islem_kaydi_baslat(f"Hayvan fotoğrafı güncellendi: {gorunen}")
+            self.islem_kaydi_baslat(f"Hayvan fotoğrafı eklendi: {gorunen}")
             self.veri_kaydet()
             self.ekranlari_guncelle()
             if pencere is not None and pencere is not self.root:
@@ -5629,6 +5762,30 @@ class HayvanTakipSistemi:
                 messagebox.showinfo("Fotoğraf", f"{gorunen} için fotoğraf eklendi.", parent=parent)
         except Exception as e:
             messagebox.showerror("Fotoğraf", f"Fotoğraf eklenemedi:\n{e}", parent=parent)
+
+    def hayvan_fotograf_sil(self, kupe_no, foto_index, pencere=None):
+        if kupe_no not in self.hayvanlar:
+            return
+        parent = pencere or self.root
+        hayvan = self.hayvanlar[kupe_no]
+        fotograflar = self.hayvan_fotograflari(hayvan)
+        if foto_index < 0 or foto_index >= len(fotograflar):
+            return
+        gorunen = self.hayvan_gorunen_kupe(kupe_no, hayvan)
+        if not messagebox.askyesno("Fotoğrafı Sil", f"{gorunen} için seçili fotoğraf silinsin mi?", parent=parent):
+            return
+        fotograflar.pop(foto_index)
+        self.hayvan_fotograflari_ata(hayvan, fotograflar)
+        hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        self.islem_kaydi_baslat(f"Hayvan fotoğrafı silindi: {gorunen}")
+        self.veri_kaydet()
+        self.ekranlari_guncelle()
+        if pencere is not None and pencere is not self.root:
+            try:
+                pencere.destroy()
+            except tk.TclError:
+                pass
+            self._track_after(self.root, 60, lambda: self.hayvan_detay_penceresi(kupe_no))
 
     def hayvan_kalici_sil(self, kupe_no, pencere):
         if kupe_no not in self.hayvanlar:
@@ -6397,16 +6554,20 @@ class HayvanTakipSistemi:
 
         detay_window.protocol("WM_DELETE_WINDOW", kapat)
 
+        fotograflar = self.hayvan_fotograflari(hayvan)
+
         header = tk.Frame(detay_window, bg=self.renkler["siyah"], padx=22, pady=14)
         header.pack(fill="x")
-        sol_header = tk.Frame(header, bg=self.renkler["siyah"])
+        header_top = tk.Frame(header, bg=self.renkler["siyah"])
+        header_top.pack(fill="x")
+        sol_header = tk.Frame(header_top, bg=self.renkler["siyah"])
         sol_header.pack(side="left", fill="x", expand=True)
         tk.Label(
             sol_header,
             text=f"{gorunen_kupe} Hayvan Profili",
             bg=self.renkler["siyah"],
             fg=self.renkler["beyaz"],
-            font=("Segoe UI", 21, "bold"),
+            font=("Segoe UI", 20, "bold"),
         ).pack(anchor="w")
         tk.Label(
             sol_header,
@@ -6416,13 +6577,28 @@ class HayvanTakipSistemi:
             font=("Segoe UI", 10),
         ).pack(anchor="w", pady=(3, 0))
 
+        rozetler = tk.Frame(header_top, bg=self.renkler["siyah"])
+        rozetler.pack(side="right", padx=(18, 0))
+
+        def header_rozet(baslik, deger, renk=None):
+            renk = renk or self.renkler["button_primary_bg"]
+            pill = tk.Frame(rozetler, bg=self.renkler["kart_ikincil"], padx=12, pady=7, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+            pill.pack(side="left", padx=(8, 0))
+            tk.Label(pill, text=baslik.upper(), bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+            tk.Label(pill, text=str(deger), bg=self.renkler["kart_ikincil"], fg=renk, font=("Segoe UI", 12, "bold")).pack(anchor="w")
+
+        header_rozet("Yaş", yas_metin)
+        header_rozet("Durum", durum, self.renkler["button_success_bg"] if durum not in {"Arşivli", "Ölü", "Kesildi"} else self.renkler["uyari"])
+        header_rozet("Fotoğraf", f"{len(fotograflar)}/3")
+
         aksiyon_frame = tk.Frame(header, bg=self.renkler["siyah"])
-        aksiyon_frame.pack(side="right", fill="x", padx=(12, 0))
+        aksiyon_frame.pack(fill="x", pady=(14, 0))
         aksiyonlar = [
             ("Düzenle", lambda: self.hayvan_duzenle_penceresi(hayvan_id, detay_window), "default"),
-            ("Fotoğraf Değiştir" if hayvan.get("foto_data") else "Fotoğraf Ekle", lambda: self.hayvan_fotograf_sec(hayvan_id, detay_window), "primary"),
             ("Aşı/Prosedür", lambda: self.asi_prosedur_penceresi(hayvan_id, detay_window), "success"),
         ]
+        if len(fotograflar) < 3:
+            aksiyonlar.append(("Fotoğraf Ekle", lambda: self.hayvan_fotograf_sec(hayvan_id, detay_window), "primary"))
         if self.hayvan_tohumlanabilir_mi(hayvan):
             aksiyonlar.append(("Tohumla", lambda: self.tohumlama_ekranina_hayvanla_git(hayvan_id, detay_window), "primary"))
         if not hayvan.get("olu") and not hayvan.get("kesildi") and not hayvan.get("arsivli"):
@@ -6440,7 +6616,7 @@ class HayvanTakipSistemi:
         else:
             aksiyonlar.append(("Arşivle", lambda: self.hayvan_sil_detay(hayvan_id, detay_window), "danger"))
         aksiyonlar.append(("Kapat", kapat, "default"))
-        self.responsive_buton_grubu(aksiyon_frame, aksiyonlar, gap=7, align="right")
+        self.responsive_buton_grubu(aksiyon_frame, aksiyonlar, gap=7, align="left")
 
         sayfa = self.kaydirilabilir_sayfa(detay_window, padx=22, pady=18)
 
@@ -6450,26 +6626,49 @@ class HayvanTakipSistemi:
         ust.grid_columnconfigure(1, weight=2)
         ust.grid_columnconfigure(2, weight=2)
 
-        foto_kart, foto_body = self.profil_kart_olustur(ust, "Fotoğraf", accent=self.renkler["button_primary_bg"])
+        foto_kart, foto_body = self.profil_kart_olustur(ust, "Fotoğraflar", accent=self.renkler["button_primary_bg"])
         foto_kart.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
-        foto_img = self.foto_data_to_image(hayvan.get("foto_data"), max_size=(250, 190))
-        if foto_img:
-            foto_lbl = tk.Label(foto_body, image=foto_img, bg=self.renkler["kart_arkaplan"])
-            foto_lbl.image = foto_img
-            self._foto_referanslari.append(foto_img)
-            foto_lbl.pack(fill="both", expand=True)
-        else:
-            tk.Label(
-                foto_body,
-                text="Fotoğraf yok",
-                bg=self.renkler["input_bg"],
-                fg=self.renkler["muted"],
-                font=("Segoe UI", 12, "bold"),
-                width=28,
-                height=9,
+        foto_grid = tk.Frame(foto_body, bg=self.renkler["kart_arkaplan"])
+        foto_grid.pack(fill="both", expand=True)
+        for col in range(3):
+            foto_grid.grid_columnconfigure(col, weight=1)
+        for idx in range(3):
+            slot = tk.Frame(
+                foto_grid,
+                bg=self.renkler["kart_ikincil"],
+                padx=6,
+                pady=6,
                 highlightthickness=1,
                 highlightbackground=self.renkler["kenarlik"],
-            ).pack(fill="both", expand=True)
+            )
+            slot.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 7, 0), pady=(0, 8))
+            if idx < len(fotograflar):
+                foto_img = self.foto_data_to_image(fotograflar[idx], max_size=(120, 90))
+                if foto_img:
+                    foto_lbl = tk.Label(slot, image=foto_img, bg=self.renkler["kart_ikincil"])
+                    foto_lbl.image = foto_img
+                    self._foto_referanslari.append(foto_img)
+                    foto_lbl.pack(fill="both", expand=True)
+                else:
+                    tk.Label(slot, text="Açılamadı", bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold"), height=5).pack(fill="both", expand=True)
+                alt_satir = tk.Frame(slot, bg=self.renkler["kart_ikincil"])
+                alt_satir.pack(fill="x", pady=(6, 0))
+                tk.Label(alt_satir, text=f"{idx + 1}. fotoğraf", bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 8, "bold")).pack(side="left")
+                self.modern_buton(alt_satir, "Sil", lambda i=idx: self.hayvan_fotograf_sil(hayvan_id, i, detay_window), purpose='danger', width=5, small=True).pack(side="right")
+            else:
+                tk.Label(slot, text=f"{idx + 1}. slot boş", bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold"), height=6).pack(fill="both", expand=True)
+
+        foto_alt = tk.Frame(foto_body, bg=self.renkler["kart_arkaplan"])
+        foto_alt.pack(fill="x")
+        tk.Label(
+            foto_alt,
+            text=f"{len(fotograflar)}/3 fotoğraf",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
+        if len(fotograflar) < 3:
+            self.modern_buton(foto_alt, "Fotoğraf Ekle", lambda: self.hayvan_fotograf_sec(hayvan_id, detay_window), purpose='primary', small=True).pack(side="right")
 
         kimlik_kart, kimlik_body = self.profil_kart_olustur(ust, "Kimlik ve Durum", accent=self.renkler["button_success_bg"])
         kimlik_kart.grid(row=0, column=1, sticky="nsew", padx=(0, 14))
