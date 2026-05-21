@@ -247,6 +247,13 @@ Android icin onemli hazirliklar:
 - Son tam test: `python tools\run_smoke_tests.py` komutu 21 Mayis 2026 tarihinde gecti.
 - Son uretilen paketler: `ALP_Ziraat_Hayvan_Takip.exe` 39.8 MB, `ALP_Ziraat_Hayvan_Takip_Setup.exe` 47.5 MB, kurulum ZIP'i 39.4 MB.
 
+## 22 Mayis 2026 GitHub Actions Yedek Duzeltmesi
+
+- GitHub Actions `Daily API Backup` job'unda `The read operation timed out` hatasi goruldu. Sebep buyuk olasilikla Render API'nin uyku modundan yavas uyanmasi veya `/api/yedek` cevabinin 30 sn icinde donmemesiydi.
+- `tools/server_backup.py` guncellendi: once `/api/health` ile API uyandirilir, login timeout 90 sn, yedek indirme timeout 180 sn oldu ve istekler 5 kez retry/backoff ile denenir.
+- `.github/workflows/daily-api-backup.yml` guncellendi: job timeout 12 dakika, retry/timeout env degerleri eklendi.
+- Lokal backup smoke test basarili calisti; gecici lokal API'den yedek JSON dosyasi indirildi.
+
 ## Bilinen Oncelikler / Sonraki Iyilestirmeler
 
 - Raporlara tarih araligi, ciftlik karsilastirma ve PDF/Excel icinde daha detayli grafik verisi eklemek.
