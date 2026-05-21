@@ -6,6 +6,11 @@ import tkinter as tk
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SAMPLE_PHOTOS = [
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP8zwACTGCSAQANHQEDgslx/wAAAABJRU5ErkJggg==",
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR4nGNk+M/AwMDABCIYGAAMHgEDrNiLpwAAAABJRU5ErkJggg==",
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNkYPjPwMDAxAAGAAsfAQMU4wsAAAAAAElFTkSuQmCC",
+]
 
 
 def prepare_local_appdata():
@@ -25,6 +30,7 @@ def patch_dialogs():
     messagebox.showerror = lambda *args, **kwargs: None
     messagebox.askyesno = lambda *args, **kwargs: True
     filedialog.askopenfilename = lambda *args, **kwargs: ""
+    filedialog.askopenfilenames = lambda *args, **kwargs: ()
     return messagebox
 
 
@@ -71,10 +77,21 @@ def assert_main_layout(app):
     app.root.update()
     assert hasattr(app, "custom_tab_bar"), "custom tab bar missing"
     assert hasattr(app, "notebook"), "notebook missing"
+    assert hasattr(app, "rapor_scroll_sayfa"), "report scroll page missing"
+    assert hasattr(app, "asi_scroll_sayfa"), "vaccine/procedure scroll page missing"
+    assert hasattr(app, "asi_tree_scroll_v") and hasattr(app, "asi_tree_scroll_h"), "vaccine/procedure table scrollbars missing"
+    assert hasattr(app, "dashboard_ciftlik_label"), "dashboard farm/status label missing"
+    assert hasattr(app, "dashboard_risk_label"), "dashboard risk label missing"
     assert len(getattr(app, "tab_buttons", [])) >= 7, "main tabs missing"
+    dashboard_text = "\n".join(widget_texts(app.dashboard_frame))
+    for expected in ("Hızlı İşlemler", "Yaklaşan İşler", "Son İşlemler"):
+        assert expected in dashboard_text, expected
     tab_y = app.custom_tab_bar.winfo_rooty()
     notebook_y = app.notebook.winfo_rooty()
     assert tab_y < notebook_y, f"tab bar is below content: tab_y={tab_y}, notebook_y={notebook_y}"
+    bar_width = app.custom_tab_bar.winfo_width()
+    for button in app.tab_buttons:
+        assert button.winfo_x() + button.winfo_width() <= bar_width + 2, "tab button overflows custom tab bar"
 
 
 def main():
@@ -100,6 +117,20 @@ def main():
         app.ciftlik_kupe_no_entry.insert(0, "C001")
         app.dogum_tarihi_entry.insert(0, "01/01/2024")
         app.cins_combo.set("D\u00fcve")
+        app.yeni_hayvan_foto_datas = list(SAMPLE_PHOTOS)
+        app.yeni_hayvan_foto_data = SAMPLE_PHOTOS[0]
+        app.yeni_hayvan_foto_onizleme_guncelle()
+        app.root.update()
+        assert all(getattr(slot, "image", None) for slot in app.yeni_hayvan_foto_previews)
+        for slot in app.yeni_hayvan_foto_previews:
+            img = getattr(slot, "image", None)
+            assert img.width() >= slot.winfo_width() - 2, "photo preview does not fill slot width"
+            assert img.height() >= slot.winfo_height() - 2, "photo preview does not fill slot height"
+        app.yeni_hayvan_foto_previews[1].event_generate("<Button-1>", x=126, y=10)
+        app.root.update()
+        assert len(app.yeni_hayvan_foto_datas) == 2
+        app.yeni_hayvan_foto_datas = list(SAMPLE_PHOTOS)
+        app.yeni_hayvan_foto_data = SAMPLE_PHOTOS[0]
         app.hayvan_kaydet()
 
         assert len(app.hayvanlar) == 1, app.hayvanlar
@@ -107,9 +138,9 @@ def main():
         created = app.hayvanlar[created_id]
         assert created["resmi_kupe_no"] == "TR001"
         assert created["ciftlik_kupe_no"] == "C001"
-        app.hayvan_fotograflari_ata(created, ["foto-1", "foto-2", "foto-3", "foto-4"])
         assert len(created["foto_datas"]) == 3
-        assert created["foto_data"] == "foto-1"
+        assert created["foto_data"] == SAMPLE_PHOTOS[0]
+        assert getattr(app, "yeni_hayvan_foto_datas", []) == []
 
         app.hayvanlar["arch"] = make_animal(
             id="arch",
@@ -157,6 +188,14 @@ def main():
             "sonraki_tarih": "01/06/2026",
             "not": "test",
         })
+        app.raporlari_guncelle()
+        app.root.update()
+        report_text = "\n".join(widget_texts(app.rapor_frame))
+        for expected in ("Aktif hayvan", "Gebelik kontrol", "Cinsiyet Da\u011f\u0131l\u0131m\u0131", "S\u00fcr\u00fcdeki Hayvan Tipleri", "\u00d6zel Durumlar"):
+            assert expected in report_text, expected
+        chart_titles = [text for text in widget_texts(app.rapor_frame) if "Da\u011f\u0131l\u0131m\u0131" in text or text in ("S\u00fcr\u00fcdeki Hayvan Tipleri", "\u00d6zel Durumlar")]
+        assert len(chart_titles) >= 3, chart_titles
+
         app.hayvan_detay_penceresi(created_id)
         app.root.update()
         profiles = [
@@ -167,6 +206,9 @@ def main():
         profile_text = "\n".join(widget_texts(profiles[-1]))
         for expected in ("Foto\u011fraflar", "Kimlik ve Durum", "\u00d6zet", "Tohumlama Ge\u00e7mi\u015fi", "Do\u011fum ve Yavru Ge\u00e7mi\u015fi", "A\u015f\u0131 ve Prosed\u00fcrler"):
             assert expected in profile_text, expected
+        popup = app.fotograf_buyut_penceresi(SAMPLE_PHOTOS[0], "Smoke Foto", profiles[-1])
+        assert popup and popup.winfo_exists()
+        popup.destroy()
         profiles[-1].destroy()
 
         male = make_animal(id="male", kupe_no="M1", resmi_kupe_no="TRM", ciftlik_kupe_no="M1", cins="Dana")

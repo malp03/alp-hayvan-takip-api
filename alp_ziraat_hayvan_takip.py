@@ -33,15 +33,6 @@ from alp_ziraat_is_kurallari import (
     uyari_esigi as is_uyari_esigi,
 )
 
-# --- Grafik çizimi için matplotlib kütüphanesini ekliyoruz ---
-try:
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
-
-
 class ApiHatasi(Exception):
     def __init__(self, mesaj, status=None):
         super().__init__(mesaj)
@@ -267,7 +258,7 @@ class HayvanTakipSistemi:
             self._update_custom_tabs()
         if hasattr(self, 'api_durum_guncelle'):
             self.api_durum_guncelle()
-        if MATPLOTLIB_AVAILABLE and hasattr(self, 'rapor_frame'):
+        if hasattr(self, 'rapor_frame'):
             self.raporlari_guncelle()
 
 
@@ -722,6 +713,7 @@ class HayvanTakipSistemi:
         if not (PIL_AVAILABLE and foto_data):
             return None
         try:
+            size = (max(int(size[0]), 1), max(int(size[1]), 1))
             raw = str(foto_data)
             if "," in raw:
                 raw = raw.split(",", 1)[1]
@@ -741,11 +733,29 @@ class HayvanTakipSistemi:
             label.configure(image="", text=bos_metin)
             label.image = None
 
-    def foto_slot_canvas_ciz(self, canvas, foto_data, slot_no, remove_callback=None, max_size=(154, 86)):
+    def foto_slot_canvas_ciz(self, canvas, foto_data, slot_no, remove_callback=None, max_size=(154, 86), bind_resize=True):
         try:
+            canvas._alp_foto_slot_payload = (foto_data, slot_no, remove_callback, max_size)
+            if bind_resize and not getattr(canvas, "_alp_foto_resize_bound", False):
+                def yeniden_ciz(event=None, hedef=canvas):
+                    payload = getattr(hedef, "_alp_foto_slot_payload", None)
+                    if payload:
+                        foto, no, kaldir, boyut = payload
+                        self.foto_slot_canvas_ciz(hedef, foto, no, kaldir, boyut, bind_resize=False)
+
+                canvas.bind("<Configure>", yeniden_ciz)
+                canvas._alp_foto_resize_bound = True
+                try:
+                    eski_after = getattr(canvas, "_alp_foto_after_id", None)
+                    if eski_after:
+                        canvas.after_cancel(eski_after)
+                except tk.TclError:
+                    pass
+                canvas._alp_foto_after_id = canvas.after_idle(yeniden_ciz)
+
             canvas.delete("all")
-            w = int(canvas.cget("width"))
-            h = int(canvas.cget("height"))
+            w = max(canvas.winfo_width(), int(canvas.cget("width")), 1)
+            h = max(canvas.winfo_height(), int(canvas.cget("height")), 1)
             canvas.configure(bg=self.renkler["input_bg"], highlightbackground=self.renkler["kenarlik"])
             img = self.foto_data_to_cover_image(foto_data, size=(w, h))
             if img:
@@ -1645,7 +1655,7 @@ class HayvanTakipSistemi:
         ).pack(anchor="w")
         tk.Label(
             baslik_kutu,
-            text="Ciftlik hesabiniza giris yapin",
+            text="Çiftlik hesabınıza giriş yapın",
             bg=self.renkler["kart_arkaplan"],
             fg=self.renkler["muted"],
             font=("Segoe UI", 10),
@@ -1653,7 +1663,7 @@ class HayvanTakipSistemi:
 
         tk.Label(
             kutu,
-            text="Kullanici adi",
+            text="Kullanıcı adı",
             bg=self.renkler["kart_arkaplan"],
             fg=self.renkler["muted"],
             font=("Segoe UI", 9, "bold"),
@@ -1663,7 +1673,7 @@ class HayvanTakipSistemi:
 
         tk.Label(
             kutu,
-            text="Sifre",
+            text="Şifre",
             bg=self.renkler["kart_arkaplan"],
             fg=self.renkler["muted"],
             font=("Segoe UI", 9, "bold"),
@@ -1765,7 +1775,7 @@ class HayvanTakipSistemi:
             kullanici_adi = kullanici_entry.get().strip()
             sifre = sifre_entry.get()
             if not kullanici_adi or not sifre:
-                durum_label.config(text="Kullanici adi ve sifre zorunludur.")
+                durum_label.config(text="Kullanıcı adı ve şifre zorunludur.")
                 return
             bu_bilgisayari_tani = bool(beni_tani_var.get())
             login_state["running"] = True
@@ -1826,7 +1836,7 @@ class HayvanTakipSistemi:
         if not sonuc["ok"]:
             return False
 
-        self.root.title("ALP ZIRAAT - Suru Takip Sistemi")
+        self.root.title("ALP Ziraat - Sürü Takip Sistemi")
         self.root.geometry("1500x900")
         self.root.minsize(1000, 700)
         self.root.resizable(True, True)
@@ -2137,11 +2147,11 @@ class HayvanTakipSistemi:
                     if state["ciftlikler"] or state["kullanicilar"]:
                         messagebox.showwarning(
                             "Admin Merkezi",
-                            f"API baglantisi kurulamadi; son kayitli yonetim listesi gosteriliyor.\n\n{e}",
+                            f"API bağlantısı kurulamadı; son kayıtlı yönetim listesi gösteriliyor.\n\n{e}",
                             parent=self.root,
                         )
                     else:
-                        messagebox.showerror("Admin Merkezi", f"Yonetim verileri alinamadi:\n{e}", parent=self.root)
+                        messagebox.showerror("Admin Merkezi", f"Yönetim verileri alınamadı:\n{e}", parent=self.root)
                 return False
 
         verileri_yenile(sessiz=True)
@@ -2201,7 +2211,7 @@ class HayvanTakipSistemi:
         ).pack(anchor="w")
         tk.Label(
             ust,
-            text="Ciftlikleri, kullanicilari ve suru verilerini tek yerden yonetin.",
+            text="Çiftlikleri, kullanıcıları ve sürü verilerini tek yerden yönetin.",
             bg=self.renkler["arkaplan"],
             fg=self.renkler["muted"],
             font=("Segoe UI", 10),
@@ -2242,8 +2252,8 @@ class HayvanTakipSistemi:
         govde.bind("<Configure>", admin_govde_yerlestir)
         self._track_after(self.root, 50, admin_govde_yerlestir)
 
-        tk.Label(sol, text="Suruye Giris", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w")
-        tk.Label(sol, text="Tum kayitlari gorebilir veya belirli bir ciftlige odaklanabilirsiniz.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9), wraplength=320, justify="left").pack(anchor="w", pady=(4, 14))
+        tk.Label(sol, text="Sürüye Giriş", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        tk.Label(sol, text="Tüm kayıtları görebilir veya belirli bir çiftliğe odaklanabilirsiniz.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9), wraplength=320, justify="left").pack(anchor="w", pady=(4, 14))
 
         ciftlik_combo = ttk.Combobox(sol, state="readonly", font=("Segoe UI", 10), style="TCombobox")
         ciftlik_combo.pack(fill="x", pady=(0, 12), ipady=4)
@@ -2299,7 +2309,7 @@ class HayvanTakipSistemi:
             if state.get("offline_cache"):
                 messagebox.showwarning(
                     "Admin Merkezi",
-                    "Offline modda tum suru verisi guvenli sekilde yenilenemez. Internet gelince Senkronize Et ile tekrar deneyin.",
+                    "Offline modda tüm sürü verisi güvenli şekilde yenilenemez. İnternet gelince Senkronize Et ile tekrar deneyin.",
                     parent=self.root,
                 )
                 return
@@ -2311,13 +2321,13 @@ class HayvanTakipSistemi:
             if state.get("offline_cache"):
                 messagebox.showwarning(
                     "Admin Merkezi",
-                    "Offline modda ciftlik degistirmek yerine sadece son kayitli ciftlik listesi gosterilir. Internet gelince Senkronize Et ile suruye girin.",
+                    "Offline modda çiftlik değiştirmek yerine sadece son kayıtlı çiftlik listesi gösterilir. İnternet gelince Senkronize Et ile sürüye girin.",
                     parent=self.root,
                 )
                 return
             ciftlik = secili_ciftlik()
             if not ciftlik:
-                messagebox.showwarning("Admin Merkezi", "Once bir ciftlik secin.", parent=self.root)
+                messagebox.showwarning("Admin Merkezi", "Önce bir çiftlik seçin.", parent=self.root)
                 return
             self.admin_aktif_ciftlik_id = ciftlik.get("id")
             self.admin_aktif_ciftlik_ad = ciftlik.get("ad")
@@ -2345,11 +2355,11 @@ class HayvanTakipSistemi:
         ciftlik_combo.bind("<<ComboboxSelected>>", combodan_ciftlik_sec)
         ciftlik_combo.bind("<Return>", lambda event: secili_suruye_gir())
 
-        admin_buton(sol, "Tum ciftliklerin suru takibine gir", tum_suruye_gir, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
-        admin_buton(sol, "Secili ciftligin surusune gir", secili_suruye_gir, self.renkler["button_success_bg"]).pack(fill="x", pady=5)
+        admin_buton(sol, "Tüm çiftliklerin sürü takibine gir", tum_suruye_gir, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
+        admin_buton(sol, "Seçili çiftliğin sürüsüne gir", secili_suruye_gir, self.renkler["button_success_bg"]).pack(fill="x", pady=5)
 
-        tk.Label(sag, text="Yonetim", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w")
-        tk.Label(sag, text="Yeni ciftlik acin, kullanici atayin veya mevcut yetkileri duzenleyin.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9), wraplength=320, justify="left").pack(anchor="w", pady=(4, 14))
+        tk.Label(sag, text="Yönetim", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        tk.Label(sag, text="Yeni çiftlik açın, kullanıcı atayın veya mevcut yetkileri düzenleyin.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9), wraplength=320, justify="left").pack(anchor="w", pady=(4, 14))
 
         def ekrani_yenile():
             ciftlikler = aktif_ciftlikler()
@@ -2367,16 +2377,16 @@ class HayvanTakipSistemi:
             else:
                 ciftlik_combo.set("")
             ozet_label.config(
-                text=f"{len(state['ciftlikler'])} ciftlik  |  {len(state['kullanicilar'])} kullanici  |  Admin: {(self.api_kullanici or {}).get('kullanici_adi', '-')}"
+                text=f"{len(state['ciftlikler'])} çiftlik  |  {len(state['kullanicilar'])} kullanıcı  |  Admin: {(self.api_kullanici or {}).get('kullanici_adi', '-')}"
             )
             if state.get("offline_cache"):
                 zaman = state.get("cache_time") or "bilinmiyor"
                 admin_durum_label.config(
-                    text=f"Offline: son kayitli liste gosteriliyor. Son guncelleme: {zaman}",
+                    text=f"Offline: son kayıtlı liste gösteriliyor. Son güncelleme: {zaman}",
                     fg=self.renkler["uyari"],
                 )
             else:
-                admin_durum_label.config(text="Online: yonetim listesi guncel.", fg=self.renkler["yesil"])
+                admin_durum_label.config(text="Online: yönetim listesi güncel.", fg=self.renkler["yesil"])
 
         def ciftlikleri_yonet():
             self.admin_ciftlik_yonetim_penceresi()
@@ -2392,20 +2402,20 @@ class HayvanTakipSistemi:
             online = verileri_yenile(sessiz=False)
             ekrani_yenile()
             if online:
-                messagebox.showinfo("Admin Merkezi", "API baglantisi yenilendi ve yonetim listesi guncellendi.", parent=self.root)
+                messagebox.showinfo("Admin Merkezi", "API bağlantısı yenilendi ve yönetim listesi güncellendi.", parent=self.root)
 
         def admin_api_ayarlari():
             self.api_ayar_penceresi()
             verileri_yenile(sessiz=True)
             ekrani_yenile()
 
-        admin_buton(sag, "Ciftlikleri yonet", ciftlikleri_yonet).pack(fill="x", pady=5)
-        admin_buton(sag, "Kullanicilari yonet", lambda: kullanicilari_yonet(False)).pack(fill="x", pady=5)
-        admin_buton(sag, "Yeni kullanici olustur", lambda: kullanicilari_yonet(True), self.renkler["button_success_bg"]).pack(fill="x", pady=5)
-        admin_buton(sag, "Son islemleri gor", self.admin_islem_gecmisi_penceresi).pack(fill="x", pady=5)
+        admin_buton(sag, "Çiftlikleri yönet", ciftlikleri_yonet).pack(fill="x", pady=5)
+        admin_buton(sag, "Kullanıcıları yönet", lambda: kullanicilari_yonet(False)).pack(fill="x", pady=5)
+        admin_buton(sag, "Yeni kullanıcı oluştur", lambda: kullanicilari_yonet(True), self.renkler["button_success_bg"]).pack(fill="x", pady=5)
+        admin_buton(sag, "Son işlemleri gör", self.admin_islem_gecmisi_penceresi).pack(fill="x", pady=5)
         admin_buton(sag, "Online yedek indir", lambda: self.admin_online_yedek_indir(self.root), self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
-        admin_buton(sag, "API ayarlari", admin_api_ayarlari, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
-        admin_buton(sag, "Sifremi degistir", lambda: self.sifre_degistir_penceresi(self.root)).pack(fill="x", pady=5)
+        admin_buton(sag, "API ayarları", admin_api_ayarlari, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
+        admin_buton(sag, "Şifremi değiştir", lambda: self.sifre_degistir_penceresi(self.root)).pack(fill="x", pady=5)
         admin_buton(sag, "Senkronize Et", admin_senkronize_et, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
 
         alt = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
@@ -2436,46 +2446,101 @@ class HayvanTakipSistemi:
         return sonuc["ok"]
 
     def admin_ciftlik_yonetim_penceresi(self):
-        if not self.online_islem_gerekli("Ciftlik yonetimi", self.root):
+        if not self.online_islem_gerekli("Çiftlik yönetimi", self.root):
             return
         pencere = tk.Toplevel(self.root)
-        pencere.title("Ciftlik Yonetimi")
-        pencere.geometry("860x520")
+        pencere.title("Çiftlik Yönetimi")
+        pencere.geometry("1040x640")
+        pencere.minsize(720, 460)
         pencere.configure(bg=self.renkler["arkaplan"])
         pencere.transient(self.root)
+        try:
+            pencere.iconphoto(True, self.logo_ikon)
+        except Exception:
+            pass
         pencere.grab_set()
 
         ciftlikler = []
         secili = {"id": None}
 
-        ana = tk.Frame(pencere, bg=self.renkler["arkaplan"], padx=16, pady=16)
-        ana.pack(fill="both", expand=True)
+        baslik_alan = tk.Frame(pencere, bg=self.renkler["arkaplan"], padx=22)
+        baslik_alan.pack(fill="x", pady=(18, 8))
+        self.themed_widgets.append((baslik_alan, 'arkaplan'))
+        tk.Label(
+            baslik_alan,
+            text="Çiftlik Yönetimi",
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 20, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            baslik_alan,
+            text="Çiftlik açın, düzenleyin veya canlı veritabanından kalıcı olarak silin.",
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(4, 0))
+
+        ana = tk.Frame(pencere, bg=self.renkler["arkaplan"], padx=22)
+        ana.pack(fill="both", expand=True, pady=(8, 22))
         ana.columnconfigure(0, weight=3)
         ana.columnconfigure(1, weight=2)
+        ana.rowconfigure(0, weight=1)
+        self.themed_widgets.append((ana, 'arkaplan'))
 
-        tree = ttk.Treeview(ana, columns=("id", "ad", "aktif", "aciklama"), show="headings", style="Modern.Treeview")
+        liste_panel = self.modern_kart(ana, accent=self.renkler["button_primary_bg"])
+        liste_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        tk.Label(
+            liste_panel,
+            text="Çiftlikler",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w", padx=16, pady=(14, 8))
+
+        tree_frame = tk.Frame(liste_panel, bg=self.renkler["kart_arkaplan"])
+        tree_frame.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
+        self.themed_widgets.append((tree_frame, 'kart'))
+
+        tree = ttk.Treeview(tree_frame, columns=("id", "ad", "aktif", "aciklama"), show="headings", style="Modern.Treeview")
         for col, baslik, genislik in [
             ("id", "ID", 170),
-            ("ad", "Ciftlik", 180),
+            ("ad", "Çiftlik", 180),
             ("aktif", "Durum", 80),
-            ("aciklama", "Aciklama", 260),
+            ("aciklama", "Açıklama", 260),
         ]:
             tree.heading(col, text=baslik)
             tree.column(col, width=genislik, anchor="center")
-        tree.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
-        ana.rowconfigure(0, weight=1)
+        tree.grid(row=0, column=0, sticky="nsew")
+        tree_sb_y = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+        tree_sb_x = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=tree_sb_y.set, xscrollcommand=tree_sb_x.set)
+        tree_sb_y.grid(row=0, column=1, sticky="ns")
+        tree_sb_x.grid(row=1, column=0, sticky="ew")
 
-        form = tk.Frame(ana, bg=self.renkler["kart_arkaplan"], padx=16, pady=16, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+        status_label = tk.Label(
+            liste_panel,
+            text="Liste yükleniyor...",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9, "bold"),
+        )
+        status_label.pack(anchor="w", padx=16, pady=(0, 14))
+
+        form = self.modern_kart(ana, accent=self.renkler["button_success_bg"])
         form.grid(row=0, column=1, sticky="nsew")
+        form.configure(padx=16, pady=16)
 
-        tk.Label(form, text="Ciftlik Bilgisi", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 12))
-        tk.Label(form, text="ID (yeni kayitta istege bagli)", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(form, text="Çiftlik Bilgisi", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 12))
+        tk.Label(form, text="ID (yeni kayıtta isteğe bağlı)", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         id_entry = ttk.Entry(form, font=("Segoe UI", 10), style="TEntry")
         id_entry.pack(fill="x", pady=(4, 10), ipady=4)
-        tk.Label(form, text="Ciftlik adi", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(form, text="Çiftlik adı", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         ad_entry = ttk.Entry(form, font=("Segoe UI", 10), style="TEntry")
         ad_entry.pack(fill="x", pady=(4, 10), ipady=4)
-        tk.Label(form, text="Aciklama", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(form, text="Açıklama", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         aciklama_entry = ttk.Entry(form, font=("Segoe UI", 10), style="TEntry")
         aciklama_entry.pack(fill="x", pady=(4, 10), ipady=4)
         aktif_var = tk.BooleanVar(value=True)
@@ -2496,6 +2561,7 @@ class HayvanTakipSistemi:
                 tree.delete(item)
             for c in ciftlikler:
                 tree.insert("", "end", iid=c.get("id"), values=(c.get("id"), c.get("ad"), "Aktif" if c.get("aktif", True) else "Pasif", c.get("aciklama") or ""))
+            status_label.config(text=f"{len(ciftlikler)} çiftlik listelendi.")
 
         def secimi_yukle(event=None):
             secim = tree.selection()
@@ -2517,7 +2583,7 @@ class HayvanTakipSistemi:
         def kaydet():
             ad = ad_entry.get().strip()
             if not ad:
-                return messagebox.showerror("Ciftlik", "Ciftlik adi zorunludur.", parent=pencere)
+                return messagebox.showerror("Çiftlik", "Çiftlik adı zorunludur.", parent=pencere)
             payload = {"ad": ad, "aciklama": aciklama_entry.get().strip() or None, "aktif": bool(aktif_var.get())}
             try:
                 if secili["id"]:
@@ -2530,7 +2596,7 @@ class HayvanTakipSistemi:
                 liste_yenile()
                 form_temizle()
             except ApiHatasi as e:
-                messagebox.showerror("Ciftlik", str(e), parent=pencere)
+                messagebox.showerror("Çiftlik", str(e), parent=pencere)
 
         def ciftlik_hayvan_sayisi(ciftlik_id):
             try:
@@ -2545,10 +2611,10 @@ class HayvanTakipSistemi:
 
         def sil():
             if not secili["id"]:
-                return messagebox.showwarning("Ciftlik Sil", "Silmek icin listeden bir ciftlik secin.", parent=pencere)
+                return messagebox.showwarning("Çiftlik Sil", "Silmek için listeden bir çiftlik seçin.", parent=pencere)
             ciftlik = next((c for c in ciftlikler if c.get("id") == secili["id"]), None)
             if not ciftlik:
-                return messagebox.showerror("Ciftlik Sil", "Secili ciftlik bulunamadi.", parent=pencere)
+                return messagebox.showerror("Çiftlik Sil", "Seçili çiftlik bulunamadı.", parent=pencere)
             hayvan_sayisi = ciftlik_hayvan_sayisi(secili["id"])
             try:
                 kullanici_sayisi = len([
@@ -2561,13 +2627,13 @@ class HayvanTakipSistemi:
             if hayvan_sayisi is not None:
                 detaylar.append(f"{hayvan_sayisi} hayvan")
             if kullanici_sayisi is not None:
-                detaylar.append(f"{kullanici_sayisi} kullanici")
-            detay_metni = "\nSilinecek kayitlar: " + ", ".join(detaylar) if detaylar else ""
+                detaylar.append(f"{kullanici_sayisi} kullanıcı")
+            detay_metni = "\nSilinecek kayıtlar: " + ", ".join(detaylar) if detaylar else ""
             onay = messagebox.askyesno(
-                "Ciftlik Sil",
+                "Çiftlik Sil",
                 (
-                    f"{ciftlik.get('ad') or secili['id']} ciftligi kalici olarak silinecek."
-                    f"{detay_metni}\n\nBu islem geri alinamaz. Emin misiniz?"
+                    f"{ciftlik.get('ad') or secili['id']} çiftliği kalıcı olarak silinecek."
+                    f"{detay_metni}\n\nBu işlem geri alınamaz. Emin misiniz?"
                 ),
                 parent=pencere,
                 icon="warning",
@@ -2575,85 +2641,172 @@ class HayvanTakipSistemi:
             if not onay:
                 return
             yazili_onay = simpledialog.askstring(
-                "Kalici Silme Onayi",
-                "Devam etmek icin SIL yazin:",
+                "Kalıcı Silme Onayı",
+                "Devam etmek için SIL yazın:",
                 parent=pencere,
             )
             if (yazili_onay or "").strip().upper() != "SIL":
-                return messagebox.showinfo("Ciftlik Sil", "Silme islemi iptal edildi.", parent=pencere)
+                return messagebox.showinfo("Çiftlik Sil", "Silme işlemi iptal edildi.", parent=pencere)
             try:
                 sonuc = self.api_istek("DELETE", f"/api/ciftlikler/{self.api_ref(secili['id'])}", timeout=30)
                 if getattr(self, "admin_aktif_ciftlik_id", None) == secili["id"]:
                     self.admin_aktif_ciftlik_id = None
                     self.admin_aktif_ciftlik_ad = None
                     self.hayvanlar = {}
-                messagebox.showinfo("Ciftlik Sil", sonuc.get("message", "Ciftlik silindi."), parent=pencere)
+                messagebox.showinfo("Çiftlik Sil", sonuc.get("message", "Çiftlik silindi."), parent=pencere)
                 liste_yenile()
                 form_temizle()
             except ApiHatasi as e:
-                messagebox.showerror("Ciftlik Sil", str(e), parent=pencere)
+                messagebox.showerror("Çiftlik Sil", str(e), parent=pencere)
 
         tree.bind("<<TreeviewSelect>>", secimi_yukle)
         btnler = tk.Frame(form, bg=self.renkler["kart_arkaplan"])
         btnler.pack(fill="x", pady=(8, 0))
-        tk.Button(btnler, text="Yeni", command=form_temizle, bg=self.renkler["button_default_bg"], fg=self.renkler["button_default_fg"], relief="flat", padx=12, pady=8).pack(side="left")
-        tk.Button(btnler, text="Kaydet", command=kaydet, bg=self.renkler["button_success_bg"], fg="#FFFFFF", relief="flat", padx=12, pady=8).pack(side="left", padx=8)
-        tk.Button(btnler, text="Sil", command=sil, bg=self.renkler["button_danger_bg"], fg="#FFFFFF", relief="flat", padx=12, pady=8).pack(side="left")
-        tk.Button(btnler, text="Kapat", command=pencere.destroy, bg=self.renkler["button_default_bg"], fg=self.renkler["button_default_fg"], relief="flat", padx=12, pady=8).pack(side="left", padx=8)
+        self.themed_widgets.append((btnler, 'kart'))
+        self.responsive_buton_grubu(
+            btnler,
+            [
+                ("Yeni", form_temizle, "default"),
+                ("Kaydet", kaydet, "success"),
+                ("Sil", sil, "danger"),
+                ("Kapat", pencere.destroy, "default"),
+            ],
+            align="left",
+        )
+
+        def yerlesim_guncelle(event=None):
+            try:
+                dar = ana.winfo_width() < 820
+                liste_panel.grid_forget()
+                form.grid_forget()
+                if dar:
+                    ana.columnconfigure(0, weight=1)
+                    ana.columnconfigure(1, weight=0)
+                    liste_panel.grid(row=0, column=0, sticky="nsew", padx=0, pady=(0, 12))
+                    form.grid(row=1, column=0, sticky="ew")
+                    ana.rowconfigure(0, weight=1)
+                    ana.rowconfigure(1, weight=0)
+                else:
+                    ana.columnconfigure(0, weight=3)
+                    ana.columnconfigure(1, weight=2)
+                    liste_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+                    form.grid(row=0, column=1, sticky="nsew")
+                    ana.rowconfigure(0, weight=1)
+                    ana.rowconfigure(1, weight=0)
+            except tk.TclError:
+                pass
+
+        ana.bind("<Configure>", yerlesim_guncelle)
+        self._track_after(pencere, 80, yerlesim_guncelle)
 
         try:
             liste_yenile()
         except ApiHatasi as e:
-            messagebox.showerror("Ciftlik", str(e), parent=pencere)
+            messagebox.showerror("Çiftlik", str(e), parent=pencere)
         pencere.wait_window()
 
     def admin_kullanici_yonetim_penceresi(self, yeni_kullanici=False):
-        if not self.online_islem_gerekli("Kullanici yonetimi", self.root):
+        if not self.online_islem_gerekli("Kullanıcı yönetimi", self.root):
             return
         pencere = tk.Toplevel(self.root)
-        pencere.title("Kullanici Yonetimi")
-        pencere.geometry("960x580")
+        pencere.title("Kullanıcı Yönetimi")
+        pencere.geometry("1080x660")
+        pencere.minsize(760, 500)
         pencere.configure(bg=self.renkler["arkaplan"])
         pencere.transient(self.root)
+        try:
+            pencere.iconphoto(True, self.logo_ikon)
+        except Exception:
+            pass
         pencere.grab_set()
 
         kullanicilar = []
         ciftlikler = self.api_ciftlikleri_yukle()
         secili = {"id": None}
 
-        ana = tk.Frame(pencere, bg=self.renkler["arkaplan"], padx=16, pady=16)
-        ana.pack(fill="both", expand=True)
+        baslik_alan = tk.Frame(pencere, bg=self.renkler["arkaplan"], padx=22)
+        baslik_alan.pack(fill="x", pady=(18, 8))
+        self.themed_widgets.append((baslik_alan, 'arkaplan'))
+        tk.Label(
+            baslik_alan,
+            text="Kullanıcı Yönetimi",
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 20, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            baslik_alan,
+            text="Admin ve çiftlik kullanıcılarını yönetin, yetki ve çiftlik atamalarını düzenleyin.",
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(4, 0))
+
+        ana = tk.Frame(pencere, bg=self.renkler["arkaplan"], padx=22)
+        ana.pack(fill="both", expand=True, pady=(8, 22))
         ana.columnconfigure(0, weight=3)
         ana.columnconfigure(1, weight=2)
+        ana.rowconfigure(0, weight=1)
+        self.themed_widgets.append((ana, 'arkaplan'))
 
-        tree = ttk.Treeview(ana, columns=("id", "kullanici", "rol", "ciftlik", "aktif"), show="headings", style="Modern.Treeview")
+        liste_panel = self.modern_kart(ana, accent=self.renkler["button_primary_bg"])
+        liste_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        tk.Label(
+            liste_panel,
+            text="Kullanıcılar",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w", padx=16, pady=(14, 8))
+
+        tree_frame = tk.Frame(liste_panel, bg=self.renkler["kart_arkaplan"])
+        tree_frame.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
+        self.themed_widgets.append((tree_frame, 'kart'))
+
+        tree = ttk.Treeview(tree_frame, columns=("id", "kullanici", "rol", "ciftlik", "aktif"), show="headings", style="Modern.Treeview")
         for col, baslik, genislik in [
             ("id", "ID", 130),
-            ("kullanici", "Kullanici", 150),
+            ("kullanici", "Kullanıcı", 150),
             ("rol", "Rol", 90),
-            ("ciftlik", "Ciftlik", 170),
+            ("ciftlik", "Çiftlik", 170),
             ("aktif", "Durum", 80),
         ]:
             tree.heading(col, text=baslik)
             tree.column(col, width=genislik, anchor="center")
-        tree.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
-        ana.rowconfigure(0, weight=1)
+        tree.grid(row=0, column=0, sticky="nsew")
+        tree_sb_y = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+        tree_sb_x = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=tree_sb_y.set, xscrollcommand=tree_sb_x.set)
+        tree_sb_y.grid(row=0, column=1, sticky="ns")
+        tree_sb_x.grid(row=1, column=0, sticky="ew")
 
-        form = tk.Frame(ana, bg=self.renkler["kart_arkaplan"], padx=16, pady=16, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+        status_label = tk.Label(
+            liste_panel,
+            text="Liste yükleniyor...",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9, "bold"),
+        )
+        status_label.pack(anchor="w", padx=16, pady=(0, 14))
+
+        form = self.modern_kart(ana, accent=self.renkler["button_success_bg"])
         form.grid(row=0, column=1, sticky="nsew")
-        tk.Label(form, text="Kullanici Bilgisi", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 12))
+        form.configure(padx=16, pady=16)
+        tk.Label(form, text="Kullanıcı Bilgisi", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 12))
 
-        tk.Label(form, text="Kullanici adi", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(form, text="Kullanıcı adı", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         ad_entry = ttk.Entry(form, font=("Segoe UI", 10), style="TEntry")
         ad_entry.pack(fill="x", pady=(4, 10), ipady=4)
-        tk.Label(form, text="Sifre (guncellemede bos kalabilir)", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(form, text="Şifre (güncellemede boş kalabilir)", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         sifre_entry = ttk.Entry(form, font=("Segoe UI", 10), style="TEntry", show="*")
         sifre_entry.pack(fill="x", pady=(4, 10), ipady=4)
         tk.Label(form, text="Rol", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         rol_combo = ttk.Combobox(form, values=["ciftlik", "admin"], state="readonly", font=("Segoe UI", 10), style="TCombobox")
         rol_combo.pack(fill="x", pady=(4, 10), ipady=4)
         rol_combo.set("ciftlik")
-        tk.Label(form, text="Ciftlik", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(form, text="Çiftlik", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         farm_combo = ttk.Combobox(form, state="readonly", font=("Segoe UI", 10), style="TCombobox")
         farm_combo.pack(fill="x", pady=(4, 10), ipady=4)
         aktif_var = tk.BooleanVar(value=True)
@@ -2691,8 +2844,9 @@ class HayvanTakipSistemi:
             for item in tree.get_children():
                 tree.delete(item)
             for k in kullanicilar:
-                ciftlik_ad = (k.get("ciftlik") or {}).get("ad") or ("Tum ciftlikler" if k.get("rol") == "admin" else "-")
+                ciftlik_ad = (k.get("ciftlik") or {}).get("ad") or ("Tüm çiftlikler" if k.get("rol") == "admin" else "-")
                 tree.insert("", "end", iid=k.get("id"), values=(k.get("id"), k.get("kullanici_adi"), k.get("rol"), ciftlik_ad, "Aktif" if k.get("aktif", True) else "Pasif"))
+            status_label.config(text=f"{len(kullanicilar)} kullanıcı listelendi.")
 
         def secimi_yukle(event=None):
             secim = tree.selection()
@@ -2716,11 +2870,11 @@ class HayvanTakipSistemi:
             rol = rol_combo.get() or "ciftlik"
             ciftlik_id = None if rol == "admin" else secili_farm_id()
             if not kullanici_adi:
-                return messagebox.showerror("Kullanici", "Kullanici adi zorunludur.", parent=pencere)
+                return messagebox.showerror("Kullanıcı", "Kullanıcı adı zorunludur.", parent=pencere)
             if not secili["id"] and not sifre:
-                return messagebox.showerror("Kullanici", "Yeni kullanici icin sifre zorunludur.", parent=pencere)
+                return messagebox.showerror("Kullanıcı", "Yeni kullanıcı için şifre zorunludur.", parent=pencere)
             if rol != "admin" and not ciftlik_id:
-                return messagebox.showerror("Kullanici", "Ciftlik kullanicisi icin ciftlik secilmelidir.", parent=pencere)
+                return messagebox.showerror("Kullanıcı", "Çiftlik kullanıcısı için çiftlik seçilmelidir.", parent=pencere)
             payload = {"kullanici_adi": kullanici_adi, "rol": rol, "ciftlik_id": ciftlik_id, "aktif": bool(aktif_var.get())}
             if sifre:
                 payload["sifre"] = sifre
@@ -2732,22 +2886,22 @@ class HayvanTakipSistemi:
                 liste_yenile()
                 form_temizle()
             except ApiHatasi as e:
-                messagebox.showerror("Kullanici", str(e), parent=pencere)
+                messagebox.showerror("Kullanıcı", str(e), parent=pencere)
 
         def sil():
             if not secili["id"]:
-                return messagebox.showwarning("Kullanici Sil", "Silmek icin listeden bir kullanici secin.", parent=pencere)
+                return messagebox.showwarning("Kullanıcı Sil", "Silmek için listeden bir kullanıcı seçin.", parent=pencere)
             kullanici = next((k for k in kullanicilar if k.get("id") == secili["id"]), None)
             if not kullanici:
-                return messagebox.showerror("Kullanici Sil", "Secili kullanici bulunamadi.", parent=pencere)
+                return messagebox.showerror("Kullanıcı Sil", "Seçili kullanıcı bulunamadı.", parent=pencere)
             aktif_id = (self.api_kullanici or {}).get("id")
             if aktif_id and aktif_id == secili["id"]:
-                return messagebox.showerror("Kullanici Sil", "Kendi admin kullanicinizi silemezsiniz.", parent=pencere)
+                return messagebox.showerror("Kullanıcı Sil", "Kendi admin kullanıcınızı silemezsiniz.", parent=pencere)
             onay = messagebox.askyesno(
-                "Kullanici Sil",
+                "Kullanıcı Sil",
                 (
-                    f"{kullanici.get('kullanici_adi') or secili['id']} kullanicisi kalici olarak silinecek.\n\n"
-                    "Bu islem geri alinamaz. Emin misiniz?"
+                    f"{kullanici.get('kullanici_adi') or secili['id']} kullanıcısı kalıcı olarak silinecek.\n\n"
+                    "Bu işlem geri alınamaz. Emin misiniz?"
                 ),
                 parent=pencere,
                 icon="warning",
@@ -2756,26 +2910,26 @@ class HayvanTakipSistemi:
                 return
             try:
                 sonuc = self.api_istek("DELETE", f"/api/kullanicilar/{self.api_ref(secili['id'])}", timeout=20)
-                messagebox.showinfo("Kullanici Sil", sonuc.get("message", "Kullanici silindi."), parent=pencere)
+                messagebox.showinfo("Kullanıcı Sil", sonuc.get("message", "Kullanıcı silindi."), parent=pencere)
                 liste_yenile()
                 form_temizle()
             except ApiHatasi as e:
-                messagebox.showerror("Kullanici Sil", str(e), parent=pencere)
+                messagebox.showerror("Kullanıcı Sil", str(e), parent=pencere)
 
         def sifre_sifirla():
             if not secili["id"]:
-                return messagebox.showwarning("Sifre Sifirla", "Sifresini degistirmek icin listeden bir kullanici secin.", parent=pencere)
+                return messagebox.showwarning("Şifre Sıfırla", "Şifresini değiştirmek için listeden bir kullanıcı seçin.", parent=pencere)
             kullanici = next((k for k in kullanicilar if k.get("id") == secili["id"]), None)
             if not kullanici:
-                return messagebox.showerror("Sifre Sifirla", "Secili kullanici bulunamadi.", parent=pencere)
-            yeni = simpledialog.askstring("Sifre Sifirla", "Yeni sifre (en az 8 karakter):", show="*", parent=pencere)
+                return messagebox.showerror("Şifre Sıfırla", "Seçili kullanıcı bulunamadı.", parent=pencere)
+            yeni = simpledialog.askstring("Şifre Sıfırla", "Yeni şifre (en az 8 karakter):", show="*", parent=pencere)
             if yeni is None:
                 return
-            tekrar = simpledialog.askstring("Sifre Sifirla", "Yeni sifre tekrar:", show="*", parent=pencere)
+            tekrar = simpledialog.askstring("Şifre Sıfırla", "Yeni şifre tekrar:", show="*", parent=pencere)
             if tekrar is None:
                 return
             if yeni != tekrar:
-                return messagebox.showerror("Sifre Sifirla", "Yeni sifreler ayni degil.", parent=pencere)
+                return messagebox.showerror("Şifre Sıfırla", "Yeni şifreler aynı değil.", parent=pencere)
             try:
                 sonuc = self.api_istek(
                     "POST",
@@ -2783,26 +2937,58 @@ class HayvanTakipSistemi:
                     {"yeni_sifre": yeni},
                     timeout=20,
                 )
-                messagebox.showinfo("Sifre Sifirla", sonuc.get("message", "Sifre sifirlandi."), parent=pencere)
+                messagebox.showinfo("Şifre Sıfırla", sonuc.get("message", "Şifre sıfırlandı."), parent=pencere)
                 sifre_entry.delete(0, tk.END)
             except ApiHatasi as e:
-                messagebox.showerror("Sifre Sifirla", str(e), parent=pencere)
+                messagebox.showerror("Şifre Sıfırla", str(e), parent=pencere)
 
         tree.bind("<<TreeviewSelect>>", secimi_yukle)
         btnler = tk.Frame(form, bg=self.renkler["kart_arkaplan"])
         btnler.pack(fill="x", pady=(8, 0))
-        tk.Button(btnler, text="Yeni", command=form_temizle, bg=self.renkler["button_default_bg"], fg=self.renkler["button_default_fg"], relief="flat", padx=12, pady=8).pack(side="left")
-        tk.Button(btnler, text="Kaydet", command=kaydet, bg=self.renkler["button_success_bg"], fg="#FFFFFF", relief="flat", padx=12, pady=8).pack(side="left", padx=8)
-        tk.Button(btnler, text="Sil", command=sil, bg=self.renkler["button_danger_bg"], fg="#FFFFFF", relief="flat", padx=12, pady=8).pack(side="left")
-        tk.Button(btnler, text="Sifre", command=sifre_sifirla, bg=self.renkler["button_warning_bg"], fg=self.renkler["button_warning_fg"], relief="flat", padx=12, pady=8).pack(side="left", padx=8)
-        tk.Button(btnler, text="Kapat", command=pencere.destroy, bg=self.renkler["button_default_bg"], fg=self.renkler["button_default_fg"], relief="flat", padx=12, pady=8).pack(side="left")
+        self.themed_widgets.append((btnler, 'kart'))
+        self.responsive_buton_grubu(
+            btnler,
+            [
+                ("Yeni", form_temizle, "default"),
+                ("Kaydet", kaydet, "success"),
+                ("Sil", sil, "danger"),
+                ("Şifre", sifre_sifirla, "warning"),
+                ("Kapat", pencere.destroy, "default"),
+            ],
+            align="left",
+        )
+
+        def yerlesim_guncelle(event=None):
+            try:
+                dar = ana.winfo_width() < 860
+                liste_panel.grid_forget()
+                form.grid_forget()
+                if dar:
+                    ana.columnconfigure(0, weight=1)
+                    ana.columnconfigure(1, weight=0)
+                    liste_panel.grid(row=0, column=0, sticky="nsew", padx=0, pady=(0, 12))
+                    form.grid(row=1, column=0, sticky="ew")
+                    ana.rowconfigure(0, weight=1)
+                    ana.rowconfigure(1, weight=0)
+                else:
+                    ana.columnconfigure(0, weight=3)
+                    ana.columnconfigure(1, weight=2)
+                    liste_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+                    form.grid(row=0, column=1, sticky="nsew")
+                    ana.rowconfigure(0, weight=1)
+                    ana.rowconfigure(1, weight=0)
+            except tk.TclError:
+                pass
+
+        ana.bind("<Configure>", yerlesim_guncelle)
+        self._track_after(pencere, 80, yerlesim_guncelle)
 
         try:
             liste_yenile()
             if yeni_kullanici:
                 form_temizle()
         except ApiHatasi as e:
-            messagebox.showerror("Kullanici", str(e), parent=pencere)
+            messagebox.showerror("Kullanıcı", str(e), parent=pencere)
         pencere.wait_window()
 
     def admin_merkeze_don(self):
@@ -3670,7 +3856,7 @@ class HayvanTakipSistemi:
         self.tab_buttons = []
         for i, tab_id in enumerate(self.notebook.tabs()):
             text = self.notebook.tab(tab_id, "text")
-            btn = self.modern_buton(self.custom_tab_bar, text, command=lambda idx=i: self._select_tab(idx), purpose='theme')
+            btn = self.modern_buton(self.custom_tab_bar, text, command=lambda idx=i: self._select_tab(idx), purpose='theme', small=True)
             self.tab_buttons.append(btn)
 
         self.notebook.pack(fill='both', expand=True, padx=12, pady=(4, 12))
@@ -3684,7 +3870,10 @@ class HayvanTakipSistemi:
                 for btn in self.tab_buttons:
                     btn.grid_forget()
                 for btn in self.tab_buttons:
-                    btn_genislik = btn.winfo_reqwidth() + 8
+                    try:
+                        btn_genislik = int(btn.cget("width")) + 8
+                    except (tk.TclError, ValueError):
+                        btn_genislik = btn.winfo_reqwidth() + 8
                     if sutun and kullanilan + btn_genislik > genislik:
                         satir += 1
                         sutun = 0
@@ -3862,8 +4051,7 @@ class HayvanTakipSistemi:
         self.hayvan_listesini_guncelle()
         self.uyarilari_guncelle()
         self.asi_prosedur_listesini_guncelle()
-        if MATPLOTLIB_AVAILABLE: 
-            self.raporlari_guncelle()
+        self.raporlari_guncelle()
 
     def otomatik_baglanti_kontrol_gerekli(self):
         return bool(
@@ -4000,8 +4188,6 @@ class HayvanTakipSistemi:
         metric_grid = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
         metric_grid.pack(fill="x", pady=(0, 16))
         self.themed_widgets.append((metric_grid, 'arkaplan'))
-        for col in range(6):
-            metric_grid.columnconfigure(col, weight=1)
 
         metric_defs = [
             ("aktif", "Aktif Hayvan", self.renkler["button_success_bg"]),
@@ -4012,19 +4198,18 @@ class HayvanTakipSistemi:
             ("kritik", "Kritik", self.renkler["button_danger_bg"]),
         ]
         self.dashboard_metric_labels = {}
-        for idx, (key, title, color) in enumerate(metric_defs):
+        metric_widgets = []
+        for key, title, color in metric_defs:
             kart, lbl = self.dashboard_metric_kart(metric_grid, title, 0, color)
-            kart.grid(row=0, column=idx, sticky="ew", padx=(0 if idx == 0 else 8, 0), pady=0)
+            metric_widgets.append(kart)
             self.dashboard_metric_labels[key] = lbl
+        self._rapor_responsive_grid(metric_grid, metric_widgets, min_width=500, max_cols=6, gap=10)
 
         alt_grid = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
         alt_grid.pack(fill="both", expand=True)
-        alt_grid.columnconfigure(0, weight=2)
-        alt_grid.columnconfigure(1, weight=1)
         self.themed_widgets.append((alt_grid, 'arkaplan'))
 
         isler_card = self.modern_kart(alt_grid, accent=self.renkler["button_primary_bg"])
-        isler_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         tk.Label(isler_card, text="Yaklaşan İşler", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=18, pady=(16, 8))
         self.dashboard_isler_tree = ttk.Treeview(isler_card, columns=("tip", "hayvan", "tarih", "kalan"), show="headings", height=10, style="Modern.Treeview")
         for col, title, width in [("tip", "İşlem", 160), ("hayvan", "Hayvan", 160), ("tarih", "Tarih", 120), ("kalan", "Kalan", 100)]:
@@ -4033,7 +4218,6 @@ class HayvanTakipSistemi:
         self.dashboard_isler_tree.pack(fill="both", expand=True, padx=18, pady=(0, 18))
 
         son_card = self.modern_kart(alt_grid, accent=self.renkler["button_success_bg"])
-        son_card.grid(row=0, column=1, sticky="nsew")
         tk.Label(son_card, text="Son İşlemler", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=18, pady=(16, 8))
         self.dashboard_son_list = tk.Listbox(
             son_card,
@@ -4048,6 +4232,46 @@ class HayvanTakipSistemi:
             font=("Segoe UI", 9),
         )
         self.dashboard_son_list.pack(fill="both", expand=True, padx=18, pady=(0, 18))
+
+        aksiyon_card = self.modern_kart(alt_grid, accent=self.renkler["uyari"])
+        tk.Label(aksiyon_card, text="Hızlı İşlemler", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=18, pady=(16, 4))
+        self.dashboard_ciftlik_label = tk.Label(
+            aksiyon_card,
+            text="-",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9),
+            justify="left",
+            wraplength=320,
+        )
+        self.dashboard_ciftlik_label.pack(anchor="w", fill="x", padx=18, pady=(0, 12))
+        self.dashboard_risk_label = tk.Label(
+            aksiyon_card,
+            text="-",
+            bg=self.renkler["kart_ikincil"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 10, "bold"),
+            padx=12,
+            pady=10,
+            anchor="w",
+            justify="left",
+        )
+        self.dashboard_risk_label.pack(fill="x", padx=18, pady=(0, 14))
+        hizli_butonlar = tk.Frame(aksiyon_card, bg=self.renkler["kart_arkaplan"])
+        hizli_butonlar.pack(fill="x", padx=18, pady=(0, 18))
+        self.themed_widgets.append((hizli_butonlar, 'kart'))
+        self.responsive_buton_grubu(
+            hizli_butonlar,
+            [
+                ("Yeni Hayvan", lambda: self._select_tab(1), "success"),
+                ("Hayvan Listesi", lambda: self._select_tab(3), "primary"),
+                ("Tohumlama", lambda: self._select_tab(2), "default"),
+                ("Raporlama", lambda: self._select_tab(4), "default"),
+                ("Senkronize", self.api_senkronize_et_ui, "primary"),
+            ],
+            align="left",
+        )
+        self._rapor_responsive_grid(alt_grid, [isler_card, son_card, aksiyon_card], min_width=420, max_cols=3, gap=12)
         self.dashboard_guncelle()
 
     def dashboard_guncelle(self):
@@ -4071,6 +4295,32 @@ class HayvanTakipSistemi:
                 self.dashboard_son_list.insert(tk.END, f"{kayit.get('zaman', '-')}  {kayit.get('aciklama', '-')}")
             if self.dashboard_son_list.size() == 0:
                 self.dashboard_son_list.insert(tk.END, "Henüz işlem kaydı yok.")
+        if hasattr(self, "dashboard_ciftlik_label") and self.dashboard_ciftlik_label.winfo_exists():
+            kullanici = getattr(self, "api_kullanici", None) or {}
+            ciftlik = (
+                getattr(self, "admin_aktif_ciftlik_ad", None)
+                or (kullanici.get("ciftlik") or {}).get("ad")
+                or ("Tüm çiftlikler" if kullanici.get("rol") == "admin" else "Yerel veri")
+            )
+            senkron = self.bekleyen_senkron_sayisi() if hasattr(self, "bekleyen_senkron_sayisi") else 0
+            api_durum = "Offline" if self.offline_modda_mi() else ("Online" if getattr(self, "api_modu", False) else "Yerel")
+            self.dashboard_ciftlik_label.config(text=f"Çalışılan alan: {ciftlik}\nBağlantı: {api_durum} · Bekleyen senkron: {senkron}")
+        if hasattr(self, "dashboard_risk_label") and self.dashboard_risk_label.winfo_exists():
+            kritik = ozet.get("kritik", 0)
+            bekleyen = ozet.get("bekleyen_kontrol", 0)
+            dogum = ozet.get("yaklasan_dogum", 0)
+            if kritik:
+                self.dashboard_risk_label.config(
+                    text=f"{kritik} kritik uyarı var. Gebelik kontrolü: {bekleyen}, yaklaşan doğum: {dogum}",
+                    fg=self.renkler["button_danger_bg"],
+                    bg=self.renkler["kart_ikincil"],
+                )
+            else:
+                self.dashboard_risk_label.config(
+                    text=f"Kritik uyarı yok. Gebelik kontrolü: {bekleyen}, yaklaşan doğum: {dogum}",
+                    fg=self.renkler["button_success_bg"],
+                    bg=self.renkler["kart_ikincil"],
+                )
 
     # #################################################################
     # ### GÜNCELLENMİŞ FONKSİYON: hayvan_kayit_sekmesi
@@ -4336,7 +4586,6 @@ class HayvanTakipSistemi:
         # --- Row 0 ---
         self.tohumlama_hayvan_combo = self.modern_form_satir(form_frame, "Hayvan Küpe No", ttk.Combobox, row=0, col=0, font=('Segoe UI', 11), style='TCombobox')
         self.tohumlama_hayvan_combo.bind('<KeyRelease>', self.hayvan_ara)
-        self.tohumlama_hayvan_combo.bind('<<ComboboxSelected>>', self.combo_secimi)
         self.tohumlama_hayvanlarini_guncelle()
         
         self.tohumlama_sekli_combo = self.modern_form_satir(form_frame, "Tohumlama Şekli", ttk.Combobox, row=0, col=1, values=["Suni", "Boğa"], font=('Segoe UI', 11), style='TCombobox')
@@ -4367,29 +4616,25 @@ class HayvanTakipSistemi:
         liste_frame = ttk.Frame(self.notebook, style='TFrame')
         self.notebook.add(liste_frame, text="Hayvan Listesi")
 
-        #  TOOLBAR 
+        #  TOOLBAR
         toolbar = tk.Frame(
             liste_frame,
             bg=self.renkler["kart_arkaplan"],
-            height=76,
             highlightthickness=1,
             highlightbackground=self.renkler["kenarlik"],
             bd=0
         )
         toolbar.pack(fill='x', padx=12, pady=(12, 0))
-        toolbar.pack_propagate(False)
+        toolbar.columnconfigure(1, weight=1)
         self.themed_widgets.append((toolbar, 'kart'))
 
-        # Sol — filtre ve arama
-        sol = tk.Frame(toolbar, bg=self.renkler["kart_arkaplan"])
-        sol.pack(side='left', fill='y', padx=16)
-        self.themed_widgets.append((sol, 'kart'))
-
-        # Filtre etiketi
-        filtre_lbl = tk.Label(sol, text="FİLTRE", font=('Segoe UI', 8, 'bold'),
+        filtre_grup = tk.Frame(toolbar, bg=self.renkler["kart_arkaplan"])
+        filtre_grup.grid(row=0, column=0, sticky="w", padx=(16, 10), pady=10)
+        self.themed_widgets.append((filtre_grup, 'kart'))
+        filtre_lbl = tk.Label(filtre_grup, text="FİLTRE", font=('Segoe UI', 8, 'bold'),
                               bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"])
-        filtre_lbl.pack(anchor='w', pady=(10, 0))
-        self.filtre_combo = ttk.Combobox(sol,
+        filtre_lbl.pack(anchor='w', pady=(0, 4))
+        self.filtre_combo = ttk.Combobox(filtre_grup,
             values=["Aktif", "Tümü", "Dişi Buzağı", "Erkek Buzağı", "Dana",
                     "Düve", "Sağmal İnek", "Kuru İnek", "Gebe", "Ölü", "Kesildi", "Arşivli"],
             width=16, font=('Segoe UI', 11), state="readonly", style='TCombobox')
@@ -4398,31 +4643,62 @@ class HayvanTakipSistemi:
         self.filtre_combo.bind('<<ComboboxSelected>>', self.filtre_degisti)
         self.themed_widgets.append((filtre_lbl, 'muted_label'))
 
-        # Ayırıcı
-        toolbar_divider = tk.Frame(toolbar, bg=self.renkler["kenarlik"], width=1)
-        toolbar_divider.pack(side='left', fill='y', padx=16, pady=12)
-        self.themed_widgets.append((toolbar_divider, 'divider'))
-
-        # Arama
         ara_grup = tk.Frame(toolbar, bg=self.renkler["kart_arkaplan"])
-        ara_grup.pack(side='left', fill='y')
+        ara_grup.grid(row=0, column=1, sticky="ew", padx=10, pady=10)
+        ara_grup.columnconfigure(0, weight=1)
         self.themed_widgets.append((ara_grup, 'kart'))
         ara_lbl = tk.Label(ara_grup, text="ARA", font=('Segoe UI', 8, 'bold'),
                            bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"])
-        ara_lbl.pack(anchor='w', pady=(10, 0))
-        self.arama_entry = ttk.Entry(ara_grup, width=22, font=('Segoe UI', 11), style='TEntry')
-        self.arama_entry.pack(anchor='w')
+        ara_lbl.grid(row=0, column=0, sticky="w", pady=(0, 4))
+        self.arama_entry = ttk.Entry(ara_grup, font=('Segoe UI', 11), style='TEntry')
+        self.arama_entry.grid(row=1, column=0, sticky="ew")
         self.arama_entry.bind('<KeyRelease>', self.arama_degisti)
         self.themed_widgets.append((ara_lbl, 'muted_label'))
 
-        # Sağ — butonlar
         sag = tk.Frame(toolbar, bg=self.renkler["kart_arkaplan"])
-        sag.pack(side='right', fill='y', padx=16)
+        sag.grid(row=0, column=2, sticky="e", padx=(10, 16), pady=10)
         self.themed_widgets.append((sag, 'kart'))
-        self.modern_buton(sag, "Yenile", self.api_verilerini_yenile,
-                          purpose='success', small=True).pack(side='right', padx=(6, 0), pady=18)
-        self.modern_buton(sag, "Temizle", self.filtreleri_temizle,
-                          purpose='danger', small=True).pack(side='right', padx=6, pady=18)
+        self.responsive_buton_grubu(
+            sag,
+            [
+                ("Temizle", self.filtreleri_temizle, "danger"),
+                ("Yenile", self.api_verilerini_yenile, "success"),
+            ],
+            align="left",
+        )
+
+        def toolbar_yerlesim(event=None):
+            try:
+                genislik = toolbar.winfo_width()
+                filtre_grup.grid_forget()
+                ara_grup.grid_forget()
+                sag.grid_forget()
+                if genislik < 640:
+                    toolbar.columnconfigure(0, weight=1)
+                    toolbar.columnconfigure(1, weight=1)
+                    toolbar.columnconfigure(2, weight=1)
+                    filtre_grup.grid(row=0, column=0, columnspan=3, sticky="ew", padx=16, pady=(10, 4))
+                    ara_grup.grid(row=1, column=0, columnspan=3, sticky="ew", padx=16, pady=4)
+                    sag.grid(row=2, column=0, columnspan=3, sticky="ew", padx=16, pady=(4, 10))
+                elif genislik < 1320:
+                    toolbar.columnconfigure(0, weight=0)
+                    toolbar.columnconfigure(1, weight=1)
+                    toolbar.columnconfigure(2, weight=0)
+                    filtre_grup.grid(row=0, column=0, sticky="w", padx=(16, 10), pady=(10, 4))
+                    ara_grup.grid(row=0, column=1, sticky="ew", padx=10, pady=(10, 4))
+                    sag.grid(row=1, column=0, columnspan=3, sticky="ew", padx=16, pady=(4, 10))
+                else:
+                    toolbar.columnconfigure(0, weight=0)
+                    toolbar.columnconfigure(1, weight=1)
+                    toolbar.columnconfigure(2, weight=0)
+                    filtre_grup.grid(row=0, column=0, sticky="w", padx=(16, 10), pady=10)
+                    ara_grup.grid(row=0, column=1, sticky="ew", padx=10, pady=10)
+                    sag.grid(row=0, column=2, sticky="e", padx=(10, 16), pady=10)
+            except tk.TclError:
+                pass
+
+        toolbar.bind("<Configure>", toolbar_yerlesim)
+        self._track_after(self.root, 80, toolbar_yerlesim)
 
         #  TABLO 
         liste_kart = self.modern_kart(liste_frame)
@@ -4462,20 +4738,39 @@ class HayvanTakipSistemi:
         rapor_sekme_frame = ttk.Frame(self.notebook, style='TFrame')
         self.notebook.add(rapor_sekme_frame, text="Raporlama")
 
-        main_card = self.modern_kart(rapor_sekme_frame)
-        main_card.pack(fill='both', expand=True, padx=16, pady=16)
+        self.rapor_scroll_sayfa = self.kaydirilabilir_sayfa(rapor_sekme_frame, padx=16, pady=16)
 
-        header = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], pady=20)
+        main_card = self.modern_kart(self.rapor_scroll_sayfa)
+        main_card.pack(fill='both', expand=True)
+
+        header = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], pady=16)
         header.pack(fill='x', padx=24)
+        header.columnconfigure(0, weight=1)
         self.themed_widgets.append((header, 'kart'))
 
-        rapor_baslik_label = tk.Label(header, text="Sürü Genel Durum Raporu", font=('Segoe UI', 18, 'bold'), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
-        rapor_baslik_label.pack(side='left')
+        baslik_alan = tk.Frame(header, bg=self.renkler["kart_arkaplan"])
+        baslik_alan.grid(row=0, column=0, sticky="w")
+        self.themed_widgets.append((baslik_alan, 'kart'))
+        rapor_baslik_label = tk.Label(baslik_alan, text="Sürü Genel Durum Raporu", font=('Segoe UI', 18, 'bold'), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
+        rapor_baslik_label.pack(anchor='w')
         self.themed_widgets.append((rapor_baslik_label, 'label'))
+        alt_label = tk.Label(
+            baslik_alan,
+            text="Sürü durumunu, uyarıları ve dağılımları tek ekranda izleyin.",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=('Segoe UI', 9),
+        )
+        alt_label.pack(anchor='w', pady=(4, 0))
+        self.themed_widgets.append((alt_label, 'muted_label'))
 
-        self.modern_buton(header, "Özet PDF", self.ozet_rapor_pdf_aktar, purpose='default', small=True).pack(side='right', padx=(6, 0))
-        self.modern_buton(header, "Özet Excel", self.ozet_rapor_excel_aktar, purpose='success', small=True).pack(side='right', padx=(6, 0))
-        self.modern_buton(header, "Raporları Yenile", self.raporlari_guncelle, purpose='primary', small=True).pack(side='right')
+        aksiyonlar = tk.Frame(header, bg=self.renkler["kart_arkaplan"])
+        aksiyonlar.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        self.themed_widgets.append((aksiyonlar, 'kart'))
+
+        self.modern_buton(aksiyonlar, "Raporları Yenile", self.raporlari_guncelle, purpose='primary', small=True).pack(side='left', padx=(0, 6))
+        self.modern_buton(aksiyonlar, "Özet Excel", self.ozet_rapor_excel_aktar, purpose='success', small=True).pack(side='left', padx=(0, 6))
+        self.modern_buton(aksiyonlar, "Özet PDF", self.ozet_rapor_pdf_aktar, purpose='default', small=True).pack(side='left')
 
         cizgi = tk.Frame(main_card, bg=self.renkler["kenarlik"], height=1)
         cizgi.pack(fill='x', padx=24, pady=(0, 10))
@@ -4485,13 +4780,6 @@ class HayvanTakipSistemi:
         self.rapor_frame.pack(fill='both', expand=True, padx=15, pady=15)
         self.themed_widgets.append((self.rapor_frame, 'kart'))
 
-        if not MATPLOTLIB_AVAILABLE:
-            uyari_label = tk.Label(self.rapor_frame, 
-                                     text="Grafikleri görüntülemek için 'matplotlib' kütüphanesi gereklidir.\nLütfen terminal veya komut istemine 'pip install matplotlib' yazarak yükleyin.",
-                                     font=('Segoe UI', 14, 'bold'), bg=self.renkler["kart_arkaplan"], fg=self.renkler["ana_kirmizi"], justify='center', wraplength=800)
-            uyari_label.pack(expand=True)
-            self.themed_widgets.append((uyari_label, 'label'))
-    
     def ozet_rapor_satirlari(self):
         ozet = self.dashboard_ozeti_hesapla()
         kullanici = (getattr(self, "api_kullanici", None) or {}).get("kullanici_adi") or "-"
@@ -4553,26 +4841,68 @@ class HayvanTakipSistemi:
         except Exception as e:
             messagebox.showerror("Rapor", f"PDF raporu oluşturulamadı:\n{e}", parent=self.root)
 
+    def _rapor_responsive_grid(self, parent, widgets, min_width=300, max_cols=3, gap=12):
+        def duzenle(event=None):
+            try:
+                width = max(parent.winfo_width(), 1)
+                cols = max(1, min(max_cols, width // min_width if width else 1))
+                for idx, widget in enumerate(widgets):
+                    col = idx % cols
+                    row = idx // cols
+                    widget.grid(
+                        row=row,
+                        column=col,
+                        sticky="nsew",
+                        padx=(0 if col == 0 else gap, 0),
+                        pady=(0, gap),
+                    )
+                for col in range(max_cols):
+                    parent.grid_columnconfigure(col, weight=1 if col < cols else 0, uniform="rapor_cols" if col < cols else "")
+            except tk.TclError:
+                pass
+
+        parent.bind("<Configure>", duzenle)
+        parent.after_idle(duzenle)
+
+    def _rapor_ozet_karti(self, parent, baslik, deger, renk, alt_metin=""):
+        kart = tk.Frame(
+            parent,
+            bg=self.renkler["kart_ikincil"],
+            padx=16,
+            pady=14,
+            highlightthickness=1,
+            highlightbackground=self.renkler["kenarlik"],
+        )
+        self.themed_widgets.append((kart, 'soft_panel'))
+        tk.Label(
+            kart,
+            text=baslik,
+            bg=self.renkler["kart_ikincil"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            kart,
+            text=str(deger),
+            bg=self.renkler["kart_ikincil"],
+            fg=renk,
+            font=("Segoe UI", 20, "bold"),
+        ).pack(anchor="w", pady=(6, 0))
+        if alt_metin:
+            tk.Label(
+                kart,
+                text=alt_metin,
+                bg=self.renkler["kart_ikincil"],
+                fg=self.renkler["muted"],
+                font=("Segoe UI", 8),
+            ).pack(anchor="w", pady=(4, 0))
+        return kart
+
     def raporlari_guncelle(self):
-        if not MATPLOTLIB_AVAILABLE:
-            return 
-
-        if hasattr(self, 'chart_canvases'):
-            for canvas in self.chart_canvases:
-                try:
-                    plt.close(canvas.figure)
-                except Exception:
-                    pass
-            self.chart_canvases = []
-
         for widget in self.rapor_frame.winfo_children():
             widget.destroy()
 
         aktif_hayvanlar = {kupe: h for kupe, h in self.hayvanlar.items() if not h.get('arsivli', False)}
-
-        if not aktif_hayvanlar:
-            tk.Label(self.rapor_frame, text="Gösterilecek veri yok.", font=('Segoe UI', 16), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"]).pack(expand=True)
-            return
 
         cinsiyet_dagilimi = {'Dişi': 0, 'Erkek': 0}
         cins_dagilimi = {} 
@@ -4596,35 +4926,43 @@ class HayvanTakipSistemi:
                 if hayvan.get('gebe_mi', False):
                     ozel_durum_dagilimi['Gebe'] += 1
 
-        charts_frame = tk.Frame(self.rapor_frame, bg=self.renkler["kart_arkaplan"])
-        charts_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        charts_frame.grid_columnconfigure((0, 1, 2), weight=1)
-        charts_frame.grid_rowconfigure(2, weight=1)
-
         arsivli_sayi = len(self.hayvanlar) - len(aktif_hayvanlar)
-        toplam_hayvan_label = tk.Label(charts_frame, text=f"Aktif Hayvan Sayısı: {len(aktif_hayvanlar)} | Arşivli: {arsivli_sayi}", font=('Segoe UI', 16, 'bold'), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
-        toplam_hayvan_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        ozet = self.dashboard_ozeti_hesapla()
+
+        content = tk.Frame(self.rapor_frame, bg=self.renkler["kart_arkaplan"])
+        content.pack(fill="both", expand=True, padx=8, pady=8)
+        self.themed_widgets.append((content, 'kart'))
+
+        toplam_hayvan_label = tk.Label(
+            content,
+            text=f"Aktif Hayvan: {len(aktif_hayvanlar)}  |  Arşivli: {arsivli_sayi}",
+            font=('Segoe UI', 15, 'bold'),
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+        )
+        toplam_hayvan_label.pack(anchor="w", pady=(0, 14))
         self.themed_widgets.append((toplam_hayvan_label, 'label'))
 
-        ozet = self.dashboard_ozeti_hesapla()
-        ozet_frame = tk.Frame(charts_frame, bg=self.renkler["kart_arkaplan"])
-        ozet_frame.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 16))
+        ozet_frame = tk.Frame(content, bg=self.renkler["kart_arkaplan"])
+        ozet_frame.pack(fill="x", pady=(0, 14))
         self.themed_widgets.append((ozet_frame, 'kart'))
-        for idx, (baslik, deger, renk) in enumerate([
-            ("Gebelik kontrol", ozet["bekleyen_kontrol"], self.renkler["uyari"]),
-            ("Yaklaşan doğum", ozet["yaklasan_dogum"], self.renkler["button_warning_bg"]),
-            ("Kritik uyarı", ozet["kritik"], self.renkler["button_danger_bg"]),
-        ]):
-            ozet_frame.columnconfigure(idx, weight=1)
-            kutu = tk.Frame(ozet_frame, bg=self.renkler["kart_ikincil"], padx=14, pady=10, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
-            kutu.grid(row=0, column=idx, sticky="ew", padx=(0 if idx == 0 else 8, 0))
-            self.themed_widgets.append((kutu, 'soft_panel'))
-            tk.Label(kutu, text=baslik, bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
-            tk.Label(kutu, text=str(deger), bg=self.renkler["kart_ikincil"], fg=renk, font=("Segoe UI", 18, "bold")).pack(anchor="w")
+        ozet_kartlari = [
+            self._rapor_ozet_karti(ozet_frame, "Aktif hayvan", len(aktif_hayvanlar), self.renkler["button_primary_bg"], "Sürüde görünen kayıt"),
+            self._rapor_ozet_karti(ozet_frame, "Gebelik kontrol", ozet["bekleyen_kontrol"], self.renkler["uyari"], "7 gün içinde veya geçmiş"),
+            self._rapor_ozet_karti(ozet_frame, "Yaklaşan doğum", ozet["yaklasan_dogum"], self.renkler["button_warning_bg"], "30 gün içinde"),
+            self._rapor_ozet_karti(ozet_frame, "Kritik uyarı", ozet["kritik"], self.renkler["button_danger_bg"], "Öncelikli takip"),
+        ]
+        self._rapor_responsive_grid(ozet_frame, ozet_kartlari, min_width=210, max_cols=4)
 
-        self.create_pie_chart(charts_frame, cinsiyet_dagilimi, "Cinsiyet Dağılımı", 0, row=2)
-        self.create_pie_chart(charts_frame, cins_dagilimi, "Sürüdeki Hayvan Tipleri", 1, row=2)
-        self.create_pie_chart(charts_frame, ozel_durum_dagilimi, "Özel Durumlar", 2, row=2)
+        charts_frame = tk.Frame(content, bg=self.renkler["kart_arkaplan"])
+        charts_frame.pack(fill="both", expand=True, pady=(2, 0))
+        self.themed_widgets.append((charts_frame, 'kart'))
+        chart_cards = [
+            self.create_pie_chart(charts_frame, cinsiyet_dagilimi, "Cinsiyet Dağılımı", 0, row=0),
+            self.create_pie_chart(charts_frame, cins_dagilimi, "Sürüdeki Hayvan Tipleri", 1, row=0),
+            self.create_pie_chart(charts_frame, ozel_durum_dagilimi, "Özel Durumlar", 2, row=0),
+        ]
+        self._rapor_responsive_grid(charts_frame, chart_cards, min_width=380, max_cols=3)
 
 
     def create_pie_chart(self, parent, data, title, column, row=1):
@@ -4633,46 +4971,114 @@ class HayvanTakipSistemi:
         labels = list(filtered_data.keys())
         sizes = list(filtered_data.values())
 
-        if not any(sizes):
-            tk.Label(parent, text=f"{title}\n(Veri Yok)", font=('Segoe UI', 12), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"]).grid(row=row, column=column, sticky="nsew", padx=15)
-            return
+        kart = tk.Frame(
+            parent,
+            bg=self.renkler["kart_ikincil"],
+            padx=16,
+            pady=14,
+            highlightthickness=1,
+            highlightbackground=self.renkler["kenarlik"],
+        )
+        self.themed_widgets.append((kart, 'soft_panel'))
+        tk.Label(
+            kart,
+            text=title,
+            bg=self.renkler["kart_ikincil"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w")
 
-        fig, ax = plt.subplots(figsize=(5, 4), dpi=100)
-        fig.patch.set_facecolor(self.renkler["kart_arkaplan"]) 
-        
-        wedges, texts, autotexts = ax.pie(sizes, autopct=lambda p: '{:.0f}'.format(p * sum(sizes) / 100),
-                                            startangle=90, textprops={'color': self.renkler["yazi_rengi"]},
-                                            pctdistance=0.85, wedgeprops=dict(width=0.4))
-        
-        plt.setp(autotexts, size=10, weight="bold", color=self.renkler["beyaz"])
-        ax.set_title(title, color=self.renkler["yazi_rengi"], size=14, weight='bold', pad=20)
-        
-        ax.axis('equal')
+        govde = tk.Frame(kart, bg=self.renkler["kart_ikincil"])
+        govde.pack(fill="both", expand=True, pady=(12, 0))
+        self.themed_widgets.append((govde, 'soft_panel'))
+        canvas = tk.Canvas(govde, height=220, bg=self.renkler["kart_ikincil"], bd=0, highlightthickness=0)
+        canvas.pack(side="left", fill="both", expand=True)
+        legend = tk.Frame(govde, bg=self.renkler["kart_ikincil"], width=150)
+        legend.pack(side="right", fill="y", padx=(12, 0))
+        self.themed_widgets.append((legend, 'soft_panel'))
 
-        legend_labels = [f'{l} ({s})'for l, s in zip(labels, sizes)]
-        ax.legend(wedges, legend_labels,
-                  loc="lower center",
-                  bbox_to_anchor=(0.5, -0.15),
-                  prop={'size': 10},
-                  labelcolor=self.renkler["yazi_rengi"],
-                  frameon=False
-                  )
-        
-        plt.tight_layout(pad=1.5)
+        renkler = [
+            self.renkler["button_primary_bg"],
+            self.renkler["button_success_bg"],
+            self.renkler["button_warning_bg"],
+            self.renkler["button_danger_bg"],
+            self.renkler["muted"],
+            "#8B5CF6",
+        ]
 
-        canvas = FigureCanvasTkAgg(fig, master=parent)
-        canvas.draw()
-        canvas.get_tk_widget().grid(row=row, column=column, sticky="nsew", padx=10)
-        if not hasattr(self, 'chart_canvases'):
-            self.chart_canvases = []
-        self.chart_canvases.append(canvas)
+        if labels:
+            for idx, (label, value) in enumerate(zip(labels, sizes)):
+                satir = tk.Frame(legend, bg=self.renkler["kart_ikincil"])
+                satir.pack(anchor="w", fill="x", pady=3)
+                renk = renkler[idx % len(renkler)]
+                tk.Frame(satir, bg=renk, width=10, height=10).pack(side="left", padx=(0, 7))
+                tk.Label(
+                    satir,
+                    text=f"{label} ({value})",
+                    bg=self.renkler["kart_ikincil"],
+                    fg=self.renkler["muted"],
+                    font=("Segoe UI", 9),
+                ).pack(side="left", anchor="w")
+        else:
+            tk.Label(
+                legend,
+                text="Veri yok",
+                bg=self.renkler["kart_ikincil"],
+                fg=self.renkler["muted"],
+                font=("Segoe UI", 9, "bold"),
+            ).pack(anchor="w")
+
+        def ciz(event=None):
+            try:
+                canvas.delete("all")
+                w = max(canvas.winfo_width(), 120)
+                h = max(canvas.winfo_height(), 160)
+                size = max(90, min(w, h) - 26)
+                x0 = (w - size) // 2
+                y0 = (h - size) // 2
+                x1 = x0 + size
+                y1 = y0 + size
+                toplam = sum(sizes)
+                if not toplam:
+                    canvas.create_oval(x0, y0, x1, y1, outline=self.renkler["kenarlik"], width=18)
+                    canvas.create_text(w // 2, h // 2, text="Veri yok", fill=self.renkler["muted"], font=("Segoe UI", 11, "bold"))
+                    return
+                baslangic = 90
+                for idx, value in enumerate(sizes):
+                    extent = -359.8 * (value / toplam)
+                    canvas.create_arc(
+                        x0,
+                        y0,
+                        x1,
+                        y1,
+                        start=baslangic,
+                        extent=extent,
+                        fill=renkler[idx % len(renkler)],
+                        outline=self.renkler["kart_ikincil"],
+                        width=2,
+                    )
+                    baslangic += extent
+                ic_bosluk = int(size * 0.58)
+                ix0 = (w - ic_bosluk) // 2
+                iy0 = (h - ic_bosluk) // 2
+                canvas.create_oval(ix0, iy0, ix0 + ic_bosluk, iy0 + ic_bosluk, fill=self.renkler["kart_ikincil"], outline=self.renkler["kart_ikincil"])
+                canvas.create_text(w // 2, h // 2 - 8, text=str(toplam), fill=self.renkler["yazi_rengi"], font=("Segoe UI", 20, "bold"))
+                canvas.create_text(w // 2, h // 2 + 18, text="toplam", fill=self.renkler["muted"], font=("Segoe UI", 9, "bold"))
+            except tk.TclError:
+                pass
+
+        canvas.bind("<Configure>", ciz)
+        canvas.after_idle(ciz)
+        return kart
 
     def asi_prosedur_sekmesi(self):
         asi_frame = ttk.Frame(self.notebook, style='TFrame')
         self.notebook.add(asi_frame, text="Aşı/Prosedür")
 
-        self.asi_main_card = self.modern_kart(asi_frame)
-        self.asi_main_card.pack(fill='both', expand=True, padx=16, pady=16)
+        self.asi_scroll_sayfa = self.kaydirilabilir_sayfa(asi_frame, padx=16, pady=16)
+
+        self.asi_main_card = self.modern_kart(self.asi_scroll_sayfa)
+        self.asi_main_card.pack(fill='both', expand=True)
 
         header = tk.Frame(self.asi_main_card, bg=self.renkler["kart_arkaplan"], pady=20)
         header.pack(fill='x', padx=24)
@@ -4722,10 +5128,12 @@ class HayvanTakipSistemi:
 
         tree_frame = tk.Frame(self.asi_main_card, bg=self.renkler["kart_arkaplan"])
         tree_frame.pack(fill='both', expand=True, padx=15, pady=15)
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
         self.themed_widgets.append((tree_frame, 'kart'))
 
         columns = ("ID", "Küpe No", "Prosedür", "Uygulama Tarihi", "Sonraki Tarih", "Kalan Gün", "Not")
-        self.asi_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', style='Modern.Treeview')
+        self.asi_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', style='Modern.Treeview', height=16)
         
         self.asi_tree.heading("ID", text="ID")
         self.asi_tree.column("ID", width=0, stretch=tk.NO) # Hide ID column
@@ -4734,7 +5142,13 @@ class HayvanTakipSistemi:
         for col in columns[1:]:
             self.asi_tree.heading(col, text=col)
             self.asi_tree.column(col, width=col_widths.get(col, 150), anchor='center')
-        self.asi_tree.pack(fill='both', expand=True, padx=1, pady=1)
+
+        self.asi_tree_scroll_v = ttk.Scrollbar(tree_frame, orient='vertical', command=self.asi_tree.yview)
+        self.asi_tree_scroll_h = ttk.Scrollbar(tree_frame, orient='horizontal', command=self.asi_tree.xview)
+        self.asi_tree.configure(yscrollcommand=self.asi_tree_scroll_v.set, xscrollcommand=self.asi_tree_scroll_h.set)
+        self.asi_tree.grid(row=0, column=0, sticky='nsew', padx=(1, 0), pady=(1, 0))
+        self.asi_tree_scroll_v.grid(row=0, column=1, sticky='ns', pady=(1, 0))
+        self.asi_tree_scroll_h.grid(row=1, column=0, sticky='ew', padx=(1, 0))
         self.asi_tree.bind('<Double-Button-1>', self.asi_prosedur_detay_ac)
 
     def asi_prosedur_listesini_guncelle(self):
@@ -5066,7 +5480,6 @@ class HayvanTakipSistemi:
             if mevcut:
                 self.tohumlama_hayvan_combo.set(mevcut)
 
-    def combo_secimi(self, event): pass
     def tohumlama_sekli_degisti(self, event):
         if self.tohumlama_sekli_combo.get() == "Suni":
             self.suni_container.grid()
@@ -5159,8 +5572,6 @@ class HayvanTakipSistemi:
                 popup.add_command(label="Tohumlama Yap", command=self.hizli_tohumlama)
             if hayvan and hayvan.get('arsivli'):
                 popup.add_command(label="Arşivden Çıkar", command=lambda h=kupe_no: self.hayvan_arsivden_cikar(h, self.root))
-            popup.add_separator()
-            popup.add_command(label=" İptal")
             popup.tk_popup(event.x_root, event.y_root)
 
     def hizli_tohumlama(self):
@@ -5750,7 +6161,7 @@ class HayvanTakipSistemi:
                 messagebox.showerror("Hata", f"Doğum kaydı sırasında bir hata oluştu: {str(e)}", parent=dogum_window)
 
         self.modern_buton(btn_frame, "DOĞUM KAYDET", dogum_kaydet, purpose='success').pack(side='left', padx=15)
-        self.modern_buton(btn_frame, " İPTAL", dogum_window.destroy, purpose='danger').pack(side='left', padx=15)
+        self.modern_buton(btn_frame, "İPTAL", dogum_window.destroy, purpose='danger').pack(side='left', padx=15)
 
     def kuruda_yap(self, kupe_no, pencere):
         if kupe_no not in self.hayvanlar: return
@@ -6289,200 +6700,6 @@ class HayvanTakipSistemi:
         self.modern_buton(dogum_btn, "DÜZENLE", dogum_duzenle, purpose='default').pack(side='left', padx=8)
         self.modern_buton(dogum_btn, "SİL", dogum_sil, purpose='danger').pack(side='left', padx=8)
         dogum_tree_yenile()
-
-    # #################################################################
-    # ### GÜNCELLENMİŞ FONKSİYON: hayvan_detay_penceresi
-    # #################################################################
-    def hayvan_detay_penceresi_eski(self, kupe_no):
-        if kupe_no not in self.hayvanlar: return
-        hayvan = self.hayvanlar[kupe_no]
-        
-        cins = hayvan.get('cins', '')
-        is_male = cins in ["Erkek Buzağı", "Dana"]
-        
-        gorunen_kupe = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or "Bilinmiyor"
-
-        detay_window = tk.Toplevel(self.root)
-        detay_window.title(f"Hayvan Detayları - {gorunen_kupe}")
-        detay_window.geometry("1400x800")
-        detay_window.configure(bg=self.renkler["arkaplan"])
-        detay_window.transient(self.root)
-        detay_window.grab_set()
-        detay_window.update_idletasks()
-
-        baslik_frame = tk.Frame(detay_window, bg=self.renkler["siyah"], height=90)
-        baslik_frame.pack(fill='x', expand=False)
-        baslik_frame.pack_propagate(False)
-        tk.Label(baslik_frame, text=f"{gorunen_kupe} Numaralı Hayvanın Profili", bg=self.renkler["siyah"], fg=self.renkler["beyaz"], font=('Segoe UI', 20, 'bold')).pack(side='left', padx=30)
-        
-        btn_frame = tk.Frame(baslik_frame, bg=self.renkler["siyah"])
-        btn_frame.pack(side='right', padx=20, pady=15)
-        
-        self.modern_buton(btn_frame, "DÜZENLE", lambda: self.hayvan_duzenle_penceresi(kupe_no, detay_window), purpose='default').pack(side='left', padx=5)
-        foto_buton_metni = "FOTOĞRAF DEĞİŞTİR" if hayvan.get('foto_data') else "FOTOĞRAF EKLE"
-        self.modern_buton(btn_frame, foto_buton_metni, lambda: self.hayvan_fotograf_sec(kupe_no, detay_window), purpose='primary').pack(side='left', padx=5)
-        if self.hayvan_tohumlanabilir_mi(hayvan):
-            self.modern_buton(btn_frame, "TOHUMLA", lambda: self.tohumlama_ekranina_hayvanla_git(kupe_no, detay_window), purpose='primary').pack(side='left', padx=5)
-        self.modern_buton(btn_frame, "AŞI/PROSEDÜR", lambda: self.asi_prosedur_penceresi(kupe_no, detay_window), purpose='success').pack(side='left', padx=5)
-        
-        if not hayvan.get('olu', False) and not hayvan.get('kesildi', False) and not hayvan.get('arsivli', False):
-            if not is_male:
-                if hayvan.get('gebe_mi', False): self.modern_buton(btn_frame, "DOĞUM KAYDET", lambda: self.dogum_kayit_olustur(kupe_no, detay_window), purpose='success').pack(side='left', padx=5)
-                if hayvan.get('durum') == 'Sağmal İnek': 
-                    self.modern_buton(btn_frame, "KURUYA AYIR", lambda: self.kuruda_yap(kupe_no, detay_window), purpose='warning').pack(side='left', padx=5)
-            
-            self.modern_buton(btn_frame, "KESİLDİ", lambda: self.hayvan_kesildi(kupe_no, detay_window), purpose='warning').pack(side='left', padx=5)
-            self.modern_buton(btn_frame, "ÖLDÜ", lambda: self.hayvan_oldu(kupe_no, detay_window), purpose='danger').pack(side='left', padx=5)
-
-        if not hayvan.get('arsivli', False):
-            self.modern_buton(btn_frame, "ARŞİVLE", lambda: self.hayvan_sil_detay(kupe_no, detay_window), purpose='danger').pack(side='left', padx=5)
-        else:
-            self.modern_buton(btn_frame, "ARŞİVDEN ÇIKAR", lambda: self.hayvan_arsivden_cikar(kupe_no, detay_window), purpose='success').pack(side='left', padx=5)
-            self.modern_buton(btn_frame, "KALICI SİL", lambda: self.hayvan_kalici_sil(kupe_no, detay_window), purpose='danger').pack(side='left', padx=5)
-        
-        ana_frame = tk.Frame(detay_window, bg=self.renkler["arkaplan"])
-        ana_frame.pack(fill='both', expand=True, padx=20, pady=20)
-        
-        sol_panel = tk.Frame(ana_frame, bg=self.renkler["kart_arkaplan"])
-        sol_panel.pack(side='left', fill='both', expand=True, padx=(0, 10 if not is_male else 0))
-        
-        tk.Label(sol_panel, text="GENEL BİLGİLER", bg=self.renkler["gri"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 14, 'bold'), pady=15).pack(fill='x')
-        bilgi_frame = tk.Frame(sol_panel, bg=self.renkler["kart_arkaplan"], padx=20, pady=15)
-        bilgi_frame.pack(fill='both', expand=True, anchor='n')
-        
-        dogumlar = hayvan.get('dogumlar', [])
-        laktasyon_sayisi = len(dogumlar)
-        yas_gun = hayvan.get('yas_gun', 0)
-        
-        if hayvan.get('arsivli', False):
-            mevcut_durum_str = "Arşivli"
-        elif hayvan.get('olu', False):
-            mevcut_durum_str = " Ölü"
-        elif hayvan.get('kesildi', False):
-            mevcut_durum_str = "Kesildi"
-        elif hayvan.get('gebe_mi', False):
-            mevcut_durum_str = "Gebe"
-        else:
-            mevcut_durum_str = "Hayatta"
-
-        bilgi_text = (f"Resmi Küpe No: {hayvan.get('resmi_kupe_no') or '-'}\n"
-                      f" Çiftlik Küpe No: {hayvan.get('ciftlik_kupe_no') or '-'}\n"
-                      f"Doğum Tarihi: {hayvan.get('dogum_tarihi', '-')}\n"
-                      f"Yaş: {yas_gun // 365} yıl {(yas_gun % 365) // 30} ay\n"
-                      f"Cinsi: {hayvan.get('cins', '-')}\n"
-                      f"Mevcut Durum: {mevcut_durum_str}\n"
-                      f"Anne Küpe: {hayvan.get('anne_kupe') or 'Bilinmiyor'}\n"
-                      f"Laktasyon Sayısı: {laktasyon_sayisi}")
-
-        laktasyon_gun_bilgisi = ""
-        if laktasyon_sayisi > 0:
-            toplam_sagim_gunu = 0
-            laktasyon_gun_bilgisi += "\n\n LAKTASYON SÜRELERİ"
-            for i, dogum in enumerate(dogumlar):
-                # --- YENİ LAKTASYON SÜRESİ GÖSTERİMİ ---
-                if dogum.get('not') == 'Geçmiş kayıt, süre bilinmiyor':
-                    laktasyon_gun_bilgisi += f"\n  - {i+1}. Laktasyon: Süre bilinmiyor (geçmiş kayıt)"
-                    continue
-                # --- YENİLİK SONU ---
-                
-                try:
-                    baslangic_tarihi = datetime.strptime(dogum['tarih'], "%d/%m/%Y")
-                    bitis_tarihi = None
-                    durum_str = ""
-
-                    if dogum.get('laktasyon_bitis_tarihi'):
-                        bitis_tarihi = datetime.strptime(dogum['laktasyon_bitis_tarihi'], "%d/%m/%Y")
-                    elif i + 1 < laktasyon_sayisi:
-                        # Sonraki doğumun 'bilinmiyor' olup olmadığını kontrol et
-                        sonraki_dogum = dogumlar[i+1]
-                        if sonraki_dogum.get('tarih') != 'Bilinmiyor':
-                           bitis_tarihi = datetime.strptime(sonraki_dogum['tarih'], "%d/%m/%Y")
-                        else: # Eğer sonraki doğum bilinmiyorsa, bu laktasyonun sonu belirsizdir
-                           bitis_tarihi = None
-                    elif hayvan.get('olu', False) and hayvan.get('olum_tarihi'):
-                        bitis_tarihi = datetime.strptime(hayvan['olum_tarihi'], "%d/%m/%Y")
-                    elif hayvan.get('kesildi', False) and hayvan.get('kesim_bilgisi', {}).get('tarih'):
-                        bitis_tarihi = datetime.strptime(hayvan['kesim_bilgisi']['tarih'], "%d/%m/%Y")
-                    else:
-                        bitis_tarihi = datetime.now()
-                        durum_str = " (devam ediyor)"
-
-                    if bitis_tarihi:
-                       laktasyon_suresi = (bitis_tarihi - baslangic_tarihi).days
-                       if laktasyon_suresi < 0: laktasyon_suresi = 0
-                       toplam_sagim_gunu += laktasyon_suresi
-                       laktasyon_gun_bilgisi += f"\n  - {i+1}. Laktasyon: {laktasyon_suresi} gün sağıldı{durum_str}"
-                    else:
-                       laktasyon_gun_bilgisi += f"\n  - {i+1}. Laktasyon: Bitiş tarihi belirsiz."
-
-                except (ValueError, TypeError) as e:
-                    print(e)
-                    laktasyon_gun_bilgisi += f"\n  - {i+1}. Laktasyon: Tarih hatası!"
-            
-            bilgi_text += f"\n\nToplam Sağım Günü: {toplam_sagim_gunu} gün"
-            bilgi_text += laktasyon_gun_bilgisi
-
-        if hayvan.get('kesildi', False) and hayvan.get('kesim_bilgisi'):
-            kesim_bilgisi = hayvan['kesim_bilgisi']
-            yas = kesim_bilgisi.get('yas_gun', 0)
-            yas_str = f"{yas // 365} yıl {(yas % 365) // 30} ay"
-            bilgi_text += (f"\n\n KESİM BİLGİSİ \n"
-                           f"Durumu: KESİLDİ\n"
-                           f"Kesim Tarihi: {kesim_bilgisi.get('tarih', '-')}\n"
-                           f"Kesim Ağırlığı: {kesim_bilgisi.get('kilo', '-')} kg\n"
-                           f"Kesim Yaşı: {yas_str}")
-        elif not is_male and hayvan.get('gebe_mi', False) and hayvan.get('gebelik_tarihi'):
-            try:
-                g_tarihi = datetime.strptime(hayvan['gebelik_tarihi'], "%d/%m/%Y"); d_tarihi = g_tarihi + timedelta(days=283); kalan_gun = (d_tarihi - datetime.now()).days
-                bilgi_text += f"\n\n Gebelik Durumu: GEBE \n  - Tahmini Doğum: {d_tarihi.strftime('%d/%m/%Y')} ({kalan_gun} gün kaldı)"
-            except: bilgi_text += "\n\n Gebelik Durumu: GEBE "
-            
-        elif hayvan.get('olu', False):
-            bilgi_text += f"\n\n Hayat Durumu: ÖLÜ ({hayvan.get('olum_tarihi', '-')})"
-        
-        foto_img = self.foto_data_to_image(hayvan.get('foto_data'), max_size=(240, 170))
-        if foto_img:
-            foto_lbl = tk.Label(bilgi_frame, image=foto_img, bg=self.renkler["kart_arkaplan"], highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
-            foto_lbl.image = foto_img
-            self._foto_referanslari.append(foto_img)
-            foto_lbl.pack(anchor='w', pady=(0, 12))
-
-        tk.Label(bilgi_frame, text=bilgi_text, font=('Segoe UI', 12), bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], justify='left', anchor='nw').pack(fill='x', pady=5, anchor='n')
-
-        if not is_male:
-            tk.Label(sol_panel, text="DOĞUM GEÇMİŞİ", bg=self.renkler["gri"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 14, 'bold'), pady=15).pack(fill='x')
-            dogum_frame = tk.Frame(sol_panel, bg=self.renkler["kart_arkaplan"], padx=20, pady=10)
-            dogum_frame.pack(fill='both', expand=True)
-            if dogumlar:
-                for i, dogum in enumerate(dogumlar, 1):
-                    # --- YENİ DOĞUM GEÇMİŞİ GÖSTERİMİ ---
-                    if dogum.get('not') == 'Geçmiş kayıt, süre bilinmiyor':
-                         dogum_txt = f"{i}. Doğum: {dogum.get('not')}"
-                    else:
-                        yavrular_str_list = [f"{y.get('cins', 'Bilinmiyor')} (Küpe: {self.yavru_gorunen_kupe(y)})" for y in dogum.get('yavrular', [])]
-                        yavrular_str = ", ".join(yavrular_str_list) if yavrular_str_list else "Yavru bilgisi yok"
-                        dogum_txt = f"{i}. Doğum ({dogum.get('tarih','-')}): {yavrular_str}"
-                    # --- YENİLİK SONU ---
-                    tk.Label(dogum_frame, text=dogum_txt, bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 11), wraplength=sol_panel.winfo_width()-50).pack(anchor='w')
-            else: tk.Label(dogum_frame, text="Kayıtlı doğum yok.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 11, 'italic')).pack(anchor='w')
-
-        if not is_male:
-            sag_panel = tk.Frame(ana_frame, bg=self.renkler["kart_arkaplan"])
-            sag_panel.pack(side='right', fill='both', expand=True, padx=(10, 0))
-            tk.Label(sag_panel, text="TOHUMLAMA GEÇMİŞİ", bg=self.renkler["gri"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 14, 'bold'), pady=15).pack(fill='x')
-            tohumlama_tree_frame = tk.Frame(sag_panel, bg=self.renkler["kart_arkaplan"])
-            tohumlama_tree_frame.pack(fill='both', expand=True, padx=1, pady=1)
-            toh_cols = ('#', 'Tarih', 'Şekil', 'Suni İsim', 'Sonuç')
-            toh_tree = ttk.Treeview(tohumlama_tree_frame, columns=toh_cols, show='headings', style='Modern.Treeview')
-            for col in toh_cols:
-                toh_tree.heading(col, text=col); toh_tree.column(col, width=120 if col != '#' else 40, anchor='center')
-            if hayvan.get('tohumlamalar'):
-                for i, tohumlama in enumerate(reversed(hayvan['tohumlamalar']), 1):
-                    sonuc = "Beklemede";
-                    if tohumlama.get('gebe_mi') is True: sonuc = "Başarılı"
-                    elif tohumlama.get('gebe_mi') is False: sonuc = "Başarısız"
-                    toh_tree.insert('', 'end', values=(len(hayvan['tohumlamalar']) - i + 1, tohumlama.get('tarih', '-'), tohumlama.get('sekil', '-'), tohumlama.get('suni_isim', '-'), sonuc))
-            toh_tree.pack(fill='both', expand=True)
 
     def profil_kart_olustur(self, parent, baslik=None, accent=None, padx=16, pady=14):
         kart = tk.Frame(
@@ -7311,10 +7528,6 @@ if __name__ == "__main__":
         if Image is None:
             messagebox.showerror("Eksik Kütüphane", "Lütfen 'Pillow' kütüphanesini yükleyin.\nKomut: pip install Pillow")
             exit()
-        
-        if not MATPLOTLIB_AVAILABLE:
-            messagebox.showwarning("Eksik Kütüphane", "Raporlama özelliği için 'matplotlib' kütüphanesi önerilir.\nKomut: pip install matplotlib")
-
         app = HayvanTakipSistemi()
         app.calistir()
     except Exception as e:

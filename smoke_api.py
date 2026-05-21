@@ -40,6 +40,16 @@ def request(base_url, method, path, payload=None, token=None, expected=None):
         raise AssertionError(f"{method} {path} returned {exc.code}: {body}") from exc
 
 
+def expect_http_error(base_url, method, path, status_code, payload=None, token=None):
+    try:
+        request(base_url, method, path, payload=payload, token=token)
+    except AssertionError as exc:
+        if f"returned {status_code}" in str(exc):
+            return
+        raise
+    raise AssertionError(f"{method} {path} should have returned {status_code}")
+
+
 def wait_for_health(proc, base_url):
     last_error = None
     for _ in range(60):
@@ -138,6 +148,29 @@ def main():
         )
         assert user["ciftlik_id"] == farm_id
 
+        _, removable_user = request(
+            base_url,
+            "POST",
+            "/api/kullanicilar",
+            {
+                "kullanici_adi": "smoke_delete_user",
+                "sifre": "smoke1234",
+                "rol": "ciftlik",
+                "ciftlik_id": farm_id,
+                "aktif": True,
+            },
+            token=admin_token,
+            expected=201,
+        )
+        request(base_url, "DELETE", f"/api/kullanicilar/{removable_user['id']}", token=admin_token, expected=200)
+        expect_http_error(
+            base_url,
+            "POST",
+            "/api/auth/login",
+            401,
+            {"kullanici_adi": "smoke_delete_user", "sifre": "smoke1234"},
+        )
+
         _, farm_login = request(
             base_url,
             "POST",
@@ -204,18 +237,25 @@ def main():
         assert any(item.get("hedef_id") == "api-smoke-h1" for item in history), history
 
         request(base_url, "DELETE", f"/api/ciftlikler/{farm_id}", token=admin_token, expected=200)
-        try:
-            request(
-                base_url,
-                "POST",
-                "/api/auth/login",
-                {"kullanici_adi": "smoke_user", "sifre": "smoke1234"},
-                expected=200,
-            )
-            raise AssertionError("Deleted farm user can still log in")
-        except AssertionError as exc:
-            if "returned 401" not in str(exc):
-                raise
+        expect_http_error(
+            base_url,
+            "POST",
+            "/api/auth/login",
+            401,
+            {"kullanici_adi": "smoke_user", "sifre": "smoke1234"},
+        )
+        expect_http_error(base_url, "GET", "/api/hayvanlar/api-smoke-h1", 404, token=admin_token)
+        expect_http_error(base_url, "GET", "/api/hayvanlar/CCALF001", 404, token=admin_token)
+        _, remaining_users = request(base_url, "GET", "/api/kullanicilar", token=admin_token, expected=200)
+        assert all(k.get("ciftlik_id") != farm_id for k in remaining_users), remaining_users
+        _, remaining_animals = request(
+            base_url,
+            "GET",
+            f"/api/hayvanlar?skip=0&limit=1000&arsiv_dahil=true&ciftlik_id={farm_id}",
+            token=admin_token,
+            expected=200,
+        )
+        assert remaining_animals == [], remaining_animals
 
         print(f"API smoke OK: {base_url}")
         return 0

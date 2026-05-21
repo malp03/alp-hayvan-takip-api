@@ -130,6 +130,7 @@ Bu komut sunlari calistirir:
 - Python syntax check
 - Pyflakes static check
 - Desktop UI smoke
+- Admin popup UI smoke
 - Login UI smoke
 - Login responsiveness smoke
 - API HTTP smoke
@@ -140,6 +141,7 @@ Tekil testler:
 
 ```powershell
 python tools\smoke_ui.py
+python tools\smoke_admin_popups.py
 python tools\smoke_login.py
 python tools\smoke_login_responsive.py
 python tools\smoke_api.py
@@ -218,10 +220,36 @@ Android icin onemli hazirliklar:
 - Kamera ile kupe numarasi tarama ve galeriden kupe okuma ileride Android tarafinda eklenecek.
 - Mobilde hayvan sekmesinde tarama sonrasi direkt ilgili profile gitme isteniyor.
 
+## 21 Mayis 2026 UI Notlari
+
+- Yeni hayvan kaydinda fotograf alani 3 sabit slottur; `Fotoğraf Ekle` coklu dosya secimi yapar.
+- Fotograf slotlarinda sag ustteki kirmizi `X`, sadece ilgili fotografi kaldirir.
+- Fotograf onizleme siyah bosluk birakmamali: `foto_slot_canvas_ciz` slotun gercek canvas boyutunu kullanir ve `<Configure>`/`after_idle` ile yeniden cizer.
+- Raporlama ekrani sabit matplotlib canvas yerine uygulama ici responsive donut kartlari kullanir. Kucuk pencerede tek/iki kolona, genis pencerede uc kolona akar.
+- Raporlama sekmesi `kaydirilabilir_sayfa` icinde acilir; kucuk pencerede asagi kaydirma olmalidir.
+- Asi/Prosedur sekmesi de `kaydirilabilir_sayfa` kullanir ve ana prosedur tablosunda dikey/yatay scrollbar vardir.
+- Matplotlib bagimliligi kaldirildi; raporlar Tkinter canvas ile cizilir ve matplotlib yoksa da calisir.
+- Admin/login ekraninda kullaniciya gorunen ASCII metinler Turkcelestirildi.
+- Sag tik hayvan menüsündeki islevsiz `Iptal` satiri kaldirildi.
+- Ana sekme barinda buton genisligi canvas `width` degerinden hesaplanir; 1280 genislikte sekmeler sagdan tasmamali.
+- `tools/smoke_ui.py` fotograf slot doluluk kontrolunu, 3 fotograf kaydini, profil fotograf buyutmeyi, rapor kartlarini ve sekme tasmasini test eder.
+
+## 21 Mayis 2026 Son Paket Notlari
+
+- Admin `Çiftlik Yönetimi` ve `Kullanıcı Yönetimi` popuplari yeniden duzenlendi: baslik/aciklama alani, kartli liste/form yapisi, tablo scrollbarlari, responsive yerlesim ve modern buton gruplari eklendi.
+- Admin popup icinde Tkinter `pack/grid` karisimi ve tuple `pady` hatalari yakalanip duzeltildi. Bu hatalar popup acilisinda runtime crash yaratabiliyordu.
+- Dashboard guclendirildi: responsive metrik kartlari, `Yaklaşan İşler`, `Son İşlemler`, `Hızlı İşlemler`, calisilan ciftlik/baglanti/senkron ozeti ve kritik uyari ozeti eklendi.
+- Hayvan Listesi filtre/arama alani sabit yukseklikten cikarildi; dar/orta genislikte butonlar alt satira akar. `Temizle` ve `Yenile` butonlari gorunur kalacak sekilde yerlestirildi.
+- Ana sekme butonlari kompakt hale getirildi; 1280 genislikte sekmeler sagdan tasmamali.
+- Kullanilmayan eski `hayvan_detay_penceresi_eski` blogu ve islevsiz `combo_secimi` callback'i kaldirildi.
+- `tools/smoke_api.py` genisletildi: kullanici silme, silinen kullanicinin login olamamasi, ciftlik silinince bagli kullanici/hayvan/yavru kayitlarinin kalkmasi lokal gecici veritabaninda test edilir.
+- `tools/smoke_admin_popups.py` eklendi ve `tools/run_smoke_tests.py` icine baglandi; admin popup acilis hatalari artik otomatik yakalanir.
+- Son tam test: `python tools\run_smoke_tests.py` komutu 21 Mayis 2026 tarihinde gecti.
+- Son uretilen paketler: `ALP_Ziraat_Hayvan_Takip.exe` 39.8 MB, `ALP_Ziraat_Hayvan_Takip_Setup.exe` 47.5 MB, kurulum ZIP'i 39.4 MB.
+
 ## Bilinen Oncelikler / Sonraki Iyilestirmeler
 
-- Dashboard ana sayfayi daha bilgi dolu yapmak.
-- Raporlari guclendirmek.
+- Raporlara tarih araligi, ciftlik karsilastirma ve PDF/Excel icinde daha detayli grafik verisi eklemek.
 - Islem gecmisini daha detayli ve kullanisli yapmak.
 - Dogum/yavru popup akislarini tekrar test edip guzellestirmek.
 - Fotograf ekleme/profilde gosterme akisini gercek kullanici senaryosuyla tekrar test etmek.
