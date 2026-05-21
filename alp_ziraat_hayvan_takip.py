@@ -148,6 +148,7 @@ class HayvanTakipSistemi:
             self.api_token = None
             self.api_kullanici = None
             self.yeni_hayvan_foto_data = None
+            self.yeni_hayvan_foto_datas = []
             self._foto_referanslari = []
             self.admin_aktif_ciftlik_id = None
             self.admin_aktif_ciftlik_ad = None
@@ -717,6 +718,19 @@ class HayvanTakipSistemi:
         except Exception:
             return None
 
+    def foto_data_to_cover_image(self, foto_data, size=(160, 90)):
+        if not (PIL_AVAILABLE and foto_data):
+            return None
+        try:
+            raw = str(foto_data)
+            if "," in raw:
+                raw = raw.split(",", 1)[1]
+            img = Image.open(io.BytesIO(base64.b64decode(raw))).convert("RGB")
+            img = ImageOps.fit(img, size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
+
     def foto_onizleme_guncelle(self, label, foto_data, max_size=(180, 140), bos_metin="Fotoğraf yok"):
         img = self.foto_data_to_image(foto_data, max_size=max_size)
         if img:
@@ -726,6 +740,83 @@ class HayvanTakipSistemi:
         else:
             label.configure(image="", text=bos_metin)
             label.image = None
+
+    def foto_slot_canvas_ciz(self, canvas, foto_data, slot_no, remove_callback=None, max_size=(154, 86)):
+        try:
+            canvas.delete("all")
+            w = int(canvas.cget("width"))
+            h = int(canvas.cget("height"))
+            canvas.configure(bg=self.renkler["input_bg"], highlightbackground=self.renkler["kenarlik"])
+            img = self.foto_data_to_cover_image(foto_data, size=(w, h))
+            if img:
+                canvas.image = img
+                self._foto_referanslari.append(img)
+                canvas.create_image(0, 0, image=img, anchor="nw")
+                canvas.create_rectangle(0, h - 24, w, h, fill="#020817", outline="#020817", stipple="gray50")
+                canvas.create_rectangle(w - 24, 2, w - 4, 22, fill=self.renkler["button_danger_bg"], outline=self.renkler["button_danger_bg"])
+                canvas.create_text(w - 14, 12, text="X", fill=self.renkler["button_danger_fg"], font=("Segoe UI", 9, "bold"))
+                canvas.create_text(8, h - 12, text=f"{slot_no}. fotoğraf", fill=self.renkler["yazi_rengi"], font=("Segoe UI", 8, "bold"), anchor="w")
+
+                def click(event):
+                    if event.x >= w - 28 and event.y <= 26 and remove_callback:
+                        remove_callback()
+
+                canvas.configure(cursor="hand2")
+                canvas.bind("<Button-1>", click)
+            else:
+                canvas.image = None
+                canvas.configure(cursor="")
+                canvas.unbind("<Button-1>")
+                canvas.create_text(
+                    w // 2,
+                    h // 2,
+                    text=f"{slot_no}. slot boş",
+                    fill=self.renkler["muted"],
+                    font=("Segoe UI", 9, "bold"),
+                )
+        except tk.TclError:
+            pass
+
+    def fotograf_buyut_penceresi(self, foto_data, baslik="Fotoğraf", parent=None):
+        parent = parent or self.root
+        img = self.foto_data_to_image(foto_data, max_size=(980, 680))
+        if not img:
+            return messagebox.showerror("Fotoğraf", "Fotoğraf görüntülenemedi.", parent=parent)
+
+        pencere = tk.Toplevel(parent)
+        pencere.title(baslik)
+        pencere.geometry("1040x760")
+        pencere.minsize(720, 520)
+        pencere.configure(bg=self.renkler["arkaplan"])
+        pencere.transient(parent)
+        try:
+            pencere.iconphoto(True, self.logo_ikon)
+        except Exception:
+            pass
+
+        kart = self.modern_kart(pencere, accent=self.renkler["button_primary_bg"])
+        kart.pack(fill="both", expand=True, padx=18, pady=18)
+        ust = tk.Frame(kart, bg=self.renkler["kart_arkaplan"], padx=18, pady=14)
+        ust.pack(fill="x")
+        tk.Label(
+            ust,
+            text=baslik,
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 15, "bold"),
+        ).pack(side="left")
+        self.modern_buton(ust, "Kapat", pencere.destroy, purpose='default', small=True).pack(side="right")
+
+        govde = tk.Frame(kart, bg=self.renkler["input_bg"], padx=10, pady=10)
+        govde.pack(fill="both", expand=True, padx=18, pady=(0, 18))
+        foto_lbl = tk.Label(govde, image=img, bg=self.renkler["input_bg"])
+        foto_lbl.image = img
+        self._foto_referanslari.append(img)
+        foto_lbl.pack(fill="both", expand=True)
+        self.pencere_ortala(pencere, parent)
+        pencere.lift(parent)
+        pencere.focus_force()
+        return pencere
 
     def hayvan_fotograflari(self, hayvan):
         fotograflar = []
@@ -4056,39 +4147,86 @@ class HayvanTakipSistemi:
         )
         foto_panel.pack(fill="x")
         self.themed_widgets.append((foto_panel, 'soft_panel'))
-        self.yeni_hayvan_foto_preview = tk.Label(
-            foto_panel,
-            text="Fotoğraf yok",
+        foto_preview_grid = tk.Frame(foto_panel, bg=self.renkler["kart_ikincil"])
+        foto_preview_grid.pack(side="left", fill="both", expand=True)
+        foto_preview_grid.columnconfigure((0, 1, 2), weight=1)
+        self.themed_widgets.append((foto_preview_grid, 'soft_panel'))
+        self.yeni_hayvan_foto_previews = []
+        for idx in range(3):
+            preview = tk.Canvas(
+                foto_preview_grid,
+                width=136,
+                height=88,
+                bg=self.renkler["input_bg"],
+                bd=0,
+                highlightthickness=1,
+                highlightbackground=self.renkler["kenarlik"],
+            )
+            preview.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 6, 0))
+            self.yeni_hayvan_foto_previews.append(preview)
+        self.yeni_hayvan_foto_sayac_label = tk.Label(
+            foto_preview_grid,
+            text="0/3 fotoğraf",
             bg=self.renkler["kart_ikincil"],
             fg=self.renkler["muted"],
-            font=('Segoe UI', 9),
-            width=20,
-            height=4,
+            font=('Segoe UI', 8, 'bold'),
         )
-        self.yeni_hayvan_foto_preview.pack(side="left", fill="both", expand=True)
+        self.yeni_hayvan_foto_sayac_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(7, 0))
         foto_btnler = tk.Frame(foto_panel, bg=self.renkler["kart_ikincil"])
         foto_btnler.pack(side="right", padx=(10, 0))
         self.themed_widgets.append((foto_btnler, 'soft_panel'))
 
+        self.yeni_hayvan_foto_datas = []
+
+        def yeni_foto_onizleme_guncelle():
+            fotograflar = list(getattr(self, "yeni_hayvan_foto_datas", []) or [])[:3]
+            self.yeni_hayvan_foto_datas = fotograflar
+            self.yeni_hayvan_foto_data = fotograflar[0] if fotograflar else None
+            for idx, preview in enumerate(getattr(self, "yeni_hayvan_foto_previews", [])):
+                foto = fotograflar[idx] if idx < len(fotograflar) else None
+                self.foto_slot_canvas_ciz(
+                    preview,
+                    foto,
+                    idx + 1,
+                    remove_callback=lambda i=idx: yeni_foto_kaldir_index(i),
+                    max_size=(136, 88),
+                )
+            if hasattr(self, "yeni_hayvan_foto_sayac_label"):
+                self.yeni_hayvan_foto_sayac_label.config(text=f"{len(fotograflar)}/3 fotoğraf")
+
+        self.yeni_hayvan_foto_onizleme_guncelle = yeni_foto_onizleme_guncelle
+
+        def yeni_foto_kaldir_index(index):
+            fotograflar = list(getattr(self, "yeni_hayvan_foto_datas", []) or [])
+            if 0 <= index < len(fotograflar):
+                fotograflar.pop(index)
+                self.yeni_hayvan_foto_datas = fotograflar
+                yeni_foto_onizleme_guncelle()
+
         def yeni_foto_sec():
-            dosya = filedialog.askopenfilename(
-                title="Hayvan fotoğrafı seç",
+            mevcut_fotograflar = list(getattr(self, "yeni_hayvan_foto_datas", []) or [])[:3]
+            if len(mevcut_fotograflar) >= 3:
+                return messagebox.showwarning("Fotoğraf", "Yeni hayvan kaydında en fazla 3 fotoğraf eklenebilir.", parent=self.root)
+            dosyalar = filedialog.askopenfilenames(
+                title="Hayvan fotoğrafları seç",
+                parent=self.root,
                 filetypes=[("Görsel dosyaları", "*.jpg *.jpeg *.png *.webp *.bmp"), ("Tüm dosyalar", "*.*")]
             )
-            if not dosya:
+            if not dosyalar:
                 return
             try:
-                self.yeni_hayvan_foto_data = self.foto_data_olustur(dosya)
-                self.foto_onizleme_guncelle(self.yeni_hayvan_foto_preview, self.yeni_hayvan_foto_data, max_size=(120, 82))
+                kalan = 3 - len(mevcut_fotograflar)
+                for dosya in list(dosyalar)[:kalan]:
+                    mevcut_fotograflar.append(self.foto_data_olustur(dosya))
+                self.yeni_hayvan_foto_datas = mevcut_fotograflar[:3]
+                yeni_foto_onizleme_guncelle()
+                if len(dosyalar) > kalan:
+                    messagebox.showwarning("Fotoğraf", "En fazla 3 fotoğraf eklenebilir; fazla seçimler alınmadı.", parent=self.root)
             except Exception as e:
                 messagebox.showerror("Fotoğraf", f"Fotoğraf eklenemedi:\n{e}", parent=self.root)
 
-        def yeni_foto_kaldir():
-            self.yeni_hayvan_foto_data = None
-            self.foto_onizleme_guncelle(self.yeni_hayvan_foto_preview, None, max_size=(120, 82))
-
-        self.modern_buton(foto_btnler, "Seç", yeni_foto_sec, purpose='primary', width=8, small=True).pack(pady=(0, 6))
-        self.modern_buton(foto_btnler, "Kaldır", yeni_foto_kaldir, purpose='default', width=8, small=True).pack()
+        self.modern_buton(foto_btnler, "Fotoğraf Ekle", yeni_foto_sec, purpose='primary', width=12, small=True).pack()
+        yeni_foto_onizleme_guncelle()
 
         # --- Row 3 (Dinamik Gizli Alanlar) ---
         self.laktasyon_container = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
@@ -5208,6 +5346,7 @@ class HayvanTakipSistemi:
         
         yeni_id = uuid.uuid4().hex
         gorunen_kupe = ciftlik_kupe if ciftlik_kupe else resmi_kupe
+        yeni_fotograflar = list(getattr(self, "yeni_hayvan_foto_datas", []) or [])[:3]
         self.islem_kaydi_baslat(f"Hayvan eklendi: {gorunen_kupe}")
         
         self.hayvanlar[yeni_id] = {
@@ -5229,8 +5368,8 @@ class HayvanTakipSistemi:
             'kesildi': False, 'kesim_bilgisi': None,
             'asi_prosedurler': [],
             'arsivli': False, 'arsiv_tarihi': None,
-            'foto_data': getattr(self, "yeni_hayvan_foto_data", None),
-            'foto_datas': [getattr(self, "yeni_hayvan_foto_data", None)] if getattr(self, "yeni_hayvan_foto_data", None) else [],
+            'foto_data': yeni_fotograflar[0] if yeni_fotograflar else None,
+            'foto_datas': yeni_fotograflar,
             'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         }
         self.veri_kaydet()
@@ -5240,8 +5379,9 @@ class HayvanTakipSistemi:
             entry.delete(0, tk.END)
         self.cins_combo.set('')
         self.yeni_hayvan_foto_data = None
-        if hasattr(self, "yeni_hayvan_foto_preview"):
-            self.foto_onizleme_guncelle(self.yeni_hayvan_foto_preview, None, max_size=(120, 82))
+        self.yeni_hayvan_foto_datas = []
+        if hasattr(self, "yeni_hayvan_foto_onizleme_guncelle"):
+            self.yeni_hayvan_foto_onizleme_guncelle()
         self._on_cins_change() 
         
         self.hayvan_listesini_guncelle()
@@ -6606,8 +6746,6 @@ class HayvanTakipSistemi:
             ("Düzenle", lambda: self.hayvan_duzenle_penceresi(hayvan_id, detay_window), "default"),
             ("Aşı/Prosedür", lambda: self.asi_prosedur_penceresi(hayvan_id, detay_window), "success"),
         ]
-        if len(fotograflar) < 3:
-            aksiyonlar.append(("Fotoğraf Ekle", lambda: self.hayvan_fotograf_sec(hayvan_id, detay_window), "primary"))
         if self.hayvan_tohumlanabilir_mi(hayvan):
             aksiyonlar.append(("Tohumla", lambda: self.tohumlama_ekranina_hayvanla_git(hayvan_id, detay_window), "primary"))
         if not hayvan.get("olu") and not hayvan.get("kesildi") and not hayvan.get("arsivli"):
@@ -6657,6 +6795,15 @@ class HayvanTakipSistemi:
                     foto_lbl = tk.Label(slot, image=foto_img, bg=self.renkler["kart_ikincil"])
                     foto_lbl.image = foto_img
                     self._foto_referanslari.append(foto_img)
+                    foto_lbl.configure(cursor="hand2")
+                    foto_lbl.bind(
+                        "<Button-1>",
+                        lambda event, f=fotograflar[idx], i=idx: self.fotograf_buyut_penceresi(
+                            f,
+                            f"{gorunen_kupe} - {i + 1}. Fotoğraf",
+                            detay_window,
+                        ),
+                    )
                     foto_lbl.pack(fill="both", expand=True)
                 else:
                     tk.Label(slot, text="Açılamadı", bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold"), height=5).pack(fill="both", expand=True)

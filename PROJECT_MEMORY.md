@@ -85,12 +85,16 @@ ALP Ziraat Hayvan Takip uygulamasi, ciftliklerin suru kayitlarini yonetmesi icin
 - Arsivli hayvani arsivden cikarma eklendi.
 - Hayvan profilini zenginlestirme yapildi: kimlik/durum, ozet, tohumlama gecmisi, dogum-yavru gecmisi, asi/prosedur gecmisi.
 - Hayvan profilinin ust kismi kompakt hale getirildi: buyuk bos header kaldirildi, profil basligi/rozetler/aksiyon bar ayrildi.
+- Hayvan profilinde fotograf ekleme butonu sadece fotograf kartinda tutulur; ust aksiyon barinda tekrar edilmez.
 - Hayvan profilinden `Tohumla` akisi eklendi: hayvan profilindeyken tohumlama ekranina gidip hayvan otomatik secili gelir.
 - Tohumlanamayacak hayvanlarda, ornegin dana/erkek gibi uygun olmayan cinslerde, sag tik menude tohumlama secenegi cikmamali.
 - Hayvanlara fotograf ekleme destegi eklendi.
+- Yeni hayvan kaydederken de 3 fotograf slotu desteklenir; kayit sirasinda secilen fotograflar `foto_datas` listesine yazilir.
+- Yeni hayvan kaydinda fotograf secimi toplu yapilabilir. Buton metni `Fotoğraf Ekle`dir. Onizlemeler sabit boyutlu slot/canvas yapisindadir, fotograflar slotu cover/crop mantigiyla doldurur; her slotun sag ustundeki `X` ile istenen fotograf kaldirilir.
 - Onceden fotograf eklenmeyen hayvanlarin profilinden sonradan fotograf eklenebilir.
 - Hayvan fotograflari profil ekraninda gosterilmelidir.
 - Hayvan basina en fazla 3 fotograf desteklenir. Eski `foto_data` alanı korunur, yeni coklu alan `foto_datas` listesidir. Ilk fotograf geriye donuk uyumluluk icin `foto_data` olarak da tutulur.
+- Profildeki kucuk fotografa tiklaninca buyuk onizleme penceresi acilir.
 
 ## Dogum ve Yavru Akisi
 
