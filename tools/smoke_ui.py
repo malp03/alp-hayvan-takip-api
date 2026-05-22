@@ -93,6 +93,16 @@ def assert_main_layout(app):
     for button in app.tab_buttons:
         assert button.winfo_x() + button.winfo_width() <= bar_width + 2, "tab button overflows custom tab bar"
 
+    assert hasattr(app, "header_action_group"), "header action group missing"
+    assert hasattr(app, "header_action_fallback"), "header action fallback missing"
+    assert app.header_action_fallback.winfo_ismapped(), "header actions should wrap below header at 1280px"
+
+    app.root.geometry("1540x820")
+    app.root.update_idletasks()
+    app.root.update()
+    assert app.header_action_group.winfo_ismapped(), "header actions should stay top-right on wide screens"
+    assert not app.header_action_fallback.winfo_ismapped(), "fallback action row should hide on wide screens"
+
 
 def main():
     tmp = prepare_local_appdata()
