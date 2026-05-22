@@ -1834,12 +1834,14 @@ class HayvanTakipSistemi:
                     pass
                 setattr(self, after_attr, None)
 
-    def login_akisini_baslat(self):
+    def login_akisini_baslat(self, otomatik_giris=True):
         while getattr(self, "api_modu", False):
             self._login_yeniden_iste = False
             self.api_oturumu_temizle()
-            otomatik_giris = self.taninan_bilgisayar_giris_dene()
-            if not otomatik_giris and not self.api_giris_penceresi():
+            otomatik_giris_basarili = False
+            if otomatik_giris:
+                otomatik_giris_basarili = self.taninan_bilgisayar_giris_dene()
+            if not otomatik_giris_basarili and not self.api_giris_penceresi():
                 return False
             if not self.admin_mi():
                 return True
@@ -1848,6 +1850,10 @@ class HayvanTakipSistemi:
                 self.themed_buttons = []
                 return True
             if getattr(self, "_login_yeniden_iste", False):
+                self.taninan_bilgisayar_temizle()
+                self._offline_kullanici_adi = None
+                self._offline_sifre = None
+                otomatik_giris = False
                 continue
             return False
         return True
@@ -1858,12 +1864,14 @@ class HayvanTakipSistemi:
         if onay_iste and not messagebox.askyesno("Çıkış Yap", "Oturum kapatılıp giriş ekranına dönülsün mü?", parent=self.root):
             return
         self.taninan_bilgisayar_temizle()
+        self._offline_kullanici_adi = None
+        self._offline_sifre = None
         self.aktif_zamanlayicilari_durdur()
         for child in self.root.winfo_children():
             child.destroy()
         self.themed_widgets = []
         self.themed_buttons = []
-        if not self.login_akisini_baslat():
+        if not self.login_akisini_baslat(otomatik_giris=False):
             return self.uygulamayi_kapat()
         self.hayvanlar = self.veri_yukle()
         self.geri_al_yigini = []
@@ -7271,10 +7279,15 @@ class HayvanTakipSistemi:
 
         header = tk.Frame(detay_window, bg=self.renkler["siyah"], padx=22, pady=14)
         header.pack(fill="x")
+
+        # ── header_top: grid ile başlık sol / butonlar sağ ──────────────────
         header_top = tk.Frame(header, bg=self.renkler["siyah"])
         header_top.pack(fill="x")
+        header_top.grid_columnconfigure(0, weight=1)  # başlık esner
+        header_top.grid_columnconfigure(1, weight=0)  # butonlar sabit
+
         sol_header = tk.Frame(header_top, bg=self.renkler["siyah"])
-        sol_header.pack(fill="x", expand=True)
+        sol_header.grid(row=0, column=0, sticky="w")
         tk.Label(
             sol_header,
             text=f"{gorunen_kupe} Hayvan Profili",
@@ -7290,22 +7303,10 @@ class HayvanTakipSistemi:
             font=("Segoe UI", 10),
         ).pack(anchor="w", pady=(3, 0))
 
-        rozetler = tk.Frame(header_top, bg=self.renkler["siyah"])
-        rozetler.pack(anchor="w", pady=(10, 0))
+        # Aksiyon butonları — sağ sütunda, ortalanmış dikey
+        aksiyon_frame = tk.Frame(header_top, bg=self.renkler["siyah"])
+        aksiyon_frame.grid(row=0, column=1, sticky="se", padx=(14, 0), pady=(6, 0))
 
-        def header_rozet(baslik, deger, renk=None):
-            renk = renk or self.renkler["button_primary_bg"]
-            pill = tk.Frame(rozetler, bg=self.renkler["kart_ikincil"], padx=12, pady=7, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
-            pill.pack(side="left", padx=(8, 0))
-            tk.Label(pill, text=baslik.upper(), bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
-            tk.Label(pill, text=str(deger), bg=self.renkler["kart_ikincil"], fg=renk, font=("Segoe UI", 12, "bold")).pack(anchor="w")
-
-        header_rozet("Yaş", yas_metin)
-        header_rozet("Durum", durum, self.renkler["button_success_bg"] if durum not in {"Arşivli", "Ölü", "Kesildi"} else self.renkler["uyari"])
-        header_rozet("Fotoğraf", f"{len(fotograflar)}/3")
-
-        aksiyon_frame = tk.Frame(header, bg=self.renkler["siyah"])
-        aksiyon_frame.pack(fill="x", pady=(14, 0))
         aksiyonlar = [
             ("Düzenle", lambda: self.hayvan_duzenle_penceresi(hayvan_id, detay_window), "default"),
             ("Aşı/Prosedür", lambda: self.asi_prosedur_penceresi(hayvan_id, detay_window), "success"),
@@ -7327,7 +7328,55 @@ class HayvanTakipSistemi:
         else:
             aksiyonlar.append(("Arşivle", lambda: self.hayvan_sil_detay(hayvan_id, detay_window), "danger"))
         aksiyonlar.append(("Kapat", kapat, "default"))
-        self.responsive_buton_grubu(aksiyon_frame, aksiyonlar, gap=7, align="left")
+
+        # Butonları aksiyon_frame'e pack ile yerleştir (wrap için responsive)
+        profil_butonlar = []
+        for btn_metin, btn_komut, btn_amac in aksiyonlar:
+            btn = self.modern_buton(aksiyon_frame, btn_metin, btn_komut, purpose=btn_amac, small=True)
+            btn.pack(side="left", padx=(0, 6), pady=2)
+            profil_butonlar.append(btn)
+
+        # Ekran daraldığında butonlar 2. satıra (sol_header altına) taşınır
+        ESIK = 900
+
+        def profil_header_duzen(event=None):
+            try:
+                genislik = header_top.winfo_width()
+                if genislik < 10:
+                    return
+                if genislik < ESIK:
+                    # Dar: buton frame'i başlığın altına al
+                    sol_header.grid(row=0, column=0, columnspan=2, sticky="w")
+                    aksiyon_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+                else:
+                    # Geniş: yan yana
+                    sol_header.grid(row=0, column=0, sticky="w")
+                    aksiyon_frame.grid(row=0, column=1, sticky="se", padx=(14, 0), pady=(6, 0))
+            except tk.TclError:
+                pass
+
+        header_top.bind("<Configure>", profil_header_duzen)
+
+        # --- Rozetler: Yaş / Durum / Fotoğraf ─────────────────────────────
+        rozetler = tk.Frame(header, bg=self.renkler["siyah"])
+        rozetler.pack(anchor="w", pady=(10, 0))
+
+        def header_rozet(baslik, deger, renk=None):
+            renk = renk or self.renkler["button_primary_bg"]
+            pill = tk.Frame(rozetler, bg=self.renkler["kart_ikincil"], padx=12, pady=7,
+                            highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+            pill.pack(side="left", padx=(0, 8))
+            tk.Label(pill, text=baslik.upper(), bg=self.renkler["kart_ikincil"],
+                     fg=self.renkler["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+            tk.Label(pill, text=str(deger), bg=self.renkler["kart_ikincil"],
+                     fg=renk, font=("Segoe UI", 12, "bold")).pack(anchor="w")
+
+        header_rozet("Yaş", yas_metin)
+        header_rozet("Durum", durum,
+                     self.renkler["button_success_bg"] if durum not in {"Arşivli", "Ölü", "Kesildi"}
+                     else self.renkler["uyari"])
+        header_rozet("Fotoğraf", f"{len(fotograflar)}/3")
+
 
         sayfa = self.kaydirilabilir_sayfa(detay_window, padx=22, pady=18)
 
