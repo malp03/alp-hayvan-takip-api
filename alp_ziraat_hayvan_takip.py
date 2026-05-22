@@ -43,7 +43,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.9.1"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
@@ -4041,7 +4041,7 @@ class HayvanTakipSistemi:
 
         def header_aksiyon_yerlestir(event=None):
             try:
-                genis_ekran = self.root.winfo_width() >= 1680
+                genis_ekran = self.root.winfo_width() >= 1450
                 if genis_ekran:
                     if not self.header_action_group.winfo_ismapped():
                         self.header_action_group.pack(side='right', fill='y', padx=(8, 14), pady=17)
@@ -4638,7 +4638,7 @@ class HayvanTakipSistemi:
         kayit_frame = ttk.Frame(self.notebook, style='TFrame')
         self.notebook.add(kayit_frame, text="Hayvan Kaydı")
 
-        sayfa = self.kaydirilabilir_sayfa(kayit_frame, padx=28, pady=22)
+        sayfa = self.kaydirilabilir_sayfa(kayit_frame, padx=24, pady=14)
 
         self._sayfa_basligi(
             sayfa,
@@ -4654,8 +4654,8 @@ class HayvanTakipSistemi:
         main_card = self.modern_kart(govde, accent=self.renkler["button_success_bg"])
         main_card.grid(row=0, column=0, sticky='nsew', padx=(0, 18))
 
-        header = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], pady=18)
-        header.pack(fill='x', padx=28)
+        header = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], pady=12)
+        header.pack(fill='x', padx=24)
         self.themed_widgets.append((header, 'kart'))
 
         baslik_lbl = tk.Label(header, text="Hayvan Bilgileri",
@@ -4664,11 +4664,14 @@ class HayvanTakipSistemi:
         baslik_lbl.pack(side='left')
         self.themed_widgets.append((baslik_lbl, 'label'))
 
+        kaydet_btn = self.modern_buton(header, "HAYVANI KAYDET", self.hayvan_kaydet, purpose='success', width=22, small=True)
+        kaydet_btn.pack(side='right')
+
         sep = tk.Frame(main_card, bg=self.renkler["kenarlik"], height=1)
-        sep.pack(fill='x', padx=28)
+        sep.pack(fill='x', padx=24)
         self.themed_widgets.append((sep, 'divider'))
 
-        form_frame = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], padx=28, pady=22)
+        form_frame = tk.Frame(main_card, bg=self.renkler["kart_arkaplan"], padx=24, pady=14)
         form_frame.pack(fill='x')
         form_frame.columnconfigure((0, 1), weight=1)
         self.themed_widgets.append((form_frame, 'kart'))
@@ -4676,17 +4679,22 @@ class HayvanTakipSistemi:
         # --- Row 0 ---
         self.resmi_kupe_no_entry = self.modern_form_satir(form_frame, "Resmi Küpe No", ttk.Entry, row=0, col=0, font=('Segoe UI', 11), style='TEntry')
         self.ciftlik_kupe_no_entry = self.modern_form_satir(form_frame, "Çiftlik Küpe No", ttk.Entry, row=0, col=1, font=('Segoe UI', 11), style='TEntry')
+        self.resmi_kupe_no_entry.master.grid_configure(pady=6)
+        self.ciftlik_kupe_no_entry.master.grid_configure(pady=6)
 
         # --- Row 1 ---
         self.dogum_tarihi_entry = self.modern_form_satir(form_frame, "Doğum Tarihi (GG/AA/YYYY)", ttk.Entry, row=1, col=0, font=('Segoe UI', 11), style='TEntry')
         self.dogum_tarihi_entry.bind('<KeyRelease>', self.tarih_formatlama)
         self.cins_combo = self.modern_form_satir(form_frame, "Cinsi", ttk.Combobox, row=1, col=1, values=["Dişi Buzağı", "Erkek Buzağı", "Dana", "Düve", "Sağmal İnek", "Kuru İnek"], font=('Segoe UI', 11), style='TCombobox')
+        self.dogum_tarihi_entry.master.grid_configure(pady=6)
+        self.cins_combo.master.grid_configure(pady=6)
 
         # --- Row 2 ---
         self.anne_kupe_entry = self.modern_form_satir(form_frame, "Anne Çiftlik Küpe No", ttk.Entry, row=2, col=0, font=('Segoe UI', 11), style='TEntry')
+        self.anne_kupe_entry.master.grid_configure(pady=6)
 
         foto_container = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
-        foto_container.grid(row=2, column=1, sticky='ew', padx=12, pady=10)
+        foto_container.grid(row=2, column=1, sticky='ew', padx=12, pady=6)
         foto_container.columnconfigure(0, weight=1)
         self.themed_widgets.append((foto_container, 'kart'))
         tk.Label(
@@ -4701,8 +4709,8 @@ class HayvanTakipSistemi:
             bg=self.renkler["kart_ikincil"],
             highlightthickness=1,
             highlightbackground=self.renkler["kenarlik"],
-            padx=12,
-            pady=10,
+            padx=10,
+            pady=8,
         )
         foto_panel.pack(fill="x")
         self.themed_widgets.append((foto_panel, 'soft_panel'))
@@ -4714,8 +4722,8 @@ class HayvanTakipSistemi:
         for idx in range(3):
             preview = tk.Canvas(
                 foto_preview_grid,
-                width=136,
-                height=88,
+                width=126,
+                height=68,
                 bg=self.renkler["input_bg"],
                 bd=0,
                 highlightthickness=1,
@@ -4748,7 +4756,7 @@ class HayvanTakipSistemi:
                     foto,
                     idx + 1,
                     remove_callback=lambda i=idx: yeni_foto_kaldir_index(i),
-                    max_size=(136, 88),
+                    max_size=(126, 68),
                 )
             if hasattr(self, "yeni_hayvan_foto_sayac_label"):
                 self.yeni_hayvan_foto_sayac_label.config(text=f"{len(fotograflar)}/3 fotoğraf")
@@ -4800,14 +4808,6 @@ class HayvanTakipSistemi:
         self.laktasyon_container.grid_remove() # Başlangıçta gizli
 
         self.cins_combo.bind('<<ComboboxSelected>>', self._on_cins_change)
-
-        # Buton Container
-        btn_frame = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=(28, 4), sticky='e')
-        self.themed_widgets.append((btn_frame, 'kart'))
-
-        kaydet_btn = self.modern_buton(btn_frame, "HAYVANI KAYDET", self.hayvan_kaydet, purpose='success', width=25)
-        kaydet_btn.pack()
 
         ozet_card = self.modern_kart(govde)
         ozet_card.grid(row=0, column=1, sticky='nsew')
@@ -5082,14 +5082,12 @@ class HayvanTakipSistemi:
             ("Özet Excel", self.ozet_rapor_excel_aktar, 'success'),
             ("Özet PDF", self.ozet_rapor_pdf_aktar, 'default'),
         ]
-        self.responsive_buton_grubu(aksiyonlar, rapor_aksiyonlar, gap=6, align="right")
+        for metin, komut, amac in rapor_aksiyonlar:
+            self.modern_buton(aksiyonlar, metin, komut, purpose=amac, small=True).pack(side="left", padx=(0, 6))
 
         def rapor_header_yerlestir(event=None):
             try:
-                if header.winfo_width() < 980:
-                    aksiyonlar.grid(row=1, column=0, sticky="ew", padx=0, pady=(12, 0))
-                else:
-                    aksiyonlar.grid(row=0, column=1, sticky="e", padx=(12, 0), pady=0)
+                aksiyonlar.grid(row=1, column=0, sticky="w", padx=0, pady=(12, 0))
             except tk.TclError:
                 pass
 
@@ -5296,7 +5294,7 @@ class HayvanTakipSistemi:
             self.create_pie_chart(charts_frame, cins_dagilimi, "Sürüdeki Hayvan Tipleri", 1, row=0),
             self.create_pie_chart(charts_frame, ozel_durum_dagilimi, "Özel Durumlar", 2, row=0),
         ]
-        self._rapor_responsive_grid(charts_frame, chart_cards, min_width=520, max_cols=3)
+        self._rapor_responsive_grid(charts_frame, chart_cards, min_width=430, max_cols=3)
 
 
     def create_pie_chart(self, parent, data, title, column, row=1):

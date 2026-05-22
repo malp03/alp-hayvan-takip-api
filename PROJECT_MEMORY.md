@@ -277,11 +277,20 @@ Android icin onemli hazirliklar:
 - Orta genislikte ust islem butonlari kaybolmasin diye header esigi guncellendi; 1680 px altinda butonlar alt satira akar.
 - Dashboard metrik kartlari artik genis ekranda gereksiz esneyip sagdan kesilmez; kompakt sabit kartlar halinde satir kirar.
 - Raporlama ekrani sonradan fazla kompakt gorundugu icin onceki genis kartli duzene geri alindi: genis ekranda ozet kartlari satira yayilir, grafik kartlari genis kolonlarda kalir, butonlar sagda durur.
+- Raporlama aksiyon butonlari sag tarafta garip kirildigi icin baslik altinda tek satir toolbar'a alindi. Tam ekran genisliginde grafik kartlari 3 kolon yan yana kalacak sekilde min genislik ayarlandi.
+- Hayvan kaydi ekraninda `HAYVANI KAYDET` butonu formun altindan kart basliginin sagina alindi; tam ekranda buton gorunur kalir, dar ekranda sayfa kaydirma davranisi korunur.
+- Ust global aksiyon butonlari icin genis ekran esigi 1450 px yapildi; tam ekranda butonlar sag ustte kalir, daha dar pencerede ikinci satira responsive olarak duser.
 - Hayvan profil header rozetleri ve profil kartlari responsive hale getirildi. Kucuk/orta pencerede fotograf, kimlik ve ozet kartlari alt satira akar; alt gecmis kartlari da gerekirse tek kolona duser.
 - Hayvan profilindeki `Fotograf Ekle` artik kalan slot sayisi kadar coklu dosya secimi yapar; profil tarafinda da yeni kayit ekranindaki 3 fotograf mantigi korunur.
 - Profil gecmis tablolarina yatay scrollbar eklendi. Ozellikle `Dogum ve Yavru Gecmisi` tablosunda `Not` kolonu genisletildi ve uzun notlar saga kaydirilarak okunabilir.
 - `tools/smoke_update.py` icinde test ortamina sizabilecek `DATABASE_URL` temizlenir; update smoke test artik harici Supabase/Render baglantisi denemeden deterministik calisir.
 - Son tam test: `python tools\run_smoke_tests.py` komutu 22 Mayis 2026 tarihinde gecti.
+
+## 22 Mayis 2026 v1.9.1 Release Notu
+
+- GitHub latest release zaten `v1.9.0` oldugu icin updater'in tetiklenmesi adina desktop `APP_VERSION` `1.9.1` yapildi.
+- Bu release tag'i `v1.9.1` olmali; asset adi mutlaka `ALP_Ziraat_Hayvan_Takip_Setup.exe` kalmali.
+- Eski `v1.9.0` kurulu kullanici login olduktan sonra GitHub latest release `v1.9.1` oldugunu gorurse zorunlu guncelleme popup'i acilir.
 
 ## Bilinen Oncelikler / Sonraki Iyilestirmeler
 
