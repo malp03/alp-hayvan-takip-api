@@ -190,18 +190,21 @@ def main():
             "ciftlik_kupe_no": "CAPI001",
             "dogum_tarihi": "01/01/2024",
             "cins": "D\u00fcve",
+            "irk": "Simental",
             "foto_data": "data:image/jpeg;base64,abc",
             "son_guncelleme": "21/05/2026 01:10:00",
         }
         _, animal = request(base_url, "POST", "/api/hayvanlar", animal_payload, token=farm_token, expected=201)
         assert animal["foto_data"] == animal_payload["foto_data"]
+        assert animal["irk"] == "Simental", animal
 
-        request(
+        _, patched_animal = request(
             base_url,
             "PATCH",
             "/api/hayvanlar/api-smoke-h1",
             {
                 "cins": "Sa\u011fmal \u0130nek",
+                "irk": "Holstein",
                 "gebe_mi": True,
                 "gebelik_tarihi": "01/02/2026",
                 "aktif_tohumlama_id": "smoke",
@@ -210,6 +213,7 @@ def main():
             token=farm_token,
             expected=200,
         )
+        assert patched_animal["irk"] == "Holstein", patched_animal
 
         _, birth = request(
             base_url,

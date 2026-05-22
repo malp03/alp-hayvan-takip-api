@@ -43,6 +43,7 @@ def make_animal(**overrides):
         "dogum_tarihi": "01/01/2024",
         "yas_gun": 500,
         "cins": "D\u00fcve",
+        "irk": "Simental",
         "durum": "D\u00fcve",
         "tohumlamalar": [],
         "dogumlar": [],
@@ -119,6 +120,16 @@ def main():
     app = appmod.HayvanTakipSistemi()
     try:
         assert_main_layout(app)
+        app.tarih_secici_ac(app.dogum_tarihi_entry)
+        app.root.update()
+        takvimler = [
+            child for child in app.root.winfo_children()
+            if isinstance(child, tk.Toplevel) and "Tarih" in child.title()
+        ]
+        assert takvimler, "date picker popup not opened"
+        takvimler[-1].destroy()
+        app.root.update()
+
         app.root.withdraw()
         assert app.api_modu is False
 
@@ -127,6 +138,7 @@ def main():
         app.ciftlik_kupe_no_entry.insert(0, "C001")
         app.dogum_tarihi_entry.insert(0, "01/01/2024")
         app.cins_combo.set("D\u00fcve")
+        app.irk_combo.set("Simental")
         app.yeni_hayvan_foto_datas = list(SAMPLE_PHOTOS)
         app.yeni_hayvan_foto_data = SAMPLE_PHOTOS[0]
         app.yeni_hayvan_foto_onizleme_guncelle()
@@ -148,6 +160,7 @@ def main():
         created = app.hayvanlar[created_id]
         assert created["resmi_kupe_no"] == "TR001"
         assert created["ciftlik_kupe_no"] == "C001"
+        assert created["irk"] == "Simental"
         assert len(created["foto_datas"]) == 3
         assert created["foto_data"] == SAMPLE_PHOTOS[0]
         assert getattr(app, "yeni_hayvan_foto_datas", []) == []
@@ -214,7 +227,7 @@ def main():
         ]
         assert profiles, "profile window not opened"
         profile_text = "\n".join(widget_texts(profiles[-1]))
-        for expected in ("Foto\u011fraflar", "Kimlik ve Durum", "\u00d6zet", "Tohumlama Ge\u00e7mi\u015fi", "Do\u011fum ve Yavru Ge\u00e7mi\u015fi", "A\u015f\u0131 ve Prosed\u00fcrler"):
+        for expected in ("Foto\u011fraflar", "Kimlik ve Durum", "Irk", "Simental", "\u00d6zet", "Tohumlama Ge\u00e7mi\u015fi", "Do\u011fum ve Yavru Ge\u00e7mi\u015fi", "A\u015f\u0131 ve Prosed\u00fcrler"):
             assert expected in profile_text, expected
         popup = app.fotograf_buyut_penceresi(SAMPLE_PHOTOS[0], "Smoke Foto", profiles[-1])
         assert popup and popup.winfo_exists()

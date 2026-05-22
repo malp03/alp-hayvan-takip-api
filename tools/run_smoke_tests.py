@@ -26,6 +26,7 @@ PYTHON_FILES = [
     "tools/smoke_exports.py",
     "tools/smoke_update.py",
     "tools/smoke_login.py",
+    "tools/smoke_offline_login.py",
     "tools/smoke_remember_logout.py",
     "tools/smoke_admin_panel_logout.py",
     "tools/smoke_login_responsive.py",
@@ -55,6 +56,7 @@ def main():
     run_step("Export smoke", [sys.executable, str(ROOT / "tools" / "smoke_exports.py")])
     run_step("Update smoke", [sys.executable, str(ROOT / "tools" / "smoke_update.py")])
     run_step("Login UI smoke", [sys.executable, str(ROOT / "tools" / "smoke_login.py")])
+    run_step("Offline login smoke", [sys.executable, str(ROOT / "tools" / "smoke_offline_login.py")])
     run_step("Remembered logout smoke", [sys.executable, str(ROOT / "tools" / "smoke_remember_logout.py")])
     run_step("Admin panel logout smoke", [sys.executable, str(ROOT / "tools" / "smoke_admin_panel_logout.py")])
     run_step("Login responsiveness smoke", [sys.executable, str(ROOT / "tools" / "smoke_login_responsive.py")])
