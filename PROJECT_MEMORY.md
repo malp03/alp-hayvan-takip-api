@@ -271,6 +271,18 @@ Android icin onemli hazirliklar:
 - `.github/workflows/daily-api-backup.yml` guncellendi: job timeout 12 dakika, retry/timeout env degerleri eklendi.
 - Lokal backup smoke test basarili calisti; gecici lokal API'den yedek JSON dosyasi indirildi.
 
+## 22 Mayis 2026 Final Desktop QA Notlari
+
+- Son auditte artik kullanilmayan yerel `Yedekten Yukle` popup kodu ve eski tema degistirme yardimci metodlari kaldirildi. UI'da bu butonlar zaten yoktu; kod tarafindaki karisikligi da temizlendi.
+- Orta genislikte ust islem butonlari kaybolmasin diye header esigi guncellendi; 1680 px altinda butonlar alt satira akar.
+- Dashboard metrik kartlari artik genis ekranda gereksiz esneyip sagdan kesilmez; kompakt sabit kartlar halinde satir kirar.
+- Raporlama ekrani sonradan fazla kompakt gorundugu icin onceki genis kartli duzene geri alindi: genis ekranda ozet kartlari satira yayilir, grafik kartlari genis kolonlarda kalir, butonlar sagda durur.
+- Hayvan profil header rozetleri ve profil kartlari responsive hale getirildi. Kucuk/orta pencerede fotograf, kimlik ve ozet kartlari alt satira akar; alt gecmis kartlari da gerekirse tek kolona duser.
+- Hayvan profilindeki `Fotograf Ekle` artik kalan slot sayisi kadar coklu dosya secimi yapar; profil tarafinda da yeni kayit ekranindaki 3 fotograf mantigi korunur.
+- Profil gecmis tablolarina yatay scrollbar eklendi. Ozellikle `Dogum ve Yavru Gecmisi` tablosunda `Not` kolonu genisletildi ve uzun notlar saga kaydirilarak okunabilir.
+- `tools/smoke_update.py` icinde test ortamina sizabilecek `DATABASE_URL` temizlenir; update smoke test artik harici Supabase/Render baglantisi denemeden deterministik calisir.
+- Son tam test: `python tools\run_smoke_tests.py` komutu 22 Mayis 2026 tarihinde gecti.
+
 ## Bilinen Oncelikler / Sonraki Iyilestirmeler
 
 - Raporlara tarih araligi, ciftlik karsilastirma ve PDF/Excel icinde daha detayli grafik verisi eklemek.

@@ -195,97 +195,6 @@ class HayvanTakipSistemi:
         except Exception as e:
             messagebox.showerror("Başlatma Hatası", f"Uygulama başlatılamadı: {e}")
 
-    # --- Tema Yönetimi ve Diğer Yardımcı Fonksiyonlar ---
-    def toggle_theme(self):
-        # Tema değiştirme kaldırıldı; uygulama sabit koyu dashboard temasıyla çalışır.
-        self.theme_mode = "dark"
-        self.renkler = self.dark_theme
-
-    def apply_theme_to_widgets(self):
-        self.root.config(bg=self.renkler["arkaplan"])
-        self.stil_ayarla()
-        for widget, widget_type in self.themed_widgets:
-            try:
-                if not widget.winfo_exists():
-                    continue
-                if widget_type == 'frame':
-                    widget.config(bg=self.renkler["arkaplan"])
-                elif widget_type == 'arkaplan':
-                    widget.config(bg=self.renkler["arkaplan"])
-                elif widget_type == 'kart':
-                    widget.config(
-                        bg=self.renkler["kart_arkaplan"],
-                        highlightbackground=self.renkler.get("kenarlik", self.renkler["gri"])
-                    )
-                elif widget_type == 'soft_panel':
-                    widget.config(
-                        bg=self.renkler["kart_ikincil"],
-                        highlightbackground=self.renkler.get("kenarlik", self.renkler["gri"])
-                    )
-                elif widget_type == 'label':
-                    try:
-                        parent_bg = widget.master.cget('bg')
-                    except Exception:
-                        parent_bg = self.renkler["kart_arkaplan"]
-                    widget.config(bg=parent_bg, fg=self.renkler["yazi_rengi"])
-                elif widget_type == 'muted_label':
-                    try:
-                        parent_bg = widget.master.cget('bg')
-                    except Exception:
-                        parent_bg = self.renkler["kart_arkaplan"]
-                    widget.config(bg=parent_bg, fg=self.renkler["muted"])
-                elif widget_type == 'divider':
-                    widget.config(bg=self.renkler.get("kenarlik", self.renkler["gri"]))
-                elif widget_type == 'baslik_frame':
-                    widget.config(bg=self.renkler["siyah"])
-                elif widget_type == 'baslik_label':
-                    widget.config(bg=self.renkler["siyah"], fg='#F8FAFC')
-                elif widget_type == 'baslik_muted_label':
-                    widget.config(bg=self.renkler["siyah"], fg=self.renkler["muted"])
-                elif widget_type == 'kirmizi_baslik_frame':
-                    widget.config(bg=self.renkler["ana_kirmizi"])
-                elif widget_type == 'kirmizi_baslik_label':
-                    widget.config(bg=self.renkler["ana_kirmizi"], fg='#FFFFFF')
-                elif widget_type == 'kontrol_frame':
-                    widget.config(bg=self.renkler["kart_arkaplan"])
-                elif widget_type == 'kontrol_label':
-                    widget.config(bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"])
-                elif widget_type in ['uyari_baslik', 'uyari_baslik_btn']:
-                    widget.config(bg=self.renkler["uyari"])
-                elif widget_type == 'uyari_baslik_label':
-                    widget.config(bg=self.renkler["uyari"], fg=self.renkler["uyari_yazi"])
-            except tk.TclError:
-                pass  # Widget yok edilmiş olabilir
-        for button, purpose in self.themed_buttons:
-            try:
-                if button.winfo_exists():
-                    bg_color = self.renkler.get(f"button_{purpose}_bg", self.renkler["button_default_bg"])
-                    fg_color = self.renkler.get(f"button_{purpose}_fg", self.renkler["button_default_fg"])
-                    if isinstance(button, tk.Canvas):
-                        parent_bg = button.master.cget('bg')
-                        button.config(bg=parent_bg)
-                        for p in getattr(button, 'border_parts', []):
-                            button.itemconfig(p, fill=self.renkler.get("kenarlik", self.renkler["gri"]))
-                        for p in getattr(button, 'button_parts', []):
-                            button.itemconfig(p, fill=bg_color)
-                        if hasattr(button, 'text_item'):
-                            button.itemconfig(button.text_item, fill=fg_color)
-                    else:
-                        hover_color = self._lighten_color(bg_color, 25) if self.theme_mode == 'dark' else self.koyu_renk(bg_color)
-                        button.config(bg=bg_color, fg=fg_color, activebackground=hover_color, activeforeground=fg_color)
-            except tk.TclError:
-                pass
-        self.uyarilari_guncelle()
-        self.hayvan_listesini_guncelle()
-        if hasattr(self, '_update_custom_tabs'):
-            self._update_custom_tabs()
-        if hasattr(self, 'api_durum_guncelle'):
-            self.api_durum_guncelle()
-        if hasattr(self, 'rapor_frame'):
-            self.raporlari_guncelle()
-
-
-
     def stil_ayarla(self):
         style = ttk.Style()
         style.theme_use('clam')
@@ -3962,81 +3871,6 @@ class HayvanTakipSistemi:
         except Exception as e:
             messagebox.showerror("Dışa Aktar", f"PDF çıktısı oluşturulamadı:\n{e}")
 
-    def yedekleri_listele(self):
-        if not os.path.exists(self.backup_dir):
-            return []
-        yedekler = []
-        for ad in os.listdir(self.backup_dir):
-            if not ad.endswith(".json") or "_bozuk_" in ad:
-                continue
-            tam_yol = os.path.join(self.backup_dir, ad)
-            if ad.startswith("hayvan_verileri_"):
-                tur = "Hayvan Verileri"
-            elif ad.startswith("okunan_uyarilar_"):
-                tur = "Okunan Uyarılar"
-            else:
-                continue
-            yedekler.append({
-                'ad': ad,
-                'tur': tur,
-                'yol': tam_yol,
-                'zaman': datetime.fromtimestamp(os.path.getmtime(tam_yol)).strftime("%d/%m/%Y %H:%M:%S")
-            })
-        return sorted(yedekler, key=lambda x: os.path.getmtime(x['yol']), reverse=True)
-
-    def yedekten_yukle_penceresi(self):
-        yedekler = self.yedekleri_listele()
-        if not yedekler:
-            return messagebox.showinfo("Yedekten Yükle", "Kullanılabilir yedek bulunamadı.")
-
-        pencere = tk.Toplevel(self.root)
-        pencere.title("Yedekten Yükle")
-        pencere.geometry("900x520")
-        pencere.configure(bg=self.renkler["arkaplan"])
-        pencere.transient(self.root)
-
-        columns = ("Tür", "Tarih", "Dosya")
-        tree = ttk.Treeview(pencere, columns=columns, show="headings", style='Modern.Treeview')
-        for col in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=180 if col != "Dosya" else 500, anchor='center')
-        tree.pack(fill='both', expand=True, padx=15, pady=15)
-        for i, yedek in enumerate(yedekler):
-            tree.insert('', 'end', iid=str(i), values=(yedek['tur'], yedek['zaman'], yedek['ad']))
-
-        def yukle():
-            secim = tree.selection()
-            if not secim:
-                return messagebox.showwarning("Yedekten Yükle", "Önce bir yedek seçin.", parent=pencere)
-            yedek = yedekler[int(secim[0])]
-            if not messagebox.askyesno("Yedekten Yükle", f"Seçilen yedek geri yüklenecek:\n\n{yedek['ad']}\n\nMevcut veri önce yedeklenir. Devam edilsin mi?", parent=pencere):
-                return
-            try:
-                if yedek['tur'] == "Hayvan Verileri":
-                    self.islem_kaydi_baslat(f"Yedekten yükleme öncesi: {yedek['ad']}")
-                    yeni_veri = self.json_dosyasi_yukle(yedek['yol'], None, "hayvan_verileri")
-                    if yeni_veri is None:
-                        return
-                    self.hayvanlar = yeni_veri
-                    self.veri_kaydet()
-                else:
-                    yeni_veri = self.json_dosyasi_yukle(yedek['yol'], None, "okunan_uyarilar")
-                    if yeni_veri is None:
-                        return
-                    self.okunan_uyarilar = yeni_veri
-                    self.okunan_uyarilar_kaydet()
-                self.hayvan_listesini_guncelle()
-                self.uyarilari_guncelle()
-                self.raporlari_guncelle()
-                if hasattr(self, 'asi_tree'):
-                    self.asi_prosedur_listesini_guncelle()
-                messagebox.showinfo("Başarılı", "Yedek geri yüklendi.", parent=pencere)
-                pencere.destroy()
-            except Exception as e:
-                messagebox.showerror("Yedekten Yükle", f"Yedek geri yüklenemedi:\n{e}", parent=pencere)
-
-        self.modern_buton(pencere, "SEÇİLİ YEDEĞİ YÜKLE", yukle, purpose='warning').pack(pady=(0, 15))
-
     def ekranlari_guncelle(self):
         if hasattr(self, 'dashboard_frame'):
             self.dashboard_guncelle()
@@ -4207,7 +4041,7 @@ class HayvanTakipSistemi:
 
         def header_aksiyon_yerlestir(event=None):
             try:
-                genis_ekran = self.root.winfo_width() >= 1320
+                genis_ekran = self.root.winfo_width() >= 1680
                 if genis_ekran:
                     if not self.header_action_group.winfo_ismapped():
                         self.header_action_group.pack(side='right', fill='y', padx=(8, 14), pady=17)
@@ -4602,18 +4436,20 @@ class HayvanTakipSistemi:
     def dashboard_metric_grid_yerlestir(self, parent, widgets):
         def duzenle(event=None):
             try:
-                width = max(parent.winfo_width(), 1)
+                root_genisligi = max(self.root.winfo_width(), 1)
+                width = min(max(parent.winfo_width(), 1), max(root_genisligi - 90, 1))
                 hedef_genislik = 186
                 bosluk = 10
-                cols = max(1, min(len(widgets), (width + bosluk) // (hedef_genislik + bosluk)))
+                maks_kolon = len(widgets)
+                cols = max(1, min(len(widgets), maks_kolon, (width + bosluk) // (hedef_genislik + bosluk)))
                 for widget in widgets:
                     widget.grid_forget()
                 for idx, widget in enumerate(widgets):
                     col = idx % cols
                     row = idx // cols
-                    widget.grid(row=row, column=col, sticky="ew", padx=(0 if col == 0 else 10, 0), pady=(0, 10))
+                    widget.grid(row=row, column=col, sticky="w", padx=(0 if col == 0 else 10, 0), pady=(0, 10))
                 for col in range(6):
-                    parent.grid_columnconfigure(col, weight=1 if col < cols else 0, uniform="dashboard_metrics" if col < cols else "")
+                    parent.grid_columnconfigure(col, weight=0, uniform="")
             except tk.TclError:
                 pass
 
@@ -5241,9 +5077,24 @@ class HayvanTakipSistemi:
         aksiyonlar.grid(row=0, column=1, sticky="e", padx=(12, 0))
         self.themed_widgets.append((aksiyonlar, 'kart'))
 
-        self.modern_buton(aksiyonlar, "Raporları Yenile", self.raporlari_guncelle, purpose='primary', small=True).pack(side='left', padx=(0, 6))
-        self.modern_buton(aksiyonlar, "Özet Excel", self.ozet_rapor_excel_aktar, purpose='success', small=True).pack(side='left', padx=(0, 6))
-        self.modern_buton(aksiyonlar, "Özet PDF", self.ozet_rapor_pdf_aktar, purpose='default', small=True).pack(side='left')
+        rapor_aksiyonlar = [
+            ("Raporları Yenile", self.raporlari_guncelle, 'primary'),
+            ("Özet Excel", self.ozet_rapor_excel_aktar, 'success'),
+            ("Özet PDF", self.ozet_rapor_pdf_aktar, 'default'),
+        ]
+        self.responsive_buton_grubu(aksiyonlar, rapor_aksiyonlar, gap=6, align="right")
+
+        def rapor_header_yerlestir(event=None):
+            try:
+                if header.winfo_width() < 980:
+                    aksiyonlar.grid(row=1, column=0, sticky="ew", padx=0, pady=(12, 0))
+                else:
+                    aksiyonlar.grid(row=0, column=1, sticky="e", padx=(12, 0), pady=0)
+            except tk.TclError:
+                pass
+
+        header.bind("<Configure>", rapor_header_yerlestir)
+        header.after_idle(rapor_header_yerlestir)
 
         cizgi = tk.Frame(main_card, bg=self.renkler["kenarlik"], height=1)
         cizgi.pack(fill='x', padx=24, pady=(0, 10))
@@ -5324,7 +5175,11 @@ class HayvanTakipSistemi:
         def duzenle(event=None):
             try:
                 width = max(parent.winfo_width(), 1)
-                cols = max(1, min(max_cols, width // min_width if width else 1))
+                cols = 1
+                for aday in range(min(max_cols, len(widgets)), 0, -1):
+                    if aday * min_width + (aday - 1) * gap <= width:
+                        cols = aday
+                        break
                 for idx, widget in enumerate(widgets):
                     col = idx % cols
                     row = idx // cols
@@ -5441,7 +5296,7 @@ class HayvanTakipSistemi:
             self.create_pie_chart(charts_frame, cins_dagilimi, "Sürüdeki Hayvan Tipleri", 1, row=0),
             self.create_pie_chart(charts_frame, ozel_durum_dagilimi, "Özel Durumlar", 2, row=0),
         ]
-        self._rapor_responsive_grid(charts_frame, chart_cards, min_width=470, max_cols=3)
+        self._rapor_responsive_grid(charts_frame, chart_cards, min_width=520, max_cols=3)
 
 
     def create_pie_chart(self, parent, data, title, column, row=1):
@@ -6775,19 +6630,24 @@ class HayvanTakipSistemi:
         if len(mevcut_fotograflar) >= 3:
             messagebox.showwarning("Fotoğraf", "Bu hayvan için en fazla 3 fotoğraf eklenebilir.", parent=parent)
             return
-        dosya = filedialog.askopenfilename(
+        kalan_slot = 3 - len(mevcut_fotograflar)
+        dosyalar = filedialog.askopenfilenames(
             title="Hayvan fotoğrafı seç",
             parent=parent,
             filetypes=[("Görsel dosyaları", "*.jpg *.jpeg *.png *.webp *.bmp"), ("Tüm dosyalar", "*.*")]
         )
-        if not dosya:
+        if not dosyalar:
             return
         gorunen = self.hayvan_gorunen_kupe(kupe_no, hayvan)
         try:
-            yeni_foto = self.foto_data_olustur(dosya)
-            self.hayvan_fotograflari_ata(hayvan, mevcut_fotograflar + [yeni_foto])
+            yeni_fotograflar = []
+            for dosya in list(dosyalar)[:kalan_slot]:
+                yeni_fotograflar.append(self.foto_data_olustur(dosya))
+            if not yeni_fotograflar:
+                return
+            self.hayvan_fotograflari_ata(hayvan, mevcut_fotograflar + yeni_fotograflar)
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.islem_kaydi_baslat(f"Hayvan fotoğrafı eklendi: {gorunen}")
+            self.islem_kaydi_baslat(f"Hayvan fotoğrafı eklendi: {gorunen} ({len(yeni_fotograflar)} adet)")
             self.veri_kaydet()
             self.ekranlari_guncelle()
             if pencere is not None and pencere is not self.root:
@@ -6797,7 +6657,7 @@ class HayvanTakipSistemi:
                     pass
                 self._track_after(self.root, 60, lambda: self.hayvan_detay_penceresi(kupe_no))
             else:
-                messagebox.showinfo("Fotoğraf", f"{gorunen} için fotoğraf eklendi.", parent=parent)
+                messagebox.showinfo("Fotoğraf", f"{gorunen} için {len(yeni_fotograflar)} fotoğraf eklendi.", parent=parent)
         except Exception as e:
             messagebox.showerror("Fotoğraf", f"Fotoğraf eklenemedi:\n{e}", parent=parent)
 
@@ -7273,11 +7133,13 @@ class HayvanTakipSistemi:
         tree = ttk.Treeview(tablo_frame, columns=kolonlar, show="headings", height=height, style="Modern.Treeview")
         for col in kolonlar:
             tree.heading(col, text=col)
-            tree.column(col, width=genislikler.get(col, 120), minwidth=70, anchor="center")
-        scroll = ttk.Scrollbar(tablo_frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scroll.set)
+            tree.column(col, width=genislikler.get(col, 120), minwidth=70, anchor="center", stretch=False)
+        scroll_y = ttk.Scrollbar(tablo_frame, orient="vertical", command=tree.yview)
+        scroll_x = ttk.Scrollbar(tablo_frame, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
         tree.grid(row=0, column=0, sticky="nsew")
-        scroll.grid(row=0, column=1, sticky="ns")
+        scroll_y.grid(row=0, column=1, sticky="ns")
+        scroll_x.grid(row=1, column=0, sticky="ew")
         tablo_frame.grid_rowconfigure(0, weight=1)
         tablo_frame.grid_columnconfigure(0, weight=1)
         return tree
@@ -7414,7 +7276,7 @@ class HayvanTakipSistemi:
         header_top = tk.Frame(header, bg=self.renkler["siyah"])
         header_top.pack(fill="x")
         sol_header = tk.Frame(header_top, bg=self.renkler["siyah"])
-        sol_header.pack(side="left", fill="x", expand=True)
+        sol_header.pack(fill="x", expand=True)
         tk.Label(
             sol_header,
             text=f"{gorunen_kupe} Hayvan Profili",
@@ -7431,7 +7293,7 @@ class HayvanTakipSistemi:
         ).pack(anchor="w", pady=(3, 0))
 
         rozetler = tk.Frame(header_top, bg=self.renkler["siyah"])
-        rozetler.pack(side="right", padx=(18, 0))
+        rozetler.pack(anchor="w", pady=(10, 0))
 
         def header_rozet(baslik, deger, renk=None):
             renk = renk or self.renkler["button_primary_bg"]
@@ -7556,6 +7418,38 @@ class HayvanTakipSistemi:
             kart = self.profil_metrik_karti(metrik_grid, baslik, deger, alt, renk)
             kart.grid(row=idx // 2, column=idx % 2, sticky="nsew", padx=5, pady=5)
 
+        def profil_ust_yerlesim(event=None):
+            try:
+                genislik = min(max(ust.winfo_width(), 1), max(detay_window.winfo_width() - 60, 1))
+                for kart in (foto_kart, kimlik_kart, metrik_kart):
+                    kart.grid_forget()
+                for col in range(3):
+                    ust.grid_columnconfigure(col, weight=0, uniform="")
+
+                if genislik < 1050:
+                    ust.grid_columnconfigure(0, weight=1)
+                    foto_kart.grid(row=0, column=0, sticky="nsew", pady=(0, 14))
+                    kimlik_kart.grid(row=1, column=0, sticky="nsew", pady=(0, 14))
+                    metrik_kart.grid(row=2, column=0, sticky="nsew")
+                elif genislik < 1350:
+                    ust.grid_columnconfigure(0, weight=1)
+                    ust.grid_columnconfigure(1, weight=2)
+                    foto_kart.grid(row=0, column=0, sticky="nsew", padx=(0, 14), pady=(0, 14))
+                    kimlik_kart.grid(row=0, column=1, sticky="nsew", pady=(0, 14))
+                    metrik_kart.grid(row=1, column=0, columnspan=2, sticky="nsew")
+                else:
+                    ust.grid_columnconfigure(0, weight=0)
+                    ust.grid_columnconfigure(1, weight=2)
+                    ust.grid_columnconfigure(2, weight=2)
+                    foto_kart.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+                    kimlik_kart.grid(row=0, column=1, sticky="nsew", padx=(0, 14))
+                    metrik_kart.grid(row=0, column=2, sticky="nsew")
+            except tk.TclError:
+                pass
+
+        ust.bind("<Configure>", profil_ust_yerlesim)
+        ust.after_idle(profil_ust_yerlesim)
+
         alt = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
         alt.pack(fill="both", expand=True, pady=(16, 0))
         alt.grid_columnconfigure(0, weight=1)
@@ -7602,7 +7496,7 @@ class HayvanTakipSistemi:
 
         dogum_kart, dogum_body = self.profil_kart_olustur(alt, "Doğum ve Yavru Geçmişi", accent=self.renkler["button_success_bg"])
         dogum_kart.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(0, 16))
-        dog_tree = self.profil_tablo_olustur(dogum_body, ("#", "Tarih", "Yavrular", "Not"), {"#": 45, "Tarih": 110, "Yavrular": 260, "Not": 180}, height=6)
+        dog_tree = self.profil_tablo_olustur(dogum_body, ("#", "Tarih", "Yavrular", "Not"), {"#": 45, "Tarih": 120, "Yavrular": 320, "Not": 520}, height=6)
         dogumlar = hayvan.get("dogumlar") or []
         if dogumlar:
             for i, dogum in enumerate(dogumlar, 1):
@@ -7639,6 +7533,34 @@ class HayvanTakipSistemi:
                 tk.Label(not_body, text=f"{kayit.get('zaman', '-')}: {kayit.get('aciklama') or kayit.get('detay')}", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], anchor="w", justify="left", wraplength=560, font=("Segoe UI", 9)).pack(fill="x", pady=2)
         else:
             tk.Label(not_body, text="Bu hayvan için yakın işlem kaydı yok.", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 10, "italic")).pack(anchor="w")
+
+        def profil_alt_yerlesim(event=None):
+            try:
+                genislik = min(max(alt.winfo_width(), 1), max(detay_window.winfo_width() - 60, 1))
+                kartlar = (ureme_kart, uyari_kart, tohum_kart, dogum_kart, asi_kart, not_kart)
+                for kart in kartlar:
+                    kart.grid_forget()
+                for col in range(2):
+                    alt.grid_columnconfigure(col, weight=0, uniform="")
+
+                if genislik < 1050:
+                    alt.grid_columnconfigure(0, weight=1)
+                    for row, kart in enumerate(kartlar):
+                        kart.grid(row=row, column=0, sticky="nsew", pady=(0, 16))
+                else:
+                    alt.grid_columnconfigure(0, weight=1, uniform="profil_alt")
+                    alt.grid_columnconfigure(1, weight=1, uniform="profil_alt")
+                    ureme_kart.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 16))
+                    uyari_kart.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 16))
+                    tohum_kart.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(0, 16))
+                    dogum_kart.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(0, 16))
+                    asi_kart.grid(row=2, column=0, sticky="nsew", padx=(0, 8))
+                    not_kart.grid(row=2, column=1, sticky="nsew", padx=(8, 0))
+            except tk.TclError:
+                pass
+
+        alt.bind("<Configure>", profil_alt_yerlesim)
+        alt.after_idle(profil_alt_yerlesim)
 
         detay_window.lift(self.root)
         detay_window.focus_force()
