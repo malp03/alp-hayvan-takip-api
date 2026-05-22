@@ -456,6 +456,7 @@ def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -
         parse_tarih(sonuc["dogum_tarihi"], "Doğum tarihi")
 
     sonuc["cins"] = metin(sonuc.get("cins")) or "Bilinmiyor"
+    sonuc["irk"] = metin(sonuc.get("irk"))
     sonuc["ad"] = bos_yoksa_none(sonuc.get("ad"))
     sonuc["anne_kupe"] = metin(sonuc.get("anne_kupe"), upper=True)
     sonuc["kayit_tarihi"] = metin(sonuc.get("kayit_tarihi")) or simdi()

@@ -181,6 +181,7 @@ class HayvanBase(AlpModel):
     ad: Optional[str] = None
     dogum_tarihi: Optional[str] = None
     cins: str = "Bilinmiyor"
+    irk: Optional[str] = None
     cinsiyet: Optional[str] = None
     anne_kupe: Optional[str] = None
     kayit_tarihi: Optional[str] = None
@@ -221,6 +222,7 @@ class HayvanUpdate(AlpModel):
     ad: Optional[str] = None
     dogum_tarihi: Optional[str] = None
     cins: Optional[str] = None
+    irk: Optional[str] = None
     cinsiyet: Optional[str] = None
     anne_kupe: Optional[str] = None
     kayit_tarihi: Optional[str] = None
