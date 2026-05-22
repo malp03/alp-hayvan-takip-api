@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
 from datetime import datetime, timedelta
 import base64
+import calendar
 import json
 import copy
 import hashlib
@@ -43,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.1"
+APP_VERSION = "1.9.2"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
@@ -838,6 +839,179 @@ class HayvanTakipSistemi:
         self.themed_widgets.append((lbl, 'muted_label'))
         return widget
 
+    def tarih_secici_ekle(self, entry):
+        if getattr(entry, "_alp_tarih_secici_var", False):
+            return
+        entry._alp_tarih_secici_var = True
+        container = entry.master
+        try:
+            entry.pack_forget()
+        except tk.TclError:
+            return
+
+        satir = tk.Frame(container, bg=self.renkler["kart_arkaplan"])
+        satir.pack(fill="x")
+        self.themed_widgets.append((satir, 'kart'))
+        entry.pack(in_=satir, side="left", fill="x", expand=True, ipady=3)
+        btn = self.modern_buton(
+            satir,
+            "Takvim",
+            lambda e=entry: self.tarih_secici_ac(e),
+            purpose='default',
+            width=7,
+            small=True,
+        )
+        btn.pack(side="left", padx=(8, 0))
+
+    def tarih_secici_ac(self, entry):
+        try:
+            secili = datetime.strptime(entry.get().strip(), "%d/%m/%Y")
+        except (ValueError, TypeError):
+            secili = datetime.now()
+
+        popup = tk.Toplevel(self.root)
+        popup.title("Tarih Seç")
+        popup.configure(bg=self.renkler["arkaplan"])
+        popup.transient(self.root)
+        popup.resizable(False, False)
+
+        durum = {"yil": secili.year, "ay": secili.month}
+        ay_adlari = [
+            "",
+            "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+            "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
+        ]
+        hafta_gunleri = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
+
+        kart = self.modern_kart(popup, accent=self.renkler["button_primary_bg"])
+        kart.pack(fill="both", expand=True, padx=10, pady=10)
+        kart.configure(padx=10, pady=10)
+
+        baslik = tk.Frame(kart, bg=self.renkler["kart_arkaplan"])
+        baslik.pack(fill="x", pady=(0, 8))
+        self.themed_widgets.append((baslik, 'kart'))
+
+        ay_label = tk.Label(
+            baslik,
+            text="",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 12, "bold"),
+            width=18,
+        )
+        self.themed_widgets.append((ay_label, 'label'))
+
+        gunler = tk.Frame(kart, bg=self.renkler["kart_arkaplan"])
+        gunler.pack(fill="both")
+        self.themed_widgets.append((gunler, 'kart'))
+
+        def tarih_yaz(gun):
+            secilen = datetime(durum["yil"], durum["ay"], gun)
+            entry.delete(0, tk.END)
+            entry.insert(0, secilen.strftime("%d/%m/%Y"))
+            try:
+                entry.event_generate("<KeyRelease>")
+            except tk.TclError:
+                pass
+            popup.destroy()
+
+        def ay_degistir(delta):
+            ay = durum["ay"] + delta
+            yil = durum["yil"]
+            if ay < 1:
+                ay = 12
+                yil -= 1
+            elif ay > 12:
+                ay = 1
+                yil += 1
+            durum["ay"] = ay
+            durum["yil"] = yil
+            takvimi_ciz()
+
+        def bugune_git():
+            bugun = datetime.now()
+            durum["ay"] = bugun.month
+            durum["yil"] = bugun.year
+            entry.delete(0, tk.END)
+            entry.insert(0, bugun.strftime("%d/%m/%Y"))
+            takvimi_ciz()
+
+        def takvimi_ciz():
+            for child in gunler.winfo_children():
+                child.destroy()
+            ay_label.config(text=f"{ay_adlari[durum['ay']]} {durum['yil']}")
+            for idx, ad in enumerate(hafta_gunleri):
+                tk.Label(
+                    gunler,
+                    text=ad,
+                    bg=self.renkler["kart_arkaplan"],
+                    fg=self.renkler["muted"],
+                    font=("Segoe UI", 8, "bold"),
+                    width=5,
+                ).grid(row=0, column=idx, padx=2, pady=(0, 4))
+
+            bugun = datetime.now()
+            cal = calendar.Calendar(firstweekday=0)
+            for row, hafta in enumerate(cal.monthdayscalendar(durum["yil"], durum["ay"]), 1):
+                for col, gun in enumerate(hafta):
+                    if not gun:
+                        tk.Label(gunler, text="", bg=self.renkler["kart_arkaplan"], width=5).grid(row=row, column=col, padx=2, pady=2)
+                        continue
+                    aktif = gun == secili.day and durum["ay"] == secili.month and durum["yil"] == secili.year
+                    bugun_mu = gun == bugun.day and durum["ay"] == bugun.month and durum["yil"] == bugun.year
+                    bg = self.renkler["button_primary_bg"] if aktif else self.renkler["kart_ikincil"]
+                    fg = "#FFFFFF" if aktif else (self.renkler["button_success_bg"] if bugun_mu else self.renkler["yazi_rengi"])
+                    tk.Button(
+                        gunler,
+                        text=str(gun),
+                        command=lambda g=gun: tarih_yaz(g),
+                        bg=bg,
+                        fg=fg,
+                        activebackground=self.renkler["button_primary_bg"],
+                        activeforeground="#FFFFFF",
+                        relief="flat",
+                        width=5,
+                        pady=5,
+                        font=("Segoe UI", 9, "bold"),
+                    ).grid(row=row, column=col, padx=2, pady=2)
+
+        onceki = self.modern_buton(baslik, "<", lambda: ay_degistir(-1), purpose='default', width=4, small=True)
+        sonraki = self.modern_buton(baslik, ">", lambda: ay_degistir(1), purpose='default', width=4, small=True)
+        onceki.pack(side="left", padx=(0, 6))
+        ay_label.pack(side="left", expand=True, fill="x")
+        sonraki.pack(side="left", padx=(6, 0))
+
+        alt = tk.Frame(kart, bg=self.renkler["kart_arkaplan"])
+        alt.pack(fill="x", pady=(10, 0))
+        self.themed_widgets.append((alt, 'kart'))
+        self.modern_buton(alt, "Bugün", bugune_git, purpose='primary', width=8, small=True).pack(side="left")
+        self.modern_buton(alt, "Kapat", popup.destroy, purpose='default', width=8, small=True).pack(side="right")
+
+        takvimi_ciz()
+        try:
+            x = entry.winfo_rootx()
+            y = entry.winfo_rooty() + entry.winfo_height() + 6
+            popup.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            self.pencere_ortala(popup, self.root)
+        popup.grab_set()
+
+    def hayvan_irk_secenekleri(self):
+        return [
+            "Simental",
+            "Holstein",
+            "Montofon",
+            "Jersey",
+            "Angus",
+            "Hereford",
+            "Şarole",
+            "Limuzin",
+            "Yerli Kara",
+            "Boz Irk",
+            "Melez",
+            "Diğer",
+        ]
+
 
 
     def veri_klasoru_hazirla(self):
@@ -1376,7 +1550,9 @@ class HayvanTakipSistemi:
         girilen_kullanici = str(kullanici_adi or "").strip().lower()
         if not beklenen_kullanici or beklenen_kullanici != girilen_kullanici:
             raise ApiHatasi(f"Online giris yapilamadi ve bu kullanici icin offline oturum yok.\n{asil_hata}")
-        if cache.get("api_url") and cache.get("api_url") != getattr(self, "api_url", ""):
+        cache_api_url = str(cache.get("api_url") or "").strip().rstrip("/")
+        mevcut_api_url = str(getattr(self, "api_url", "") or "").strip().rstrip("/")
+        if cache_api_url and mevcut_api_url and cache_api_url != mevcut_api_url:
             raise ApiHatasi("Offline oturum farkli bir API adresi icin kayitli.")
         if not self.yerel_sifre_dogrula(sifre, cache.get("sifre_hash")):
             raise ApiHatasi("Offline oturum sifresi hatali.")
@@ -1562,13 +1738,13 @@ class HayvanTakipSistemi:
         if payload is not None:
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json; charset=utf-8"
-        request = urllib.request.Request(
-            f"{self.api_url}{path}",
-            data=data,
-            headers=headers,
-            method=method,
-        )
         try:
+            request = urllib.request.Request(
+                f"{self.api_url}{path}",
+                data=data,
+                headers=headers,
+                method=method,
+            )
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read().decode("utf-8")
                 return json.loads(raw) if raw else None
@@ -1587,6 +1763,8 @@ class HayvanTakipSistemi:
             raise ApiHatasi("API isteği zaman aşımına uğradı.") from e
         except TimeoutError as e:
             raise ApiHatasi("API isteği zaman aşımına uğradı.") from e
+        except Exception as e:
+            raise ApiHatasi(f"API isteği tamamlanamadı: {e}") from e
 
     def api_giris_yap(self, kullanici_adi, sifre, bu_bilgisayari_tani=False):
         try:
@@ -3422,6 +3600,7 @@ class HayvanTakipSistemi:
         veri['kupe_no'] = ciftlik or resmi or eski_kupe or str(h_id)
         veri['dogum_tarihi'] = veri.get('dogum_tarihi') or ""
         veri['cins'] = veri.get('cins') or "Bilinmiyor"
+        veri.setdefault('irk', "")
         veri['yas_gun'] = self.hayvan_yas_gun_hesapla(veri)
         veri['durum'] = veri.get('durum') or self.durum_hesapla(veri.get('cins'), veri.get('yas_gun', 0))
         veri['tohumlamalar'] = list(veri.get('tohumlamalar') or [])
@@ -4693,16 +4872,19 @@ class HayvanTakipSistemi:
         # --- Row 1 ---
         self.dogum_tarihi_entry = self.modern_form_satir(form_frame, "Doğum Tarihi (GG/AA/YYYY)", ttk.Entry, row=1, col=0, font=('Segoe UI', 11), style='TEntry')
         self.dogum_tarihi_entry.bind('<KeyRelease>', self.tarih_formatlama)
+        self.tarih_secici_ekle(self.dogum_tarihi_entry)
         self.cins_combo = self.modern_form_satir(form_frame, "Cinsi", ttk.Combobox, row=1, col=1, values=["Dişi Buzağı", "Erkek Buzağı", "Dana", "Düve", "Sağmal İnek", "Kuru İnek"], font=('Segoe UI', 11), style='TCombobox')
         self.dogum_tarihi_entry.master.grid_configure(pady=6)
         self.cins_combo.master.grid_configure(pady=6)
 
         # --- Row 2 ---
-        self.anne_kupe_entry = self.modern_form_satir(form_frame, "Anne Çiftlik Küpe No", ttk.Entry, row=2, col=0, font=('Segoe UI', 11), style='TEntry')
+        self.irk_combo = self.modern_form_satir(form_frame, "Irk", ttk.Combobox, row=2, col=0, values=self.hayvan_irk_secenekleri(), font=('Segoe UI', 11), style='TCombobox')
+        self.anne_kupe_entry = self.modern_form_satir(form_frame, "Anne Çiftlik Küpe No", ttk.Entry, row=2, col=1, font=('Segoe UI', 11), style='TEntry')
+        self.irk_combo.master.grid_configure(pady=6)
         self.anne_kupe_entry.master.grid_configure(pady=6)
 
         foto_container = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
-        foto_container.grid(row=2, column=1, sticky='ew', padx=12, pady=6)
+        foto_container.grid(row=3, column=0, columnspan=2, sticky='ew', padx=12, pady=6)
         foto_container.columnconfigure(0, weight=1)
         self.themed_widgets.append((foto_container, 'kart'))
         tk.Label(
@@ -4803,15 +4985,16 @@ class HayvanTakipSistemi:
         self.modern_buton(foto_btnler, "Fotoğraf Ekle", yeni_foto_sec, purpose='primary', width=12, small=True).pack()
         yeni_foto_onizleme_guncelle()
 
-        # --- Row 3 (Dinamik Gizli Alanlar) ---
+        # --- Row 4 (Dinamik Gizli Alanlar) ---
         self.laktasyon_container = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
-        self.laktasyon_container.grid(row=3, column=0, columnspan=2, sticky='ew')
+        self.laktasyon_container.grid(row=4, column=0, columnspan=2, sticky='ew')
         self.laktasyon_container.columnconfigure((0, 1), weight=1)
         self.themed_widgets.append((self.laktasyon_container, 'kart'))
 
         self.laktasyon_no_entry = self.modern_form_satir(self.laktasyon_container, "Laktasyon Numarası", ttk.Entry, row=0, col=0, font=('Segoe UI', 11), style='TEntry')
         self.son_dogum_tarihi_entry = self.modern_form_satir(self.laktasyon_container, "Son Doğum Tarihi", ttk.Entry, row=0, col=1, font=('Segoe UI', 11), style='TEntry')
         self.son_dogum_tarihi_entry.bind('<KeyRelease>', self.tarih_formatlama)
+        self.tarih_secici_ekle(self.son_dogum_tarihi_entry)
 
         self.laktasyon_container.grid_remove() # Başlangıçta gizli
 
@@ -4918,6 +5101,7 @@ class HayvanTakipSistemi:
         self.tohumlama_tarih_entry = self.modern_form_satir(form_frame, "Tohumlama Tarihi (GG/AA/YYYY)", ttk.Entry, row=1, col=1, font=('Segoe UI', 11), style='TEntry')
         self.tohumlama_tarih_entry.insert(0, datetime.now().strftime("%d/%m/%Y"))
         self.tohumlama_tarih_entry.bind('<KeyRelease>', self.tarih_formatlama)
+        self.tarih_secici_ekle(self.tohumlama_tarih_entry)
 
         # Buton Container
         btn_frame = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
@@ -6051,6 +6235,7 @@ class HayvanTakipSistemi:
         ciftlik_kupe = self.ciftlik_kupe_no_entry.get().strip().upper()
         dogum_tarihi = self.dogum_tarihi_entry.get().strip()
         cins = self.cins_combo.get()
+        irk = self.irk_combo.get().strip()
         anne_kupe = self.anne_kupe_entry.get().strip().upper()
         hedef_ciftlik_id = getattr(self, "admin_aktif_ciftlik_id", None) if self.admin_mi() else None
         hedef_ciftlik_ad = getattr(self, "admin_aktif_ciftlik_ad", None) if self.admin_mi() else None
@@ -6116,6 +6301,7 @@ class HayvanTakipSistemi:
             'ciftlik_kupe_no': ciftlik_kupe,
             'dogum_tarihi': dogum_tarihi, 
             'cins': gercek_cins, 
+            'irk': irk,
             'anne_kupe': anne_kupe, 
             'kayit_tarihi': datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 
             'yas_gun': yas_gun, 
@@ -6137,6 +6323,7 @@ class HayvanTakipSistemi:
         for entry in [self.resmi_kupe_no_entry, self.ciftlik_kupe_no_entry, self.dogum_tarihi_entry, self.anne_kupe_entry, self.laktasyon_no_entry, self.son_dogum_tarihi_entry]:
             entry.delete(0, tk.END)
         self.cins_combo.set('')
+        self.irk_combo.set('')
         self.yeni_hayvan_foto_data = None
         self.yeni_hayvan_foto_datas = []
         if hasattr(self, "yeni_hayvan_foto_onizleme_guncelle"):
@@ -6764,6 +6951,8 @@ class HayvanTakipSistemi:
         dogum_entry.bind('<KeyRelease>', self.tarih_formatlama)
         cins_combo = ttk.Combobox(form, values=["Dişi Buzağı", "Erkek Buzağı", "Dana", "Düve", "Sağmal İnek", "Kuru İnek"], width=25, font=('Segoe UI', 11), style='TCombobox')
         cins_combo.set(hayvan.get('cins', ''))
+        irk_combo = ttk.Combobox(form, values=self.hayvan_irk_secenekleri(), width=25, font=('Segoe UI', 11), style='TCombobox')
+        irk_combo.set(hayvan.get('irk', ''))
         anne_entry = ttk.Entry(form, width=25, font=('Segoe UI', 11), style='TEntry')
         anne_entry.insert(0, hayvan.get('anne_kupe', ''))
 
@@ -6772,6 +6961,7 @@ class HayvanTakipSistemi:
             ("Çiftlik Küpe No", ciftlik_kupe_entry),
             ("Doğum Tarihi", dogum_entry),
             ("Cinsi", cins_combo),
+            ("Irk", irk_combo),
             ("Anne Küpe No", anne_entry),
         ]):
             label = tk.Label(form, text=label_text, bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold'))
@@ -6779,7 +6969,7 @@ class HayvanTakipSistemi:
             widget.grid(row=row, column=1, sticky='ew', pady=12)
 
         foto_frame = tk.Frame(form, bg=self.renkler["kart_arkaplan"])
-        foto_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        foto_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         foto_frame.columnconfigure(1, weight=1)
         self.themed_widgets.append((foto_frame, 'kart'))
         tk.Label(foto_frame, text="Fotoğraf", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).grid(row=0, column=0, sticky="nw", padx=(0, 20))
@@ -6829,6 +7019,7 @@ class HayvanTakipSistemi:
             yeni_ciftlik = ciftlik_kupe_entry.get().strip().upper()
             dogum_tarihi = dogum_entry.get().strip()
             yeni_cins = cins_combo.get().strip()
+            yeni_irk = irk_combo.get().strip()
             anne_kupe = anne_entry.get().strip().upper()
             if not dogum_tarihi or not yeni_cins:
                 return messagebox.showerror("Hata", "Doğum tarihi ve cins zorunludur.", parent=pencere)
@@ -6846,6 +7037,7 @@ class HayvanTakipSistemi:
             hayvan['ciftlik_kupe_no'] = yeni_ciftlik
             hayvan['dogum_tarihi'] = dogum_tarihi
             hayvan['cins'] = yeni_cins
+            hayvan['irk'] = yeni_irk
             hayvan['anne_kupe'] = anne_kupe
             hayvan['yas_gun'] = (datetime.now() - dogum_dt).days
             if yeni_cins in ["Erkek Buzağı", "Dana"]:
@@ -6858,7 +7050,7 @@ class HayvanTakipSistemi:
             self.ekranlari_guncelle()
             messagebox.showinfo("Başarılı", "Genel bilgiler güncellendi.", parent=pencere)
 
-        self.modern_buton(form, "GENEL BİLGİLERİ KAYDET", genel_kaydet, purpose='success').grid(row=6, column=0, columnspan=2, pady=(34, 0))
+        self.modern_buton(form, "GENEL BİLGİLERİ KAYDET", genel_kaydet, purpose='success').grid(row=7, column=0, columnspan=2, pady=(34, 0))
 
         tohumlama_frame = ttk.Frame(notebook, style='TFrame')
         notebook.add(tohumlama_frame, text="Tohumlama Geçmişi")
@@ -7446,6 +7638,7 @@ class HayvanTakipSistemi:
         self.profil_bilgi_satiri(kimlik_body, "Doğum Tarihi", hayvan.get("dogum_tarihi") or "-")
         self.profil_bilgi_satiri(kimlik_body, "Yaş", yas_metin)
         self.profil_bilgi_satiri(kimlik_body, "Cinsi", hayvan.get("cins") or "-")
+        self.profil_bilgi_satiri(kimlik_body, "Irk", hayvan.get("irk") or "-")
         self.profil_bilgi_satiri(kimlik_body, "Anne Küpe", hayvan.get("anne_kupe") or "Bilinmiyor")
         self.profil_bilgi_satiri(kimlik_body, "Durum", durum)
 
