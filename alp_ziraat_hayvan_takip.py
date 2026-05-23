@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.4"
+APP_VERSION = "1.9.5"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
@@ -163,6 +163,7 @@ class HayvanTakipSistemi:
             self.yeni_hayvan_foto_data = None
             self.yeni_hayvan_foto_datas = []
             self._foto_referanslari = []
+            self._foto_url_cache = {}
             self.admin_aktif_ciftlik_id = None
             self.admin_aktif_ciftlik_ad = None
             self._login_yeniden_iste = False
@@ -634,14 +635,39 @@ class HayvanTakipSistemi:
         encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
         return f"data:image/jpeg;base64,{encoded}"
 
+    def foto_referansi_url_mu(self, foto):
+        raw = str(foto or "").strip()
+        return raw.startswith("http://") or raw.startswith("https://")
+
+    def foto_referans_bytes(self, foto):
+        if not foto:
+            return None
+        raw = str(foto).strip()
+        try:
+            if self.foto_referansi_url_mu(raw):
+                cache = getattr(self, "_foto_url_cache", {})
+                if raw in cache:
+                    return cache[raw]
+                req = urllib.request.Request(raw, headers={"User-Agent": "ALP-Ziraat-Hayvan-Takip/1.0"})
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    data = resp.read(5 * 1024 * 1024)
+                cache[raw] = data
+                self._foto_url_cache = cache
+                return data
+            if "," in raw:
+                raw = raw.split(",", 1)[1]
+            return base64.b64decode(raw)
+        except Exception:
+            return None
+
     def foto_data_to_image(self, foto_data, max_size=(180, 140)):
         if not (PIL_AVAILABLE and foto_data):
             return None
         try:
-            raw = str(foto_data)
-            if "," in raw:
-                raw = raw.split(",", 1)[1]
-            img = Image.open(io.BytesIO(base64.b64decode(raw))).convert("RGB")
+            data = self.foto_referans_bytes(foto_data)
+            if not data:
+                return None
+            img = Image.open(io.BytesIO(data)).convert("RGB")
             img.thumbnail(max_size, Image.Resampling.LANCZOS)
             return ImageTk.PhotoImage(img)
         except Exception:
@@ -652,10 +678,10 @@ class HayvanTakipSistemi:
             return None
         try:
             size = (max(int(size[0]), 1), max(int(size[1]), 1))
-            raw = str(foto_data)
-            if "," in raw:
-                raw = raw.split(",", 1)[1]
-            img = Image.open(io.BytesIO(base64.b64decode(raw))).convert("RGB")
+            data = self.foto_referans_bytes(foto_data)
+            if not data:
+                return None
+            img = Image.open(io.BytesIO(data)).convert("RGB")
             img = ImageOps.fit(img, size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
             return ImageTk.PhotoImage(img)
         except Exception:
@@ -768,12 +794,18 @@ class HayvanTakipSistemi:
 
     def hayvan_fotograflari(self, hayvan):
         fotograflar = []
+        for foto in hayvan.get('foto_urls') or []:
+            if foto and foto not in fotograflar:
+                fotograflar.append(foto)
+        eski_url = hayvan.get('foto_url')
+        if eski_url and eski_url not in fotograflar:
+            fotograflar.append(eski_url)
         for foto in hayvan.get('foto_datas') or []:
             if foto and foto not in fotograflar:
                 fotograflar.append(foto)
         eski_foto = hayvan.get('foto_data')
         if eski_foto and eski_foto not in fotograflar:
-            fotograflar.insert(0, eski_foto)
+            fotograflar.append(eski_foto)
         return fotograflar[:3]
 
     def hayvan_fotograflari_ata(self, hayvan, fotograflar):
@@ -783,10 +815,12 @@ class HayvanTakipSistemi:
                 temiz.append(foto)
             if len(temiz) >= 3:
                 break
-        hayvan['foto_datas'] = temiz
-        hayvan['foto_data'] = temiz[0] if temiz else None
-        if temiz:
-            hayvan['foto_url'] = None
+        url_liste = [foto for foto in temiz if self.foto_referansi_url_mu(foto)]
+        data_liste = [foto for foto in temiz if not self.foto_referansi_url_mu(foto)]
+        hayvan['foto_urls'] = url_liste
+        hayvan['foto_url'] = url_liste[0] if url_liste else None
+        hayvan['foto_datas'] = data_liste
+        hayvan['foto_data'] = data_liste[0] if data_liste else None
         return temiz
 
     def hayvan_gorunen_kupe(self, h_id, hayvan):
@@ -2661,6 +2695,124 @@ class HayvanTakipSistemi:
         except Exception as e:
             messagebox.showerror("Yedek", f"Yedek dosyasi yazilamadi:\n{e}", parent=parent or self.root)
 
+    def admin_sistem_durumu_penceresi(self, parent=None):
+        parent = parent or self.root
+        if not self.admin_mi():
+            return messagebox.showerror("Sistem Durumu", "Bu islem icin admin yetkisi gerekir.", parent=parent)
+        if not self.online_islem_gerekli("Sistem durumu", parent):
+            return
+        try:
+            durum = self.api_istek("GET", "/api/sistem-durumu", timeout=25)
+        except ApiHatasi as e:
+            return messagebox.showerror("Sistem Durumu", f"Sistem durumu alinamadi:\n{e}", parent=parent)
+
+        pencere = tk.Toplevel(parent)
+        pencere.title("Sistem Durumu")
+        pencere.geometry("760x620")
+        pencere.minsize(620, 480)
+        pencere.configure(bg=self.renkler["arkaplan"])
+        pencere.transient(parent)
+        try:
+            pencere.iconphoto(True, self.logo_ikon)
+        except Exception:
+            pass
+
+        sayfa = self.kaydirilabilir_sayfa(pencere, padx=20, pady=18)
+        tk.Label(
+            sayfa,
+            text="Sistem Durumu",
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 20, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            sayfa,
+            text="Veritabanı, Storage ve kayıt sayıları.",
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 10),
+        ).pack(anchor="w", pady=(2, 14))
+
+        def kart(baslik, accent=None):
+            k = self.modern_kart(sayfa, accent=accent or self.renkler["button_primary_bg"])
+            k.pack(fill="x", pady=(0, 12))
+            ic = tk.Frame(k, bg=self.renkler["kart_arkaplan"], padx=18, pady=14)
+            ic.pack(fill="both", expand=True)
+            tk.Label(
+                ic,
+                text=baslik,
+                bg=self.renkler["kart_arkaplan"],
+                fg=self.renkler["yazi_rengi"],
+                font=("Segoe UI", 14, "bold"),
+            ).pack(anchor="w", pady=(0, 10))
+            return ic
+
+        def satir(parent_frame, etiket, deger, renk=None):
+            f = tk.Frame(parent_frame, bg=self.renkler["kart_arkaplan"])
+            f.pack(fill="x", pady=3)
+            tk.Label(
+                f,
+                text=etiket,
+                bg=self.renkler["kart_arkaplan"],
+                fg=self.renkler["muted"],
+                font=("Segoe UI", 9, "bold"),
+                width=24,
+                anchor="w",
+            ).pack(side="left")
+            tk.Label(
+                f,
+                text=str(deger),
+                bg=self.renkler["kart_arkaplan"],
+                fg=renk or self.renkler["yazi_rengi"],
+                font=("Segoe UI", 10, "bold"),
+                anchor="w",
+            ).pack(side="left", fill="x", expand=True)
+
+        database = durum.get("database") or {}
+        storage = durum.get("storage") or {}
+        sayilar = durum.get("kayit_sayilari") or {}
+        fotograflar = durum.get("fotograflar") or {}
+
+        db_kart = kart("Veritabanı", self.renkler["button_primary_bg"])
+        db_mb = database.get("boyut_mb")
+        db_limit = database.get("limit_mb")
+        yuzde = database.get("kullanim_yuzde")
+        satir(db_kart, "Altyapı", database.get("backend") or "-")
+        satir(db_kart, "Kullanım", f"{db_mb if db_mb is not None else '-'} MB / {db_limit} MB")
+        satir(db_kart, "Doluluk", f"%{yuzde}" if yuzde is not None else "-")
+
+        storage_kart = kart("Fotoğraf Storage", self.renkler["button_success_bg"])
+        storage_renk = self.renkler["yesil"] if storage.get("aktif") else self.renkler["uyari"]
+        satir(storage_kart, "Durum", "Aktif" if storage.get("aktif") else "Pasif", storage_renk)
+        satir(storage_kart, "Bucket", storage.get("bucket") or "-")
+        satir(storage_kart, "Planlanan limit", f"{storage.get('limit_mb', '-')} MB")
+        satir(storage_kart, "Tahmini kapasite", f"{storage.get('tahmini_foto_kapasitesi', '-')} fotoğraf")
+
+        foto_kart = kart("Fotoğraflar", self.renkler["uyari"])
+        satir(foto_kart, "Fotoğraflı hayvan", fotograflar.get("fotografli_hayvan", 0))
+        satir(foto_kart, "Storage URL", fotograflar.get("storage_url_adet", 0))
+        satir(foto_kart, "DB içindeki foto", fotograflar.get("database_base64_adet", 0))
+        satir(foto_kart, "DB foto boyutu", f"{fotograflar.get('database_base64_mb', 0)} MB")
+
+        kayit_kart = kart("Kayıt Sayıları", self.renkler["button_default_bg"])
+        for etiket, anahtar in [
+            ("Çiftlik", "ciftlik"),
+            ("Kullanıcı", "kullanici"),
+            ("Hayvan", "hayvan"),
+            ("Aktif hayvan", "aktif_hayvan"),
+            ("Arşivli hayvan", "arsivli_hayvan"),
+            ("Tohumlama", "tohumlama"),
+            ("Aşı/prosedür", "asi_prosedur"),
+            ("İşlem geçmişi", "islem_gecmisi"),
+        ]:
+            satir(kayit_kart, etiket, sayilar.get(anahtar, 0))
+
+        alt = tk.Frame(sayfa, bg=self.renkler["arkaplan"])
+        alt.pack(fill="x", pady=(4, 12))
+        self.modern_buton(alt, "Kapat", pencere.destroy, purpose="default", small=True).pack(side="right")
+        self.pencere_ortala(pencere, parent)
+        pencere.lift(parent)
+
     def sifre_degistir_penceresi(self, parent=None):
         parent = parent or self.root
         if not self.online_islem_gerekli("Sifre degistirme", parent):
@@ -3175,6 +3327,7 @@ class HayvanTakipSistemi:
         admin_buton(sag, "Kullanıcıları yönet", lambda: kullanicilari_yonet(False)).pack(fill="x", pady=5)
         admin_buton(sag, "Yeni kullanıcı oluştur", lambda: kullanicilari_yonet(True), self.renkler["button_success_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Son işlemleri gör", self.admin_islem_gecmisi_penceresi).pack(fill="x", pady=5)
+        admin_buton(sag, "Sistem durumu", lambda: self.admin_sistem_durumu_penceresi(self.root), self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Online yedek indir", lambda: self.admin_online_yedek_indir(self.root), self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "API ayarları", admin_api_ayarlari, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Şifremi değiştir", lambda: self.sifre_degistir_penceresi(self.root)).pack(fill="x", pady=5)
@@ -3918,6 +4071,8 @@ class HayvanTakipSistemi:
         veri.setdefault('arsiv_tarihi', None)
         veri.setdefault('foto_data', None)
         veri.setdefault('foto_url', None)
+        veri.setdefault('foto_datas', [])
+        veri.setdefault('foto_urls', [])
         self.hayvan_fotograflari_ata(veri, self.hayvan_fotograflari(veri))
         veri.setdefault('son_guncelleme', "")
         return veri

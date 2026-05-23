@@ -15,8 +15,19 @@ Render servisinde su degiskenleri ayarla:
 - `DATABASE_URL`: Supabase Transaction Pooler PostgreSQL URL
 - `ALP_AUTH_SECRET`: Kullanici tokenlari icin guclu ve gizli anahtar
 - `ALP_API_CORS_ORIGINS`: `*` simdilik yeterli; Android yayina cikinca daha daraltabiliriz.
+- `SUPABASE_URL`: Supabase project URL. Fotograf Storage icin gerekli.
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role key. Sadece Render secret olarak saklanmali.
+- `ALP_PHOTO_BUCKET`: Fotograf bucket adi. Varsayilan: `animal-photos`
+- `ALP_STORAGE_QUOTA_MB`: Storage kota takibi icin bilgi amacli limit. Supabase Free icin `1024`.
+- `ALP_DB_QUOTA_MB`: Database kota takibi icin bilgi amacli limit. Supabase Free icin `500`.
 
-`DATABASE_URL` ve `ALP_AUTH_SECRET` dosyaya yazilmamali ve GitHub'a gonderilmemeli.
+`DATABASE_URL`, `ALP_AUTH_SECRET` ve `SUPABASE_SERVICE_ROLE_KEY` dosyaya yazilmamali ve GitHub'a gonderilmemeli.
+
+## Fotograf Storage
+
+Supabase Storage'da `animal-photos` adli public bucket olustur. Bucket adi farkli olacaksa Render'da `ALP_PHOTO_BUCKET` ayni ada ayarlanmali.
+
+API yeni hayvan fotograflarini once kucultulmus base64 olarak alabilir; Storage ayarlari varsa otomatik olarak bucket'a yukler ve kayda `foto_urls` olarak yazar. Storage ayarlari yoksa eski `foto_datas` alanlariyla calismaya devam eder.
 
 ## Yedekleme
 

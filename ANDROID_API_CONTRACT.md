@@ -71,8 +71,14 @@ Hayvan payload ek alanlari:
 - `resmi_kupe_no`
 - `ciftlik_kupe_no`
 - `irk`: Simental, Holstein vb. serbest metin/opsiyonel irk bilgisi. Desktop, Android ve API yanitlarinda ayni alan adi kullanilir.
-- `foto_data`: masaustu ve mobil icin kucultulmus JPEG data URI. Ilk surumde API JSON icinde tasinir.
-- `foto_url`: ileride dosya depolama/S3 benzeri sistem gelirse kullanilacak URL alani.
+- `foto_datas`: geriye donuk uyumluluk icin max 3 kucultulmus JPEG data URI. Storage aktif degilse kullanilir.
+- `foto_data`: ilk fotograf icin eski tekil alan; yeni istemciler `foto_datas` / `foto_urls` kullanmali.
+- `foto_urls`: Storage aktifken max 3 fotograf URL'si. Yeni kayitlarda asil hedef alan budur.
+- `foto_url`: ilk Storage fotografi icin eski tekil URL alani.
+
+Foto notu:
+- API'de Supabase Storage ayarlari varsa (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ALP_PHOTO_BUCKET`) istemci base64 `foto_datas` gonderse bile API bunu Storage'a yukleyip `foto_urls` olarak dondurur.
+- Android tarafinda yeni foto eklerken simdilik desktop ile ayni sekilde kucultulmus data URI gonderilebilir; API Storage'a tasir. Daha sonra istenirse Android direkt Storage upload akisi da eklenebilir.
 
 Alt kayitlar:
 
@@ -132,6 +138,7 @@ Rapor, uyari, gecmis, yedek:
 - `GET /api/raporlar/ozet`
 - `GET /api/islem-gecmisi`
 - `GET /api/yedek`
+- `GET /api/sistem-durumu` (admin): database boyutu, Storage aktifligi, kayit sayilari ve fotograf istatistikleri.
 
 ## Offline Senkron Kurali
 
