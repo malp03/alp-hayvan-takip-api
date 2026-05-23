@@ -72,6 +72,15 @@ def widget_texts(widget):
     return texts
 
 
+def widgets_by_class(widget, cls):
+    bulunan = []
+    if isinstance(widget, cls):
+        bulunan.append(widget)
+    for child in widget.winfo_children():
+        bulunan.extend(widgets_by_class(child, cls))
+    return bulunan
+
+
 def assert_main_layout(app):
     app.root.geometry("1280x820")
     app.root.update_idletasks()
@@ -120,20 +129,36 @@ def main():
     app = appmod.HayvanTakipSistemi()
     try:
         assert_main_layout(app)
-        app.tarih_secici_ac(app.dogum_tarihi_entry)
-        app.root.update()
-        takvimler = [
-            child for child in app.root.winfo_children()
-            if isinstance(child, tk.Toplevel) and "Tarih" in child.title()
-        ]
-        assert takvimler, "date picker popup not opened"
-        takvimler[-1].destroy()
-        app.root.update()
+        for entry_name in ("dogum_tarihi_entry", "tohumlama_tarih_entry"):
+            entry = getattr(app, entry_name)
+            entry.delete(0, tk.END)
+            entry.insert(0, "01/01/2026")
+            app.tarih_secici_ac(entry)
+            app.root.update_idletasks()
+            app.root.update()
+            takvimler = [
+                child for child in app.root.winfo_children()
+                if isinstance(child, tk.Toplevel) and "Tarih" in child.title()
+            ]
+            assert takvimler, f"date picker popup not opened for {entry_name}"
+            takvim_text = "\n".join(widget_texts(takvimler[-1]))
+            assert "Tarih" in takvim_text and "Seçili tarih" in takvim_text and "Ocak 2026" in takvim_text, takvim_text
+            day_buttons = [child for child in widgets_by_class(takvimler[-1], tk.Button) if child.cget("text") == "15"]
+            assert day_buttons, f"date picker day button not found for {entry_name}"
+            day_buttons[0].invoke()
+            app.root.update_idletasks()
+            app.root.update()
+            assert entry.get() == "15/01/2026", entry.get()
+            assert entry.winfo_ismapped(), f"{entry_name} selected date field is not visible"
+            assert entry.master.winfo_ismapped(), f"{entry_name} date field container is not visible"
+            assert entry.winfo_width() >= 80, f"{entry_name} selected date field is too narrow: {entry.winfo_width()}"
 
         app.root.withdraw()
         assert app.api_modu is False
 
         app.hayvanlar = {}
+        for entry in (app.resmi_kupe_no_entry, app.ciftlik_kupe_no_entry, app.dogum_tarihi_entry, app.anne_kupe_entry):
+            entry.delete(0, tk.END)
         app.resmi_kupe_no_entry.insert(0, "TR001")
         app.ciftlik_kupe_no_entry.insert(0, "C001")
         app.dogum_tarihi_entry.insert(0, "01/01/2024")
