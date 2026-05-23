@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.3"
+APP_VERSION = "1.9.4"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
@@ -3931,6 +3931,74 @@ class HayvanTakipSistemi:
         kimlikler.discard("")
         return kimlikler
 
+    def kupe_arama_temizle(self, deger):
+        return re.sub(r"[^A-Z0-9]", "", str(deger or "").upper())
+
+    def kupe_arama_rakamlar(self, deger):
+        return re.sub(r"\D", "", str(deger or ""))
+
+    def resmi_kupe_kisaltma_eslesir(self, arama, resmi_kupe):
+        eslesme = re.fullmatch(r"\s*([A-Z]{2})\s+(\d{4,5})\s*", str(arama or "").upper())
+        if not eslesme:
+            return False
+        resmi_temiz = self.kupe_arama_temizle(resmi_kupe)
+        if not resmi_temiz.startswith(eslesme.group(1)):
+            return False
+        return eslesme.group(2) in self.kupe_arama_rakamlar(resmi_temiz)
+
+    def hayvan_arama_eslesir(self, h_id, hayvan, arama, kaynak="normal"):
+        arama_metin = str(arama or "").strip().upper()
+        arama_temiz = self.kupe_arama_temizle(arama_metin)
+        arama_rakam = self.kupe_arama_rakamlar(arama_metin)
+        if not arama_metin:
+            return True
+
+        resmi = str((hayvan or {}).get("resmi_kupe_no") or "").strip().upper()
+        ciftlik = str((hayvan or {}).get("ciftlik_kupe_no") or "").strip().upper()
+        kupe_no = str((hayvan or {}).get("kupe_no") or "").strip().upper()
+        kimlikler = [str(h_id).strip().upper(), kupe_no, resmi, ciftlik]
+        kimlikler = [k for k in kimlikler if k]
+        temiz_kimlikler = [self.kupe_arama_temizle(k) for k in kimlikler]
+        ciftlik_rakam = self.kupe_arama_rakamlar(ciftlik)
+
+        if str(kaynak or "normal").lower() == "kamera":
+            resmi_temiz = self.kupe_arama_temizle(resmi)
+            if arama_temiz and resmi_temiz and arama_temiz == resmi_temiz:
+                return True
+            if len(arama_rakam) >= 6 and ciftlik_rakam and ciftlik_rakam.endswith(arama_rakam[-6:]):
+                return True
+            return False
+
+        birlesik = " ".join(kimlikler)
+        if arama_metin in birlesik:
+            return True
+        if arama_temiz and any(arama_temiz in temiz for temiz in temiz_kimlikler):
+            return True
+        if len(arama_rakam) == 6 and ciftlik_rakam.endswith(arama_rakam):
+            return True
+        if self.resmi_kupe_kisaltma_eslesir(arama_metin, resmi):
+            return True
+        return False
+
+    def hayvan_arama_idleri(self, arama, aktif_olsun=False, haric_id=None, kaynak="normal"):
+        haric_id = str(haric_id) if haric_id is not None else None
+        eslesenler = []
+        for h_id, hayvan in self.hayvanlar.items():
+            if haric_id is not None and str(h_id) == haric_id:
+                continue
+            if aktif_olsun and (hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi')):
+                continue
+            if self.hayvan_arama_eslesir(h_id, hayvan, arama, kaynak=kaynak):
+                eslesenler.append(h_id)
+        return eslesenler
+
+    def hayvan_referans_coz(self, kupe_girdi, aktif_olsun=False):
+        hayvan_id = self.hayvan_id_bul(kupe_girdi, aktif_olsun=aktif_olsun)
+        if hayvan_id:
+            return hayvan_id
+        eslesenler = self.hayvan_arama_idleri(kupe_girdi, aktif_olsun=aktif_olsun)
+        return eslesenler[0] if len(eslesenler) == 1 else None
+
     def hayvan_id_bul(self, kupe_girdi, aktif_olsun=False, haric_id=None):
         aranan = str(kupe_girdi or "").strip().upper()
         if not aranan:
@@ -5442,7 +5510,7 @@ class HayvanTakipSistemi:
         ara_grup.grid(row=0, column=1, sticky="ew", padx=10, pady=10)
         ara_grup.columnconfigure(0, weight=1)
         self.themed_widgets.append((ara_grup, 'kart'))
-        ara_lbl = tk.Label(ara_grup, text="ARA", font=('Segoe UI', 8, 'bold'),
+        ara_lbl = tk.Label(ara_grup, text="ARA - KUPE / SON 6 / KISALTMA", font=('Segoe UI', 8, 'bold'),
                            bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"])
         ara_lbl.grid(row=0, column=0, sticky="w", pady=(0, 4))
         self.arama_entry = ttk.Entry(ara_grup, font=('Segoe UI', 11), style='TEntry')
@@ -6280,11 +6348,9 @@ class HayvanTakipSistemi:
         for h_id, hayvan in self.hayvanlar.items():
             if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False):
                 continue
-            ciftlik = (hayvan.get('ciftlik_kupe_no') or '').upper()
-            resmi = (hayvan.get('resmi_kupe_no') or '').upper()
-            gorunen = ciftlik or resmi
-            if gorunen.startswith(text):
-                eslesenler.append(ciftlik or resmi)
+            if self.hayvan_arama_eslesir(h_id, hayvan, text):
+                gorunen = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or h_id
+                eslesenler.append(str(gorunen).upper())
         current_text = self.tohumlama_hayvan_combo.get()
         self.tohumlama_hayvan_combo['values'] = sorted(eslesenler)
         self.tohumlama_hayvan_combo.set(current_text)
@@ -6336,7 +6402,7 @@ class HayvanTakipSistemi:
         return True
 
     def tohumlama_ekranina_hayvanla_git(self, kupe_no, kaynak_pencere=None):
-        hayvan_id = self.hayvan_id_bul(kupe_no) or kupe_no
+        hayvan_id = self.hayvan_referans_coz(kupe_no, aktif_olsun=True) or kupe_no
         if hayvan_id not in self.hayvanlar:
             return messagebox.showerror("Hata", f"Hayvan bulunamadı: {kupe_no}", parent=getattr(self, "root", None))
         hayvan = self.hayvanlar[hayvan_id]
@@ -6640,7 +6706,7 @@ class HayvanTakipSistemi:
         tarih = self.tohumlama_tarih_entry.get().strip()
         if not all([kupe_girdi, sekil, tarih]): return messagebox.showerror("Hata", "Lütfen tüm alanları doldurun!")
         
-        kupe_no = self.hayvan_id_bul(kupe_girdi)
+        kupe_no = self.hayvan_referans_coz(kupe_girdi, aktif_olsun=True)
                 
         if not kupe_no: return messagebox.showerror("Hata", f"'{kupe_girdi}' küpeli hayvan bulunamadı!")
         
@@ -6706,7 +6772,7 @@ class HayvanTakipSistemi:
         if not kupe_girdi:
             return messagebox.showerror("Hata", "Geçerli bir hayvan seçin veya tohumlama kaydı oluşturun!")
         
-        kupe_no = self.hayvan_id_bul(kupe_girdi)
+        kupe_no = self.hayvan_referans_coz(kupe_girdi, aktif_olsun=True)
         
         if not kupe_no or not self.hayvanlar[kupe_no].get('tohumlamalar'):
             return messagebox.showerror("Hata", "Geçerli bir hayvan seçin veya tohumlama kaydı oluşturun!")
@@ -6741,7 +6807,7 @@ class HayvanTakipSistemi:
         if not kupe_girdi:
             return messagebox.showerror("Hata", "Geçerli bir hayvan seçin veya tohumlama kaydı oluşturun!")
         
-        kupe_no = self.hayvan_id_bul(kupe_girdi)
+        kupe_no = self.hayvan_referans_coz(kupe_girdi, aktif_olsun=True)
         
         if not kupe_no or not self.hayvanlar[kupe_no].get('tohumlamalar'):
             return messagebox.showerror("Hata", "Geçerli bir hayvan seçin veya tohumlama kaydı oluşturun!")
@@ -8103,13 +8169,12 @@ class HayvanTakipSistemi:
     def hayvan_listesini_guncelle(self):
         self.header_ozet_guncelle()
         for item in self.hayvan_tree.get_children(): self.hayvan_tree.delete(item)
-        filtre = self.filtre_combo.get(); arama = self.arama_entry.get().strip().upper()
+        filtre = self.filtre_combo.get(); arama = self.arama_entry.get().strip()
         self.tum_hayvanlari_guncelle()
         sorted_hayvanlar = sorted(self.hayvanlar.items(), key=lambda item: item[0])
         row_idx = 0
         for kupe_no, hayvan in sorted_hayvanlar:
-            gorunen_kupe_arama = ((hayvan.get('ciftlik_kupe_no') or '') + ' ' + (hayvan.get('resmi_kupe_no') or '')).upper()
-            if arama and arama not in gorunen_kupe_arama: continue
+            if arama and not self.hayvan_arama_eslesir(kupe_no, hayvan, arama): continue
             arsivli = hayvan.get('arsivli', False)
             aktif_degil = arsivli or hayvan.get('olu', False) or hayvan.get('kesildi', False)
             

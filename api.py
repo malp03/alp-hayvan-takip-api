@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import time
 from typing import Any, Dict, Iterable, List, Optional
@@ -284,6 +285,57 @@ def metin(deger: Any, *, upper: bool = False) -> str:
         return ""
     sonuc = str(deger).strip()
     return sonuc.upper() if upper else sonuc
+
+
+def kupe_arama_temizle(deger: Any) -> str:
+    return re.sub(r"[^A-Z0-9]", "", metin(deger, upper=True))
+
+
+def kupe_arama_rakamlar(deger: Any) -> str:
+    return re.sub(r"\D", "", metin(deger))
+
+
+def resmi_kupe_kisaltma_eslesir(arama: Any, resmi_kupe: Any) -> bool:
+    eslesme = re.fullmatch(r"\s*([A-Z]{2})\s+(\d{4,5})\s*", metin(arama, upper=True))
+    if not eslesme:
+        return False
+    resmi_temiz = kupe_arama_temizle(resmi_kupe)
+    if not resmi_temiz.startswith(eslesme.group(1)):
+        return False
+    return eslesme.group(2) in kupe_arama_rakamlar(resmi_temiz)
+
+
+def hayvan_arama_eslesir(hayvan: models.Hayvan, arama: Any, *, kaynak: str = "normal") -> bool:
+    arama_metin = metin(arama, upper=True)
+    arama_temiz = kupe_arama_temizle(arama_metin)
+    arama_rakam = kupe_arama_rakamlar(arama_metin)
+    if not arama_metin:
+        return True
+
+    resmi = metin(hayvan.resmi_kupe_no, upper=True)
+    ciftlik = metin(hayvan.ciftlik_kupe_no, upper=True)
+    ad = metin(hayvan.ad, upper=True)
+    kimlikler = [metin(hayvan.id, upper=True), resmi, ciftlik, ad]
+    kimlikler = [k for k in kimlikler if k]
+    temiz_kimlikler = [kupe_arama_temizle(k) for k in kimlikler]
+    ciftlik_rakam = kupe_arama_rakamlar(ciftlik)
+
+    if metin(kaynak, upper=True) == "KAMERA":
+        if arama_temiz and kupe_arama_temizle(resmi) and arama_temiz == kupe_arama_temizle(resmi):
+            return True
+        if len(arama_rakam) >= 6 and ciftlik_rakam and ciftlik_rakam.endswith(arama_rakam[-6:]):
+            return True
+        return False
+
+    if arama_metin in " ".join(kimlikler):
+        return True
+    if arama_temiz and any(arama_temiz in temiz for temiz in temiz_kimlikler):
+        return True
+    if len(arama_rakam) == 6 and ciftlik_rakam.endswith(arama_rakam):
+        return True
+    if resmi_kupe_kisaltma_eslesir(arama_metin, resmi):
+        return True
+    return False
 
 
 def parse_tarih(deger: Optional[str], alan: str, *, zorunlu: bool = False) -> Optional[datetime]:
@@ -1285,16 +1337,38 @@ def get_hayvanlar(
             models.Hayvan.kesildi.is_(False),
         )
     if q:
-        arama = f"%{q.strip().upper()}%"
-        sorgu = sorgu.filter(
-            or_(
-                models.Hayvan.resmi_kupe_no.ilike(arama),
-                models.Hayvan.ciftlik_kupe_no.ilike(arama),
-                models.Hayvan.ad.ilike(f"%{q.strip()}%"),
-            )
-        )
-    hayvanlar = sorgu.offset(skip).limit(limit).all()
+        eslesenler = [h for h in sorgu.all() if hayvan_arama_eslesir(h, q, kaynak="normal")]
+        hayvanlar = eslesenler[skip: skip + limit]
+    else:
+        hayvanlar = sorgu.offset(skip).limit(limit).all()
     return [db_hayvandan_payload(h) for h in hayvanlar]
+
+
+@app.get("/api/hayvanlar/bul", response_model=schemas.HayvanAramaResponse)
+def hayvan_ref_ara(
+    ref: str = Query(..., min_length=1),
+    kaynak: str = Query(default="normal", pattern="^(normal|kamera)$"),
+    ciftlik_id: Optional[str] = None,
+    arsiv_dahil: bool = True,
+    limit: int = Query(default=20, le=100),
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    sorgu = hayvan_sorgusu_scope(db, kullanici, ciftlik_id)
+    if not arsiv_dahil:
+        sorgu = sorgu.filter(
+            models.Hayvan.arsivli.is_(False),
+            models.Hayvan.olu.is_(False),
+            models.Hayvan.kesildi.is_(False),
+        )
+    eslesenler = [h for h in sorgu.all() if hayvan_arama_eslesir(h, ref, kaynak=kaynak)]
+    return {
+        "ref": ref,
+        "kaynak": kaynak,
+        "eslesme_sayisi": len(eslesenler),
+        "tekil": len(eslesenler) == 1,
+        "hayvanlar": [db_hayvandan_payload(h) for h in eslesenler[:limit]],
+    }
 
 
 @app.get("/api/hayvanlar/{hayvan_ref}", response_model=schemas.HayvanResponse)

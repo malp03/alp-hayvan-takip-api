@@ -60,6 +60,7 @@ Kullanici:
 Hayvan:
 
 - `GET /api/hayvanlar?arsiv_dahil=true`
+- `GET /api/hayvanlar/bul?ref={okunan_metin}&kaynak=normal|kamera`
 - `GET /api/hayvanlar/{hayvan_ref}`
 - `POST /api/hayvanlar`
 - `PATCH /api/hayvanlar/{hayvan_ref}`
@@ -69,6 +70,7 @@ Hayvan payload ek alanlari:
 
 - `resmi_kupe_no`
 - `ciftlik_kupe_no`
+- `irk`: Simental, Holstein vb. serbest metin/opsiyonel irk bilgisi. Desktop, Android ve API yanitlarinda ayni alan adi kullanilir.
 - `foto_data`: masaustu ve mobil icin kucultulmus JPEG data URI. Ilk surumde API JSON icinde tasinir.
 - `foto_url`: ileride dosya depolama/S3 benzeri sistem gelirse kullanilacak URL alani.
 
@@ -91,7 +93,38 @@ Dogum `yavrular` icinde her yavru icin:
 - `ciftlik_kupe_no`
 - `kupe`: geriye donuk uyumluluk icin gorunen/ana kupe.
 
-Android kamera/galeri kupesi okudugunda sonuc once `resmi_kupe_no` veya `ciftlik_kupe_no` alanina yazilmali. Tarama sonucunda hayvan bulunursa direkt profil acilir; bulunamazsa yeni kayit ekrani o kupeyle doldurulur.
+### Kamera ile Kupe Tarama (Android'e Ozel Kritik Akis)
+
+Android kamera veya galeriden kupe okudugunda:
+
+1. Okunan metin buyuk harfe normalize edilir (`trim().uppercase()`), kullanici isterse duzeltir.
+2. Kamera/galeri akisi `GET /api/hayvanlar/bul?ref={metin}&kaynak=kamera` sorgusunu kullanir.
+   - `resmi_kupe_no`: okunan temiz metnin tamamiyla eslesir.
+   - `ciftlik_kupe_no`: okunan metindeki rakamlarin son 6 hanesiyle eslesir.
+   - Resmi kupe kisaltmalari kamera modunda kullanilmaz.
+3. **tekil=true donerse:** `hayvanlar[0]` ile Hayvan Profil Ekrani acilir (liste ekranini atla).
+4. **eslesme_sayisi > 1 donerse:** ayni son 6 haneyi tasiyan hayvanlar icin secim listesi gosterilir.
+5. **eslesme_sayisi = 0 donerse:** Yeni hayvan kayit ekrani acilir, uygun alan okunan metinle doldurulur.
+6. **Offline ise:** Yerel `animals` tablosunda ayni kurallar uygulanir.
+   - `kaynak=kamera`: resmi kupe tam eslesme, ciftlik kupe son 6 hane.
+   - `kaynak=normal`: resmi kupe, ciftlik kupe, ciftlik son 6 hane ve resmi kupe kisaltmasi.
+
+Normal elle arama:
+- `GET /api/hayvanlar?q={arama}` liste aramasidir.
+- Resmi kupe ve ciftlik kupe icinde arar.
+- Ciftlik kupe numarasinin son 6 hanesini kabul eder.
+- Resmi kupe kisaltmasini kabul eder: ilk iki harf + bosluk + resmi kupe icindeki ard arda gelen 4 veya 5 rakam. Ornek: `TR 1234`, `TR 56789`.
+
+Tarama kutuphanesi:
+- Oncelikli secim: **ML Kit TextRecognition** (on-device, internet gerektirmez).
+- Alternatif: **ZXing** (barkod/QR destegi de isteniyor ise).
+- Kupe numaralari standart barkod icermeyebilir; sade basili/el yazisi rakam-harf icin OCR tercih edilmeli.
+
+UX:
+- Tarama ekrani tam ekran kamera preview olmali.
+- Basarili okuma sesli/titresim geribildirim verir.
+- Kullanici okunan metni onaylar veya duzeltir, sonra "Ara" tusuna basar (yanlis okuma toleransi).
+- Iptal icin Android geri butonu veya ust sol X yeterli.
 
 Rapor, uyari, gecmis, yedek:
 
@@ -135,10 +168,28 @@ Minimum yerel tablolar:
 ## Ilk Android Is Akisi
 
 1. Login ekrani
-2. Token'i guvenli saklama
-3. Kullanici rolune gore yonlendirme
-4. Admin icin ciftlik secme/yonetim ekrani
-5. Normal kullanici icin direkt suru ekranina gecis
-6. Hayvan liste/kayit/duzenleme/tohumlama/asi/dogum ekranlari
-7. Offline kuyruk ve otomatik baglanti kontrolu
-8. Internet gelince otomatik senkron ve manuel `Senkronize` butonu
+2. Token'i guvenli saklama (Android KeyStore)
+3. Kullanici rolune gore yonlendirme:
+   - `admin` → ciftlik sec / yonetim ekrani
+   - `ciftlik` → direkt suru listesi
+4. Hayvan listesi ekraninda **Tara butonu** (ust kisim)
+5. Tara basilinca tam ekran kamera preview acilir
+6. Kupe okunur → kullanici onaylar/duzeltir → Ara
+7. Kupe bulunursa → Hayvan Profil Ekrani
+8. Kupe bulunamazsa → Yeni Hayvan Kayit Ekrani (kupe dolu)
+9. Hayvan ekle / duzenle / tohumla / asi / dogum akislari
+10. Offline kuyruk ve otomatik baglanti kontrolu
+11. Internet gelince otomatik senkron ve manuel Senkronize butonu
+
+Ek not: Tara akisinda arama icin `/api/hayvanlar/bul?ref={metin}&kaynak=kamera` kullanilir. Tekil eslesme profil ekranina, coklu eslesme secim listesine, sifir eslesme yeni kayit ekranina gider.
+
+## Hayvan Profil Sekmeler (Android)
+
+Desktop profiliyle esdeger, sekme tabanli:
+
+1. **Kimlik & Durum:** resmi/ciftlik kupe, cins, irk, yas, durum rozeti
+2. **Ozet:** gebe mi, son tohumlama, yaklasan doğum
+3. **Tohumlama Gecmisi:** liste + yeni tohumlama ekle
+4. **Dogum & Yavru Gecmisi:** liste + yeni dogum kaydi
+5. **Asi / Prosedur:** liste + yeni asi ekle
+6. **Fotograflar:** max 3 fotograf, kameradan veya galeriden ekleme

@@ -331,6 +331,7 @@ Desktop profil ile ayni sekmeleri icermeli:
 - 23 Mayis 2026: Tarih secici popup'inda eski duzende oldugu gibi yazili ay/yil bandi geri eklendi; ayni bantta secili tarih de gorunur. Bu ortak popup hayvan kaydi ve tohumlama tarih alanlarinda kullanilir.
 - 23 Mayis 2026: Tarih seciminde asil beklenen davranis netlesti: kullanici `Takvim` butonundan gun secince tarih popup icinde degil, formdaki `Takvim` butonunun yanindaki tarih kutusunda gorunmelidir. Hayvan kaydi ve tohumlama tarih alanlari bunun icin gorunur `tk.Entry` kutusuna cevrildi; smoke test artik alanin degerini, ekranda gorunmesini ve yeterli genisligini birlikte kontrol eder.
 - 23 Mayis 2026: GitHub latest release `1.9.2` oldugu icin yeni canli dagitim/updater testi icin desktop `APP_VERSION` `1.9.3` yapildi. Yeni release tag'i ayni formatta `1.9.3` olmali; asset adi yine `ALP_Ziraat_Hayvan_Takip_Setup.exe` kalmali.
+- 24 Mayis 2026: Android kamera/normal arama hazirligi eklendi. Desktop liste aramasi artik resmi kupe, ciftlik kupe, ciftlik son 6 hane ve resmi kupe kisaltmasini destekler. API'ye `/api/hayvanlar/bul?ref=...&kaynak=normal|kamera` eklendi; `kaynak=kamera` resmi kupede tam eslesme, ciftlik kupede son 6 hane kullanir ve kisaltmalari kullanmaz. Desktop `APP_VERSION` `1.9.4` yapildi.
 
 ## 22 Mayis 2026 v1.9.1 Release Notu
 
