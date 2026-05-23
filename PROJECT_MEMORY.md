@@ -217,8 +217,50 @@ Android icin onemli hazirliklar:
 - API kontrati `ANDROID_API_CONTRACT.md` icinde tutulur.
 - Mobil login ayni kullanici/ciftlik/admin modelini kullanmali.
 - Hayvan listesi, profil, fotograf ve tohumlama akislarinda desktop davranisi referans alinmali.
-- Kamera ile kupe numarasi tarama ve galeriden kupe okuma ileride Android tarafinda eklenecek.
-- Mobilde hayvan sekmesinde tarama sonrasi direkt ilgili profile gitme isteniyor.
+
+### Android Kamera ile Kupe Tarama (Kritik Ozellik)
+
+Bu ozellik Android uygulamasinin temel ayirt edici ozelligi olup mutlaka implemente edilmeli:
+
+- Hayvan listesi ekraninda bir `Tara` butonu bulunur.
+- Butona basildiginda kamera acilir; kullanici hayvana takilmis kupedeki numarayi kameraya gosterir.
+- Tarama ML Kit (Google) veya ZXing kutuphanesi ile yapilabilir. Kupe numaralari genellikle sade rakam/harf dizisidir; OCR veya barkod/QR destegi gerekmez; elle yazilmis/baski duz metin icin kamera ile metin okuma (MLKit TextRecognition) kullanilmali.
+- Tarama tamamlaninca okunan metin once `resmi_kupe_no` veya `ciftlik_kupe_no` alaninda `GET /api/hayvanlar/{ref}` ile sorgulanir.
+- **Hayvan bulunursa:** Hayvan listesi ekranini atla, direkt o hayvani profil ekrani ac.
+- **Hayvan bulunamazsa:** Yeni hayvan kayit ekrani ac, okunan kupe numarasini `ciftlik_kupe_no` alanina otomatik doldur.
+- Galeri uzerinden de foto/tarama secimi desteklenebilir (ileride).
+- Tarama sonucu bos veya okunamaz ise kullaniciya uyari goster ve tekrar deneme imkani ver.
+- API arama hem `resmi_kupe_no` hem `ciftlik_kupe_no` uzerinden calisir; `hayvan_bul` endpoint zaten her ikisinde de arama yapabiliyor (`GET /api/hayvanlar/{ref}`).
+- Offline modda kupe sorgusu yerel SQLite cache uzerinden yapilir.
+
+### Android Is Akisi (Kamera Dahil)
+
+1. Login ekrani
+2. Token guvenli saklama (Android KeyStore)
+3. Kullanici rolune gore yonlendirme (admin → ciftlik sec, normal → direkt suru)
+4. Hayvan listesi ekrani + ust kisimda `Tara` ikonu/butonu
+5. Tara basilinca kamera ac → kupe metni oku
+6. Kupe API'de bulunursa → Hayvan Profil Ekrani
+7. Kupe bulunamazsa → Yeni Hayvan Kayit Ekrani (kupe alani dolu gelir)
+8. Hayvan ekle/duzenle/tohumla/asi/dogum akislari
+9. Offline kuyruk ve otomatik senkron
+
+### Hayvan Profil Ekrani (Android)
+
+Desktop profil ile ayni sekmeleri icermeli:
+- Kimlik & Durum
+- Ozet (yas, gebe mi, son islem)
+- Tohumlama gecmisi
+- Dogum & Yavru gecmisi
+- Asi / Prosedur gecmisi
+- Fotograflar (kameradan ekleme destegi)
+
+### Teknik Notlar
+
+- Arama: `GET /api/hayvanlar/{ref}` — ref hem ID hem resmi_kupe_no hem ciftlik_kupe_no kabul eder.
+- Kupe numarasi buyuk harf normalize edilmeli (API zaten upper yapiyor ama client da yapsin).
+- Tarama ekrani tam ekran kamera preview olmali; iptal icin geri butonu yeterlii.
+- Tarama basarili sesi veya titresim geribildirim onerilir.
 
 ## 21 Mayis 2026 UI Notlari
 
@@ -279,18 +321,33 @@ Android icin onemli hazirliklar:
 - Raporlama ekrani sonradan fazla kompakt gorundugu icin onceki genis kartli duzene geri alindi: genis ekranda ozet kartlari satira yayilir, grafik kartlari genis kolonlarda kalir, butonlar sagda durur.
 - Raporlama aksiyon butonlari sag tarafta garip kirildigi icin baslik altinda tek satir toolbar'a alindi. Tam ekran genisliginde grafik kartlari 3 kolon yan yana kalacak sekilde min genislik ayarlandi.
 - Hayvan kaydi ekraninda `HAYVANI KAYDET` butonu formun altindan kart basliginin sagina alindi; tam ekranda buton gorunur kalir, dar ekranda sayfa kaydirma davranisi korunur.
-- Ust global aksiyon butonlari icin genis ekran esigi 1450 px yapildi; tam ekranda butonlar sag ustte kalir, daha dar pencerede ikinci satira responsive olarak duser.
+- Ust global aksiyon butonlari icin genis ekran esigi 1450 px yapildi; Windows'ta maksimize pencerede piksel olceklemesine bakmadan butonlar sag ustte kalir, daha dar pencerede ikinci satira responsive olarak duser.
 - Hayvan profil header rozetleri ve profil kartlari responsive hale getirildi. Kucuk/orta pencerede fotograf, kimlik ve ozet kartlari alt satira akar; alt gecmis kartlari da gerekirse tek kolona duser.
 - Hayvan profilindeki `Fotograf Ekle` artik kalan slot sayisi kadar coklu dosya secimi yapar; profil tarafinda da yeni kayit ekranindaki 3 fotograf mantigi korunur.
 - Profil gecmis tablolarina yatay scrollbar eklendi. Ozellikle `Dogum ve Yavru Gecmisi` tablosunda `Not` kolonu genisletildi ve uzun notlar saga kaydirilarak okunabilir.
 - `tools/smoke_update.py` icinde test ortamina sizabilecek `DATABASE_URL` temizlenir; update smoke test artik harici Supabase/Render baglantisi denemeden deterministik calisir.
 - Son tam test: `python tools\run_smoke_tests.py` komutu 22 Mayis 2026 tarihinde gecti.
+- 23 Mayis 2026: Hayvan kaydi ve tohumlama tarih alanlarindaki popup modern tarih seciciye cevrildi. Ay secimi, yil spinbox'i, bugun/temizle/kapat aksiyonlari ve gun seciminin alana yazilmasini dogrulayan smoke test eklendi.
+- 23 Mayis 2026: Tarih secici popup'inda eski duzende oldugu gibi yazili ay/yil bandi geri eklendi; ayni bantta secili tarih de gorunur. Bu ortak popup hayvan kaydi ve tohumlama tarih alanlarinda kullanilir.
+- 23 Mayis 2026: Tarih seciminde asil beklenen davranis netlesti: kullanici `Takvim` butonundan gun secince tarih popup icinde degil, formdaki `Takvim` butonunun yanindaki tarih kutusunda gorunmelidir. Hayvan kaydi ve tohumlama tarih alanlari bunun icin gorunur `tk.Entry` kutusuna cevrildi; smoke test artik alanin degerini, ekranda gorunmesini ve yeterli genisligini birlikte kontrol eder.
+- 23 Mayis 2026: GitHub latest release `1.9.2` oldugu icin yeni canli dagitim/updater testi icin desktop `APP_VERSION` `1.9.3` yapildi. Yeni release tag'i ayni formatta `1.9.3` olmali; asset adi yine `ALP_Ziraat_Hayvan_Takip_Setup.exe` kalmali.
 
 ## 22 Mayis 2026 v1.9.1 Release Notu
 
 - GitHub latest release zaten `v1.9.0` oldugu icin updater'in tetiklenmesi adina desktop `APP_VERSION` `1.9.1` yapildi.
 - Bu release tag'i `v1.9.1` olmali; asset adi mutlaka `ALP_Ziraat_Hayvan_Takip_Setup.exe` kalmali.
 - Eski `v1.9.0` kurulu kullanici login olduktan sonra GitHub latest release `v1.9.1` oldugunu gorurse zorunlu guncelleme popup'i acilir.
+
+## 22 Mayis 2026 v1.9.2 Login/Logout Duzeltmeleri
+
+- Desktop `APP_VERSION` `1.9.2` yapildi; release tag'i `v1.9.2` olmali.
+- `Bu bilgisayari tani` ile giris yapildiktan sonra normal ekrandan veya Admin Merkezi'nden `Cikis Yap` denince taninan bilgisayar kaydi temizlenir ve otomatik giris o turda atlanir.
+- Offline login daha dayanikli hale getirildi: API istegi beklenmeyen ag hatalariyla kesilirse de `ApiHatasi` uzerinden offline oturum fallback'i denenir.
+- Offline oturum API URL karsilastirmasi normalize edildi; trailing slash farklari offline girisi bozmaz.
+- Regression testleri eklendi: `tools/smoke_offline_login.py`, `tools/smoke_remember_logout.py`, `tools/smoke_admin_panel_logout.py`.
+- Hayvan kaydi ve tohumlama tarih alanlarina takvim popup'i eklendi; hayvan kaydina/duzenlemeye `Irk` alani eklendi ve profil kimlik kartinda gosteriliyor.
+- `tools/smoke_ui.py` tarih popup'i, `Irk` kaydi ve profilde gorunme akisini test edecek sekilde guncellendi.
+- Render/Supabase API ve Android kontrati icin `irk` alani `schemas.py`, `api_deploy/schemas.py`, `api.py`, `api_deploy/api.py` ve `ANDROID_API_CONTRACT.md` icinde acik hale getirildi. Supabase'de ayri kolon gerekmiyor; tam hayvan payload'i `hayvanlar.veri_json` icinde saklaniyor.
 
 ## Bilinen Oncelikler / Sonraki Iyilestirmeler
 

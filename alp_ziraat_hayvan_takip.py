@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.2"
+APP_VERSION = "1.9.3"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
@@ -841,29 +841,326 @@ class HayvanTakipSistemi:
 
     def tarih_secici_ekle(self, entry):
         if getattr(entry, "_alp_tarih_secici_var", False):
-            return
-        entry._alp_tarih_secici_var = True
+            return entry
         container = entry.master
+        mevcut_deger = entry.get()
         try:
-            entry.pack_forget()
+            entry.destroy()
         except tk.TclError:
-            return
+            return entry
 
         satir = tk.Frame(container, bg=self.renkler["kart_arkaplan"])
         satir.pack(fill="x")
+        satir.grid_columnconfigure(0, weight=1)
         self.themed_widgets.append((satir, 'kart'))
-        entry.pack(in_=satir, side="left", fill="x", expand=True, ipady=3)
+
+        entry_kutu = tk.Frame(
+            satir,
+            bg=self.renkler["input_bg"],
+            width=160,
+            height=35,
+            highlightthickness=1,
+            highlightbackground=self.renkler["kenarlik"],
+            highlightcolor=self.renkler["button_primary_bg"],
+            bd=0,
+        )
+        entry_kutu.grid(row=0, column=0, sticky="ew")
+        entry_kutu.pack_propagate(False)
+        self.themed_widgets.append((entry_kutu, 'input_frame'))
+        date_entry = tk.Entry(
+            entry_kutu,
+            bg=self.renkler["input_bg"],
+            fg=self.renkler["yazi_rengi"],
+            insertbackground=self.renkler["yazi_rengi"],
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 11),
+            justify="center",
+        )
+        date_entry.insert(0, mevcut_deger)
+        date_entry.pack(fill="x", expand=True, padx=10, pady=6, ipady=4)
+        date_entry.bind('<KeyRelease>', self.tarih_formatlama)
+        date_entry._alp_tarih_secici_var = True
         btn = self.modern_buton(
             satir,
             "Takvim",
-            lambda e=entry: self.tarih_secici_ac(e),
+            lambda e=date_entry: self.tarih_secici_ac(e),
             purpose='default',
             width=7,
             small=True,
         )
-        btn.pack(side="left", padx=(8, 0))
+        btn.grid(row=0, column=1, sticky="e", padx=(8, 0))
+        return date_entry
+
+    def _tarih_secici_entry_yaz(self, entry, tarih):
+        entry.delete(0, tk.END)
+        entry.insert(0, tarih.strftime("%d/%m/%Y"))
+        try:
+            entry.event_generate("<KeyRelease>")
+        except tk.TclError:
+            pass
+
+    def _tarih_secici_modern_ac(self, entry):
+        try:
+            secili = datetime.strptime(entry.get().strip(), "%d/%m/%Y")
+        except (ValueError, TypeError):
+            secili = datetime.now()
+
+        popup = tk.Toplevel(self.root)
+        popup.title("Tarih Seç")
+        popup.configure(bg=self.renkler["arkaplan"])
+        popup.transient(self.root)
+        popup.resizable(False, False)
+        popup.geometry("560x520")
+
+        durum = {"yil": secili.year, "ay": secili.month, "gun": secili.day}
+        ay_adlari = [
+            "",
+            "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+            "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
+        ]
+        hafta_gunleri = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
+
+        kart = self.modern_kart(popup, accent=self.renkler["button_primary_bg"])
+        kart.pack(fill="both", expand=True, padx=14, pady=14)
+        kart.configure(padx=14, pady=14)
+
+        baslik = tk.Frame(kart, bg=self.renkler["kart_arkaplan"])
+        baslik.pack(fill="x", pady=(0, 10))
+        self.themed_widgets.append((baslik, 'kart'))
+        tk.Label(
+            baslik,
+            text="Tarih Seç",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            baslik,
+            text="Günü seçin veya ay/yılı hızlıca değiştirin.",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(2, 0))
+
+        kontrol = tk.Frame(kart, bg=self.renkler["kart_arkaplan"])
+        kontrol.pack(fill="x", pady=(0, 10))
+        self.themed_widgets.append((kontrol, 'kart'))
+
+        ay_var = tk.StringVar(value=ay_adlari[durum["ay"]])
+        yil_var = tk.StringVar(value=str(durum["yil"]))
+        ay_combo = ttk.Combobox(
+            kontrol,
+            values=ay_adlari[1:],
+            textvariable=ay_var,
+            state="readonly",
+            width=12,
+            font=("Segoe UI", 10),
+            style='TCombobox',
+        )
+        yil_spin = tk.Spinbox(
+            kontrol,
+            from_=1900,
+            to=2100,
+            textvariable=yil_var,
+            width=6,
+            font=("Segoe UI", 10, "bold"),
+            bg=self.renkler["input_bg"],
+            fg=self.renkler["yazi_rengi"],
+            insertbackground=self.renkler["yazi_rengi"],
+            buttonbackground=self.renkler["kart_ikincil"],
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.renkler["kenarlik"],
+            highlightcolor=self.renkler["button_primary_bg"],
+        )
+        donem_band = tk.Frame(
+            kart,
+            bg=self.renkler["kart_ikincil"],
+            padx=12,
+            pady=7,
+            highlightthickness=1,
+            highlightbackground=self.renkler["kenarlik"],
+            bd=0,
+        )
+        donem_band.pack(fill="x", pady=(0, 10))
+        self.themed_widgets.append((donem_band, 'soft_panel'))
+        donem_label = tk.Label(
+            donem_band,
+            text="",
+            bg=self.renkler["kart_ikincil"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 11, "bold"),
+        )
+        donem_label.pack(side="left")
+        self.themed_widgets.append((donem_label, 'label'))
+        secili_label = tk.Label(
+            donem_band,
+            text="",
+            bg=self.renkler["kart_ikincil"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9, "bold"),
+        )
+        secili_label.pack(side="right")
+        self.themed_widgets.append((secili_label, 'muted_label'))
+
+        gunler = tk.Frame(kart, bg=self.renkler["kart_arkaplan"])
+        gunler.pack(fill="x")
+        self.themed_widgets.append((gunler, 'kart'))
+
+        def gun_sinirla():
+            son_gun = calendar.monthrange(durum["yil"], durum["ay"])[1]
+            durum["gun"] = min(max(1, int(durum.get("gun") or 1)), son_gun)
+
+        def secimi_goster():
+            gun_sinirla()
+            donem_label.config(text=f"{ay_adlari[durum['ay']]} {durum['yil']}")
+            secili_label.config(
+                text=f"Seçili tarih: {datetime(durum['yil'], durum['ay'], durum['gun']).strftime('%d/%m/%Y')}"
+            )
+
+        def tarih_yaz(gun):
+            durum["gun"] = int(gun)
+            self._tarih_secici_entry_yaz(entry, datetime(durum["yil"], durum["ay"], durum["gun"]))
+            popup.destroy()
+
+        def ay_degistir(delta):
+            ay = durum["ay"] + delta
+            yil = durum["yil"]
+            if ay < 1:
+                ay = 12
+                yil -= 1
+            elif ay > 12:
+                ay = 1
+                yil += 1
+            durum["ay"] = ay
+            durum["yil"] = yil
+            ay_var.set(ay_adlari[durum["ay"]])
+            yil_var.set(str(durum["yil"]))
+            takvimi_ciz()
+
+        def kontrol_degisince(event=None):
+            try:
+                yeni_ay = ay_adlari.index(ay_var.get())
+            except ValueError:
+                yeni_ay = durum["ay"]
+            try:
+                yeni_yil = int(yil_var.get())
+            except ValueError:
+                yeni_yil = durum["yil"]
+            durum["ay"] = max(1, min(12, yeni_ay))
+            durum["yil"] = max(1900, min(2100, yeni_yil))
+            yil_var.set(str(durum["yil"]))
+            takvimi_ciz()
+
+        def bugune_git():
+            bugun = datetime.now()
+            durum["yil"] = bugun.year
+            durum["ay"] = bugun.month
+            durum["gun"] = bugun.day
+            self._tarih_secici_entry_yaz(entry, bugun)
+            popup.destroy()
+
+        def temizle():
+            entry.delete(0, tk.END)
+            try:
+                entry.event_generate("<KeyRelease>")
+            except tk.TclError:
+                pass
+            popup.destroy()
+
+        def takvimi_ciz():
+            for child in gunler.winfo_children():
+                child.destroy()
+            secimi_goster()
+            for idx, ad in enumerate(hafta_gunleri):
+                tk.Label(
+                    gunler,
+                    text=ad,
+                    bg=self.renkler["kart_arkaplan"],
+                    fg=self.renkler["muted"],
+                    font=("Segoe UI", 9, "bold"),
+                    width=3,
+                ).grid(row=0, column=idx, padx=2, pady=(0, 6), sticky="nsew")
+                gunler.grid_columnconfigure(idx, weight=1, uniform="tarih_gun")
+
+            bugun = datetime.now()
+            cal = calendar.Calendar(firstweekday=0)
+            for row, hafta in enumerate(cal.monthdayscalendar(durum["yil"], durum["ay"]), 1):
+                for col, gun in enumerate(hafta):
+                    if not gun:
+                        bos = tk.Label(gunler, text="", bg=self.renkler["kart_arkaplan"], width=3)
+                        bos.grid(row=row, column=col, padx=2, pady=3, sticky="nsew")
+                        continue
+                    aktif = gun == durum["gun"]
+                    bugun_mu = gun == bugun.day and durum["ay"] == bugun.month and durum["yil"] == bugun.year
+                    bg = self.renkler["button_primary_bg"] if aktif else self.renkler["kart_ikincil"]
+                    fg = "#FFFFFF" if aktif else (self.renkler["button_success_bg"] if bugun_mu else self.renkler["yazi_rengi"])
+                    tk.Button(
+                        gunler,
+                        text=str(gun),
+                        command=lambda g=gun: tarih_yaz(g),
+                        bg=bg,
+                        fg=fg,
+                        activebackground=self.renkler["button_primary_bg"],
+                        activeforeground="#FFFFFF",
+                        relief="flat",
+                        bd=0,
+                        highlightthickness=1,
+                        highlightbackground=self.renkler["button_success_bg"] if bugun_mu and not aktif else self.renkler["kenarlik"],
+                        width=2,
+                        pady=8,
+                        font=("Segoe UI", 9, "bold"),
+                        cursor="hand2",
+                    ).grid(row=row, column=col, padx=2, pady=3, sticky="nsew")
+
+        onceki = self.modern_buton(kontrol, "<", lambda: ay_degistir(-1), purpose='default', width=4, small=True)
+        sonraki = self.modern_buton(kontrol, ">", lambda: ay_degistir(1), purpose='default', width=4, small=True)
+        onceki.pack(side="left", padx=(0, 6))
+        ay_combo.pack(side="left", padx=(0, 6), ipady=4)
+        yil_spin.pack(side="left", padx=(0, 6), ipady=5)
+        sonraki.pack(side="left", padx=(6, 0))
+        ay_combo.bind("<<ComboboxSelected>>", kontrol_degisince)
+        yil_spin.config(command=kontrol_degisince)
+        yil_spin.bind("<Return>", kontrol_degisince)
+        yil_spin.bind("<FocusOut>", kontrol_degisince)
+
+        alt = tk.Frame(kart, bg=self.renkler["kart_arkaplan"])
+        alt.pack(fill="x", pady=(12, 0))
+        self.themed_widgets.append((alt, 'kart'))
+        self.modern_buton(alt, "Bugün", bugune_git, purpose='primary', width=8, small=True).pack(side="left")
+        self.modern_buton(alt, "Temizle", temizle, purpose='default', width=8, small=True).pack(side="left", padx=(8, 0))
+        self.modern_buton(alt, "Kapat", popup.destroy, purpose='default', width=8, small=True).pack(side="right")
+
+        takvimi_ciz()
+        popup.update_idletasks()
+        try:
+            x = entry.winfo_rootx()
+            y = entry.winfo_rooty() + entry.winfo_height() + 6
+            popup_w = popup.winfo_width()
+            popup_h = popup.winfo_height()
+            ekran_w = popup.winfo_screenwidth()
+            ekran_h = popup.winfo_screenheight()
+            x = min(max(8, x), max(8, ekran_w - popup_w - 8))
+            if y + popup_h > ekran_h:
+                y = max(8, entry.winfo_rooty() - popup_h - 8)
+            popup.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            self.pencere_ortala(popup, self.root)
+        popup.bind("<Escape>", lambda _event: popup.destroy())
+        popup.bind("<Left>", lambda _event: ay_degistir(-1))
+        popup.bind("<Right>", lambda _event: ay_degistir(1))
+        popup.grab_set()
 
     def tarih_secici_ac(self, entry):
+        try:
+            return self._tarih_secici_modern_ac(entry)
+        except Exception as hata:
+            print(f"Tarih seçici modern açılamadı: {hata}")
+            return self._tarih_secici_klasik_ac(entry)
+
+    def _tarih_secici_klasik_ac(self, entry):
         try:
             secili = datetime.strptime(entry.get().strip(), "%d/%m/%Y")
         except (ValueError, TypeError):
@@ -4228,7 +4525,7 @@ class HayvanTakipSistemi:
 
         def header_aksiyon_yerlestir(event=None):
             try:
-                genis_ekran = self.root.winfo_width() >= 1450
+                genis_ekran = self.root.state() == "zoomed" or self.root.winfo_width() >= 1450
                 if genis_ekran:
                     if not self.header_action_group.winfo_ismapped():
                         self.header_action_group.pack(side='right', fill='y', padx=(8, 14), pady=17)
@@ -4871,8 +5168,7 @@ class HayvanTakipSistemi:
 
         # --- Row 1 ---
         self.dogum_tarihi_entry = self.modern_form_satir(form_frame, "Doğum Tarihi (GG/AA/YYYY)", ttk.Entry, row=1, col=0, font=('Segoe UI', 11), style='TEntry')
-        self.dogum_tarihi_entry.bind('<KeyRelease>', self.tarih_formatlama)
-        self.tarih_secici_ekle(self.dogum_tarihi_entry)
+        self.dogum_tarihi_entry = self.tarih_secici_ekle(self.dogum_tarihi_entry)
         self.cins_combo = self.modern_form_satir(form_frame, "Cinsi", ttk.Combobox, row=1, col=1, values=["Dişi Buzağı", "Erkek Buzağı", "Dana", "Düve", "Sağmal İnek", "Kuru İnek"], font=('Segoe UI', 11), style='TCombobox')
         self.dogum_tarihi_entry.master.grid_configure(pady=6)
         self.cins_combo.master.grid_configure(pady=6)
@@ -4993,8 +5289,7 @@ class HayvanTakipSistemi:
 
         self.laktasyon_no_entry = self.modern_form_satir(self.laktasyon_container, "Laktasyon Numarası", ttk.Entry, row=0, col=0, font=('Segoe UI', 11), style='TEntry')
         self.son_dogum_tarihi_entry = self.modern_form_satir(self.laktasyon_container, "Son Doğum Tarihi", ttk.Entry, row=0, col=1, font=('Segoe UI', 11), style='TEntry')
-        self.son_dogum_tarihi_entry.bind('<KeyRelease>', self.tarih_formatlama)
-        self.tarih_secici_ekle(self.son_dogum_tarihi_entry)
+        self.son_dogum_tarihi_entry = self.tarih_secici_ekle(self.son_dogum_tarihi_entry)
 
         self.laktasyon_container.grid_remove() # Başlangıçta gizli
 
@@ -5100,8 +5395,7 @@ class HayvanTakipSistemi:
         
         self.tohumlama_tarih_entry = self.modern_form_satir(form_frame, "Tohumlama Tarihi (GG/AA/YYYY)", ttk.Entry, row=1, col=1, font=('Segoe UI', 11), style='TEntry')
         self.tohumlama_tarih_entry.insert(0, datetime.now().strftime("%d/%m/%Y"))
-        self.tohumlama_tarih_entry.bind('<KeyRelease>', self.tarih_formatlama)
-        self.tarih_secici_ekle(self.tohumlama_tarih_entry)
+        self.tohumlama_tarih_entry = self.tarih_secici_ekle(self.tohumlama_tarih_entry)
 
         # Buton Container
         btn_frame = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
