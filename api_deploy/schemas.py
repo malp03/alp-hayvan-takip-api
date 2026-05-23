@@ -258,6 +258,14 @@ class HayvanResponse(HayvanBase):
     asi_prosedurler: List[AsiProsedurResponse] = Field(default_factory=list)
 
 
+class HayvanAramaResponse(AlpModel):
+    ref: str
+    kaynak: str = "normal"
+    eslesme_sayisi: int
+    tekil: bool
+    hayvanlar: List[HayvanResponse] = Field(default_factory=list)
+
+
 class UyariResponse(AlpModel):
     hayvan_id: str
     kupe_no: str
