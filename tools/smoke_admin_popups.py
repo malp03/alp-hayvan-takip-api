@@ -53,6 +53,7 @@ def main():
     app = appmod.HayvanTakipSistemi()
     try:
         app.root.withdraw()
+        app.api_kullanici = {"rol": "admin", "kullanici_adi": "admin"}
         app.online_islem_gerekli = lambda *args, **kwargs: True
         app.api_ciftlikleri_yukle = lambda: [
             {"id": "c1", "ad": "Sametin Çiftliği", "aktif": True, "aciklama": "Ana deneme çiftliği"},
@@ -62,7 +63,17 @@ def main():
             {"id": "u1", "kullanici_adi": "admin", "rol": "admin", "aktif": True, "ciftlik": None, "ciftlik_id": None},
             {"id": "u2", "kullanici_adi": "samet", "rol": "ciftlik", "aktif": True, "ciftlik": {"ad": "Sametin Çiftliği"}, "ciftlik_id": "c1"},
         ]
-        app.api_istek = lambda *args, **kwargs: []
+        def fake_api_istek(method, path, *args, **kwargs):
+            if path == "/api/sistem-durumu":
+                return {
+                    "database": {"backend": "sqlite", "boyut_mb": 0.2, "limit_mb": 500, "kullanim_yuzde": 0.1},
+                    "storage": {"aktif": False, "bucket": "animal-photos", "limit_mb": 1024, "tahmini_foto_kapasitesi": 5000},
+                    "kayit_sayilari": {"ciftlik": 2, "kullanici": 2, "hayvan": 3, "aktif_hayvan": 2, "arsivli_hayvan": 1},
+                    "fotograflar": {"fotografli_hayvan": 1, "storage_url_adet": 0, "database_base64_adet": 1, "database_base64_mb": 0.1},
+                }
+            return []
+
+        app.api_istek = fake_api_istek
 
         def closer():
             close_toplevels(app.root)
@@ -71,6 +82,7 @@ def main():
         app.root.after(400, closer)
         app.admin_ciftlik_yonetim_penceresi()
         app.admin_kullanici_yonetim_penceresi()
+        app.admin_sistem_durumu_penceresi()
         print(f"Admin popup smoke OK: {tmp}")
         return 0
     finally:

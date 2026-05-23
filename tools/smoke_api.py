@@ -251,6 +251,11 @@ def main():
         _, history = request(base_url, "GET", "/api/islem-gecmisi", token=farm_token, expected=200)
         assert any(item.get("hedef_id") == "api-smoke-h1" for item in history), history
 
+        _, system_status = request(base_url, "GET", "/api/sistem-durumu", token=admin_token, expected=200)
+        assert system_status["kayit_sayilari"]["hayvan"] >= 2, system_status
+        assert system_status["storage"]["aktif"] is False, system_status
+        assert system_status["fotograflar"]["database_base64_adet"] >= 1, system_status
+
         request(base_url, "DELETE", f"/api/ciftlikler/{farm_id}", token=admin_token, expected=200)
         expect_http_error(
             base_url,
