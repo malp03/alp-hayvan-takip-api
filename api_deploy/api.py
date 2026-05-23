@@ -8,11 +8,14 @@ import re
 import secrets
 import time
 from typing import Any, Dict, Iterable, List, Optional
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import or_
+from sqlalchemy import or_, text as sql_text
 from sqlalchemy.orm import Session
 import uvicorn
 
@@ -57,6 +60,12 @@ DEFAULT_CIFTLIK_ADI = os.getenv("ALP_DEFAULT_CIFTLIK_ADI", "Varsayılan Çiftlik
 AUTH_SECRET = os.getenv("ALP_AUTH_SECRET", "alp-ziraat-dev-secret-change-me")
 TOKEN_TTL_SECONDS = int(os.getenv("ALP_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 DEVICE_TOKEN_TTL_SECONDS = int(os.getenv("ALP_DEVICE_TOKEN_TTL_SECONDS", str(90 * 24 * 60 * 60)))
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or ""
+ALP_PHOTO_BUCKET = os.getenv("ALP_PHOTO_BUCKET", "animal-photos").strip() or "animal-photos"
+ALP_DB_QUOTA_MB = float(os.getenv("ALP_DB_QUOTA_MB", "500"))
+ALP_STORAGE_QUOTA_MB = float(os.getenv("ALP_STORAGE_QUOTA_MB", "1024"))
+ALP_MAX_PHOTOS_PER_ANIMAL = 3
 
 
 def simdi() -> str:
@@ -338,6 +347,181 @@ def hayvan_arama_eslesir(hayvan: models.Hayvan, arama: Any, *, kaynak: str = "no
     return False
 
 
+def foto_url_mu(deger: Any) -> bool:
+    metin_deger = metin(deger)
+    return metin_deger.startswith("http://") or metin_deger.startswith("https://")
+
+
+def storage_aktif_mi() -> bool:
+    ayar = os.getenv("ALP_PHOTO_STORAGE_ENABLED", "auto").strip().lower()
+    if ayar in {"0", "false", "hayir", "hayır", "kapali", "kapalı", "off"}:
+        return False
+    aktif = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and ALP_PHOTO_BUCKET)
+    if ayar in {"1", "true", "evet", "aktif", "on"} and not aktif:
+        raise HTTPException(
+            status_code=500,
+            detail="Foto storage aktif istendi ama SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY veya ALP_PHOTO_BUCKET eksik.",
+        )
+    return aktif
+
+
+def foto_data_ayristir(foto: str) -> tuple[str, bytes]:
+    raw = metin(foto)
+    mime = "image/jpeg"
+    if raw.startswith("data:") and "," in raw:
+        header, raw = raw.split(",", 1)
+        if ";" in header:
+            mime = header[5:].split(";", 1)[0] or mime
+    try:
+        return mime, base64.b64decode(raw, validate=False)
+    except Exception as hata:
+        raise HTTPException(status_code=400, detail="Fotoğraf verisi okunamadı.") from hata
+
+
+def foto_base64_boyutu(foto: Any) -> int:
+    if not foto or foto_url_mu(foto):
+        return 0
+    try:
+        _, data = foto_data_ayristir(str(foto))
+        return len(data)
+    except HTTPException:
+        return 0
+
+
+def foto_referanslarini_topla(veri: Dict[str, Any]) -> tuple[List[str], List[str]]:
+    urls: List[str] = []
+    datas: List[str] = []
+
+    def ekle(foto: Any) -> None:
+        deger = metin(foto)
+        if not deger:
+            return
+        hedef = urls if foto_url_mu(deger) else datas
+        if deger not in hedef:
+            hedef.append(deger)
+
+    for alan in ("foto_urls", "foto_url", "foto_datas", "foto_data"):
+        deger = veri.get(alan)
+        if isinstance(deger, list):
+            for foto in deger:
+                ekle(foto)
+        else:
+            ekle(deger)
+    return urls[:ALP_MAX_PHOTOS_PER_ANIMAL], datas[:ALP_MAX_PHOTOS_PER_ANIMAL]
+
+
+def foto_alanlarini_normalize_et(veri: Dict[str, Any]) -> Dict[str, Any]:
+    urls, datas = foto_referanslarini_topla(veri)
+    veri["foto_urls"] = urls[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    veri["foto_url"] = veri["foto_urls"][0] if veri["foto_urls"] else None
+    veri["foto_datas"] = datas[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    veri["foto_data"] = veri["foto_datas"][0] if veri["foto_datas"] else None
+    return veri
+
+
+def storage_public_url(path: str, version_hash: str) -> str:
+    bucket = urllib.parse.quote(ALP_PHOTO_BUCKET, safe="")
+    quoted_path = urllib.parse.quote(path, safe="/")
+    return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{quoted_path}?v={version_hash[:12]}"
+
+
+def storage_foto_yukle(veri: Dict[str, Any], foto: str, index: int) -> str:
+    mime, data = foto_data_ayristir(foto)
+    if not data:
+        raise HTTPException(status_code=400, detail="Boş fotoğraf yüklenemez.")
+    if len(data) > 3 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Fotoğraf çok büyük. Lütfen daha küçük bir fotoğraf seçin.")
+
+    uzanti = "jpg"
+    if "png" in mime:
+        uzanti = "png"
+    elif "webp" in mime:
+        uzanti = "webp"
+    version_hash = hashlib.sha256(data).hexdigest()
+    ciftlik_id = kupe_arama_temizle(veri.get("ciftlik_id")) or "genel"
+    hayvan_id = kupe_arama_temizle(veri.get("id")) or yeni_id(12)
+    path = f"{ciftlik_id}/{hayvan_id}/foto-{index}.{uzanti}"
+    bucket = urllib.parse.quote(ALP_PHOTO_BUCKET, safe="")
+    quoted_path = urllib.parse.quote(path, safe="/")
+    upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{quoted_path}"
+    request = urllib.request.Request(
+        upload_url,
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Content-Type": mime,
+            "Cache-Control": "3600",
+            "x-upsert": "true",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if response.status >= 400:
+                raise HTTPException(status_code=502, detail="Fotoğraf storage yüklemesi başarısız oldu.")
+    except urllib.error.HTTPError as hata:
+        detay = hata.read().decode("utf-8", errors="ignore")[:300]
+        raise HTTPException(status_code=502, detail=f"Fotoğraf storage yüklemesi başarısız oldu: {detay}") from hata
+    except urllib.error.URLError as hata:
+        raise HTTPException(status_code=502, detail=f"Storage bağlantısı kurulamadı: {hata.reason}") from hata
+    return storage_public_url(path, version_hash)
+
+
+def fotograflari_storagea_tasi(veri: Dict[str, Any]) -> Dict[str, Any]:
+    veri = dict(veri)
+    urls, datas = foto_referanslarini_topla(veri)
+    if storage_aktif_mi() and datas:
+        kalan_slot = ALP_MAX_PHOTOS_PER_ANIMAL - len(urls)
+        for index, foto in enumerate(datas[:kalan_slot], start=len(urls) + 1):
+            yuklenen_url = storage_foto_yukle(veri, foto, index)
+            if yuklenen_url not in urls:
+                urls.append(yuklenen_url)
+        datas = []
+    veri["foto_urls"] = urls[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    veri["foto_url"] = veri["foto_urls"][0] if veri["foto_urls"] else None
+    veri["foto_datas"] = datas[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    veri["foto_data"] = veri["foto_datas"][0] if veri["foto_datas"] else None
+    return veri
+
+
+def veri_json_fotograf_istatistikleri(db: Session) -> Dict[str, Any]:
+    database_base64_adet = 0
+    storage_url_adet = 0
+    tahmini_base64_bytes = 0
+    foto_hayvan_adet = 0
+    for satir in db.query(models.Hayvan.veri_json).all():
+        try:
+            veri = json.loads(satir[0] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        urls, datas = foto_referanslarini_topla(veri if isinstance(veri, dict) else {})
+        if urls or datas:
+            foto_hayvan_adet += 1
+        storage_url_adet += len(urls)
+        database_base64_adet += len(datas)
+        tahmini_base64_bytes += sum(foto_base64_boyutu(foto) for foto in datas)
+    return {
+        "fotografli_hayvan": foto_hayvan_adet,
+        "storage_url_adet": storage_url_adet,
+        "database_base64_adet": database_base64_adet,
+        "database_base64_mb": round(tahmini_base64_bytes / (1024 * 1024), 2),
+    }
+
+
+def database_boyutu_bytes(db: Session) -> Optional[int]:
+    try:
+        backend = engine.url.get_backend_name()
+        if backend.startswith("sqlite"):
+            path = engine.url.database
+            if path and os.path.exists(path):
+                return os.path.getsize(path)
+            return None
+        return int(db.execute(sql_text("select pg_database_size(current_database())")).scalar() or 0)
+    except Exception:
+        return None
+
+
 def parse_tarih(deger: Optional[str], alan: str, *, zorunlu: bool = False) -> Optional[datetime]:
     deger = metin(deger)
     if not deger:
@@ -539,16 +723,7 @@ def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -
     sonuc["arsiv_tarihi"] = bos_yoksa_none(sonuc.get("arsiv_tarihi"))
     if sonuc["arsiv_tarihi"]:
         parse_tarih(sonuc["arsiv_tarihi"], "Arşiv tarihi")
-    sonuc["foto_data"] = bos_yoksa_none(sonuc.get("foto_data"))
-    foto_datas = sonuc.get("foto_datas") or []
-    if not isinstance(foto_datas, list):
-        foto_datas = []
-    foto_datas = [foto for foto in foto_datas if foto]
-    if sonuc["foto_data"] and sonuc["foto_data"] not in foto_datas:
-        foto_datas.insert(0, sonuc["foto_data"])
-    sonuc["foto_datas"] = foto_datas[:3]
-    sonuc["foto_data"] = sonuc["foto_datas"][0] if sonuc["foto_datas"] else None
-    sonuc["foto_url"] = bos_yoksa_none(sonuc.get("foto_url"))
+    foto_alanlarini_normalize_et(sonuc)
     for alan, etiket in [
         ("dogum_tarihi", "Doğum tarihi"),
         ("gebelik_tarihi", "Gebelik tarihi"),
@@ -660,6 +835,7 @@ def db_hayvandan_payload(h: models.Hayvan) -> Dict[str, Any]:
 
 def db_hayvana_yaz(db: Session, db_hayvan: models.Hayvan, veri: Dict[str, Any]) -> models.Hayvan:
     veri = normalize_hayvan(veri, hayvan_id=db_hayvan.id)
+    veri = normalize_hayvan(fotograflari_storagea_tasi(veri), hayvan_id=db_hayvan.id)
     yas_gun = int(veri.get("yas_gun") or 0)
     kesim_bilgisi = veri.get("kesim_bilgisi") or {}
 
@@ -1796,6 +1972,64 @@ def get_rapor_ozet(
         "kesildi": sum(1 for h in hayvanlar if h.get("kesildi")),
         "cins_dagilimi": cins_dagilimi,
         "acik_uyari": len(uyarilar),
+    }
+
+
+@app.get("/api/sistem-durumu", response_model=schemas.SistemDurumuResponse)
+def get_sistem_durumu(
+    db: Session = Depends(get_db),
+    _: models.Kullanici = Depends(require_admin),
+):
+    db_bytes = database_boyutu_bytes(db)
+    db_mb = round((db_bytes or 0) / (1024 * 1024), 2) if db_bytes is not None else None
+    db_yuzde = round((db_mb / ALP_DB_QUOTA_MB) * 100, 1) if db_mb is not None and ALP_DB_QUOTA_MB else None
+    toplam_hayvan = db.query(models.Hayvan).count()
+    aktif_hayvan = (
+        db.query(models.Hayvan)
+        .filter(
+            models.Hayvan.arsivli.is_(False),
+            models.Hayvan.olu.is_(False),
+            models.Hayvan.kesildi.is_(False),
+        )
+        .count()
+    )
+    foto_istatistik = veri_json_fotograf_istatistikleri(db)
+    storage_aktif = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and ALP_PHOTO_BUCKET)
+    tahmini_foto_adet = 0
+    ortalama_mb = 0.18
+    if ALP_STORAGE_QUOTA_MB:
+        tahmini_foto_adet = int(ALP_STORAGE_QUOTA_MB / ortalama_mb)
+    return {
+        "olusturma_zamani": simdi(),
+        "database": {
+            "backend": engine.url.get_backend_name(),
+            "boyut_bytes": db_bytes,
+            "boyut_mb": db_mb,
+            "limit_mb": ALP_DB_QUOTA_MB,
+            "kullanim_yuzde": db_yuzde,
+        },
+        "storage": {
+            "aktif": storage_aktif,
+            "bucket": ALP_PHOTO_BUCKET,
+            "limit_mb": ALP_STORAGE_QUOTA_MB,
+            "tahmini_foto_kapasitesi": tahmini_foto_adet,
+            "not": "Kapasite tahmini 180 KB ortalama sıkıştırılmış fotoğrafa göre hesaplanır.",
+        },
+        "kayit_sayilari": {
+            "ciftlik": db.query(models.Ciftlik).count(),
+            "kullanici": db.query(models.Kullanici).count(),
+            "hayvan": toplam_hayvan,
+            "aktif_hayvan": aktif_hayvan,
+            "arsivli_hayvan": db.query(models.Hayvan).filter(models.Hayvan.arsivli.is_(True)).count(),
+            "tohumlama": db.query(models.Tohumlama).count(),
+            "asi_prosedur": db.query(models.AsiProsedur).count(),
+            "islem_gecmisi": db.query(models.IslemGecmisi).count(),
+        },
+        "fotograflar": foto_istatistik,
+        "limitler": {
+            "hayvan_basi_maks_fotograf": ALP_MAX_PHOTOS_PER_ANIMAL,
+            "storage_env": "SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + ALP_PHOTO_BUCKET",
+        },
     }
 
 

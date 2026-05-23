@@ -204,6 +204,7 @@ class HayvanBase(AlpModel):
     foto_data: Optional[str] = None
     foto_datas: List[str] = Field(default_factory=list)
     foto_url: Optional[str] = None
+    foto_urls: List[str] = Field(default_factory=list)
     son_guncelleme: Optional[str] = None
     tohumlamalar: List[TohumlamaCreate] = Field(default_factory=list)
     dogumlar: List[DogumCreate] = Field(default_factory=list)
@@ -245,6 +246,7 @@ class HayvanUpdate(AlpModel):
     foto_data: Optional[str] = None
     foto_datas: Optional[List[str]] = None
     foto_url: Optional[str] = None
+    foto_urls: Optional[List[str]] = None
     son_guncelleme: Optional[str] = None
     tohumlamalar: Optional[List[TohumlamaCreate]] = None
     dogumlar: Optional[List[DogumCreate]] = None
@@ -264,6 +266,15 @@ class HayvanAramaResponse(AlpModel):
     eslesme_sayisi: int
     tekil: bool
     hayvanlar: List[HayvanResponse] = Field(default_factory=list)
+
+
+class SistemDurumuResponse(AlpModel):
+    olusturma_zamani: str
+    database: Dict[str, Any] = Field(default_factory=dict)
+    storage: Dict[str, Any] = Field(default_factory=dict)
+    kayit_sayilari: Dict[str, Any] = Field(default_factory=dict)
+    fotograflar: Dict[str, Any] = Field(default_factory=dict)
+    limitler: Dict[str, Any] = Field(default_factory=dict)
 
 
 class UyariResponse(AlpModel):
