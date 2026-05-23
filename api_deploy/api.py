@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -60,6 +61,21 @@ DEFAULT_CIFTLIK_ADI = os.getenv("ALP_DEFAULT_CIFTLIK_ADI", "Varsayılan Çiftlik
 AUTH_SECRET = os.getenv("ALP_AUTH_SECRET", "alp-ziraat-dev-secret-change-me")
 TOKEN_TTL_SECONDS = int(os.getenv("ALP_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 DEVICE_TOKEN_TTL_SECONDS = int(os.getenv("ALP_DEVICE_TOKEN_TTL_SECONDS", str(90 * 24 * 60 * 60)))
+APP_TIMEZONE_NAME = os.getenv("ALP_TIMEZONE", "Europe/Istanbul")
+try:
+    APP_TIMEZONE = ZoneInfo(APP_TIMEZONE_NAME)
+except Exception:
+    APP_TIMEZONE = None
+
+
+def simdi_dt() -> datetime:
+    if APP_TIMEZONE is None:
+        return datetime.now()
+    return datetime.now(APP_TIMEZONE).replace(tzinfo=None)
+
+
+def bugun_tarih():
+    return simdi_dt().date()
 
 
 def supabase_base_url(url: str) -> str:
@@ -86,11 +102,11 @@ ALP_MAX_PHOTOS_PER_ANIMAL = 3
 
 
 def simdi() -> str:
-    return datetime.now().strftime(ZAMAN_FORMATI)
+    return simdi_dt().strftime(ZAMAN_FORMATI)
 
 
 def bugun() -> str:
-    return datetime.now().strftime(TARIH_FORMATI)
+    return simdi_dt().strftime(TARIH_FORMATI)
 
 
 def yeni_id(uzunluk: Optional[int] = None) -> str:
@@ -565,7 +581,7 @@ def parse_tarih_sessiz(deger: Optional[str]) -> Optional[datetime]:
 
 def tarih_gelecekte_olamaz(deger: Optional[str], alan: str) -> Optional[datetime]:
     tarih = parse_tarih(deger, alan)
-    if tarih and tarih.date() > datetime.now().date():
+    if tarih and tarih.date() > bugun_tarih():
         raise HTTPException(status_code=400, detail=f"{alan} gelecekte olamaz.")
     return tarih
 
@@ -609,7 +625,7 @@ def son_silme_zamani(db: Session, hayvan_id: str) -> Optional[datetime]:
 def yas_gun_hesapla(veri: Dict[str, Any]) -> int:
     dogum_tarihi = parse_tarih(veri.get("dogum_tarihi"), "Doğum tarihi")
     if dogum_tarihi:
-        return max((datetime.now() - dogum_tarihi).days, 0)
+        return max((simdi_dt() - dogum_tarihi).days, 0)
     if veri.get("yas_gun") is not None:
         try:
             return max(int(veri.get("yas_gun") or 0), 0)
@@ -626,7 +642,7 @@ def normalize_tohumlama(veri: Dict[str, Any], *, yeni: bool = False) -> Dict[str
         sonuc["id"] = sonuc.get("id") or yeni_id(12)
     sonuc["tarih"] = metin(sonuc.get("tarih"))
     tohumlama_tarihi = parse_tarih(sonuc.get("tarih"), "Tohumlama tarihi", zorunlu=True)
-    if tohumlama_tarihi and tohumlama_tarihi.date() > datetime.now().date():
+    if tohumlama_tarihi and tohumlama_tarihi.date() > bugun_tarih():
         raise HTTPException(status_code=400, detail="Tohumlama tarihi gelecekte olamaz.")
     sonuc["sekil"] = metin(sonuc.get("sekil")) or None
     sonuc["suni_isim"] = metin(sonuc.get("suni_isim")) or ""
@@ -647,7 +663,7 @@ def normalize_asi(veri: Dict[str, Any], *, yeni: bool = False) -> Dict[str, Any]
     sonuc["tarih"] = metin(sonuc.get("tarih"))
     parse_tarih(sonuc.get("tarih"), "Aşı/prosedür tarihi", zorunlu=True)
     asi_tarihi = parse_tarih_sessiz(sonuc.get("tarih"))
-    if asi_tarihi and asi_tarihi.date() > datetime.now().date():
+    if asi_tarihi and asi_tarihi.date() > bugun_tarih():
         raise HTTPException(status_code=400, detail="Aşı/prosedür uygulama tarihi gelecekte olamaz.")
     if sonuc.get("sonraki_tarih"):
         parse_tarih(sonuc.get("sonraki_tarih"), "Sonraki tarih")
@@ -663,7 +679,7 @@ def normalize_dogum(veri: Dict[str, Any], *, yeni: bool = False) -> Dict[str, An
     sonuc["tarih"] = metin(sonuc.get("tarih"))
     parse_tarih(sonuc.get("tarih"), "Doğum tarihi", zorunlu=True)
     dogum_tarihi = parse_tarih_sessiz(sonuc.get("tarih"))
-    if dogum_tarihi and dogum_tarihi.date() > datetime.now().date():
+    if dogum_tarihi and dogum_tarihi.date() > bugun_tarih():
         raise HTTPException(status_code=400, detail="Doğum tarihi gelecekte olamaz.")
     if sonuc.get("laktasyon_bitis_tarihi"):
         parse_tarih(sonuc.get("laktasyon_bitis_tarihi"), "Laktasyon bitiş tarihi")
@@ -748,10 +764,10 @@ def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -
         ("arsiv_tarihi", "Arşiv tarihi"),
     ]:
         tarih = parse_tarih_sessiz(sonuc.get(alan))
-        if tarih and tarih.date() > datetime.now().date():
+        if tarih and tarih.date() > bugun_tarih():
             raise HTTPException(status_code=400, detail=f"{etiket} gelecekte olamaz.")
     kesim_tarihi = parse_tarih_sessiz((sonuc.get("kesim_bilgisi") or {}).get("tarih"))
-    if kesim_tarihi and kesim_tarihi.date() > datetime.now().date():
+    if kesim_tarihi and kesim_tarihi.date() > bugun_tarih():
         raise HTTPException(status_code=400, detail="Kesim tarihi gelecekte olamaz.")
     sonuc["son_guncelleme"] = metin(sonuc.get("son_guncelleme")) or simdi()
     tohumlamalar = []
@@ -1088,7 +1104,7 @@ def dogum_uyarilari(veri: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
     gebelik_tarihi = parse_tarih_sessiz(veri.get("gebelik_tarihi"))
     if not gebelik_tarihi:
         return []
-    kalan = (gebelik_tarihi + timedelta(days=283) - datetime.now()).days
+    kalan = (gebelik_tarihi + timedelta(days=283) - simdi_dt()).days
     if kalan > 60:
         return []
     kupe = veri.get("ciftlik_kupe_no") or veri.get("resmi_kupe_no") or veri.get("id")
@@ -1126,7 +1142,7 @@ def uyarilari_hesapla(hayvanlar: Iterable[Dict[str, Any]]) -> List[Dict[str, Any
                 t_tarihi = parse_tarih_sessiz(son.get("tarih"))
                 if t_tarihi:
                     kontrol = t_tarihi + timedelta(days=21)
-                    kalan = (kontrol - datetime.now()).days
+                    kalan = (kontrol - simdi_dt()).days
                     if kalan <= 7:
                         uyarilar.append(
                             {
@@ -1143,7 +1159,7 @@ def uyarilari_hesapla(hayvanlar: Iterable[Dict[str, Any]]) -> List[Dict[str, Any
             sonraki = parse_tarih_sessiz(prosedur.get("sonraki_tarih"))
             if not sonraki:
                 continue
-            kalan = (sonraki - datetime.now()).days
+            kalan = (sonraki - simdi_dt()).days
             if kalan <= 7:
                 uyarilar.append(
                     {
