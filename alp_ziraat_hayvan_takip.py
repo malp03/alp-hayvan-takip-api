@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.5"
+APP_VERSION = "1.9.6"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
@@ -1796,7 +1796,7 @@ class HayvanTakipSistemi:
         if not os.path.exists(dosya_yolu):
             return varsayilan
         try:
-            with open(dosya_yolu, 'r', encoding='utf-8') as f:
+            with open(dosya_yolu, 'r', encoding='utf-8-sig') as f:
                 return json.load(f)
         except json.JSONDecodeError as e:
             zaman = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2196,9 +2196,18 @@ class HayvanTakipSistemi:
             try:
                 kayit = self.api_istek("POST", "/api/hayvanlar", payload)
             except ApiHatasi as e:
-                if e.status == 409 and "eski offline" in str(e).lower():
+                hata_metni = str(e).lower()
+                if e.status == 409 and "eski offline" in hata_metni:
                     return h_id, None
-                if e.status not in (400, 404, 409):
+
+                # Yeni kayitta 404 gibi gercek POST hatalarini PATCH ile maskelemeyelim.
+                # Sadece ayni id zaten sunucuda varsa mevcut kaydi guncellemeyi dene.
+                ayni_id_cakismasi = (
+                    e.status in (400, 409)
+                    and "id" in hata_metni
+                    and ("zaten" in hata_metni or "kayit" in hata_metni or "kayıt" in hata_metni)
+                )
+                if not ayni_id_cakismasi:
                     raise
                 kayit = self.api_istek("PATCH", f"/api/hayvanlar/{self.api_ref(h_id)}", payload)
 
@@ -2284,7 +2293,8 @@ class HayvanTakipSistemi:
         if not getattr(self, "api_token", None) or getattr(self, "api_offline_oturum", False):
             self.api_online_oturum_ac()
         if self.bekleyen_senkron_var() and not self.bekleyen_senkron_gonder(sessiz=True):
-            return False
+            hata = getattr(self, "_api_son_hata", None) or "Bekleyen offline degisiklikler senkronlanamadi."
+            raise ApiHatasi(hata)
         self.hayvanlar = self.api_hayvanlari_yukle()
         self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
         if hasattr(self, "notebook"):
@@ -3958,7 +3968,8 @@ class HayvanTakipSistemi:
         if self.offline_modda_mi():
             raise ApiHatasi("API offline modda; kayitlar yerel senkron kuyruguna alinacak.")
         if self.bekleyen_senkron_var() and not self.bekleyen_senkron_gonder(sessiz=True):
-            raise ApiHatasi("Bekleyen offline degisiklikler senkronlanamadi.")
+            hata = getattr(self, "_api_son_hata", None) or "Bekleyen offline degisiklikler senkronlanamadi."
+            raise ApiHatasi(f"Bekleyen offline degisiklikler senkronlanamadi.\n\nDetay: {hata}")
 
         onceki_idler = set(getattr(self, "_api_son_idler", set()))
         mevcut_idler = {str(h_id) for h_id in self.hayvanlar.keys()}
