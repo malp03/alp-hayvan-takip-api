@@ -60,7 +60,24 @@ DEFAULT_CIFTLIK_ADI = os.getenv("ALP_DEFAULT_CIFTLIK_ADI", "Varsayılan Çiftlik
 AUTH_SECRET = os.getenv("ALP_AUTH_SECRET", "alp-ziraat-dev-secret-change-me")
 TOKEN_TTL_SECONDS = int(os.getenv("ALP_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 DEVICE_TOKEN_TTL_SECONDS = int(os.getenv("ALP_DEVICE_TOKEN_TTL_SECONDS", str(90 * 24 * 60 * 60)))
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+
+
+def supabase_base_url(url: str) -> str:
+    url = str(url or "").strip().rstrip("/")
+    if not url:
+        return ""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme and parsed.netloc:
+        path = parsed.path.rstrip("/")
+        if "supabase.co" in parsed.netloc or path in {"/rest/v1", "/storage/v1", "/auth/v1", "/functions/v1"}:
+            return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    for suffix in ("/rest/v1", "/storage/v1", "/auth/v1", "/functions/v1"):
+        if url.endswith(suffix):
+            return url[: -len(suffix)].rstrip("/")
+    return url
+
+
+SUPABASE_URL = supabase_base_url(os.getenv("SUPABASE_URL", ""))
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or ""
 ALP_PHOTO_BUCKET = os.getenv("ALP_PHOTO_BUCKET", "animal-photos").strip() or "animal-photos"
 ALP_DB_QUOTA_MB = float(os.getenv("ALP_DB_QUOTA_MB", "500"))
