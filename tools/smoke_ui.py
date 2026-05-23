@@ -159,8 +159,8 @@ def main():
         app.hayvanlar = {}
         for entry in (app.resmi_kupe_no_entry, app.ciftlik_kupe_no_entry, app.dogum_tarihi_entry, app.anne_kupe_entry):
             entry.delete(0, tk.END)
-        app.resmi_kupe_no_entry.insert(0, "TR001")
-        app.ciftlik_kupe_no_entry.insert(0, "C001")
+        app.resmi_kupe_no_entry.insert(0, "TR987654321")
+        app.ciftlik_kupe_no_entry.insert(0, "CF99123456")
         app.dogum_tarihi_entry.insert(0, "01/01/2024")
         app.cins_combo.set("D\u00fcve")
         app.irk_combo.set("Simental")
@@ -183,12 +183,24 @@ def main():
         assert len(app.hayvanlar) == 1, app.hayvanlar
         created_id = next(iter(app.hayvanlar))
         created = app.hayvanlar[created_id]
-        assert created["resmi_kupe_no"] == "TR001"
-        assert created["ciftlik_kupe_no"] == "C001"
+        assert created["resmi_kupe_no"] == "TR987654321"
+        assert created["ciftlik_kupe_no"] == "CF99123456"
         assert created["irk"] == "Simental"
         assert len(created["foto_datas"]) == 3
         assert created["foto_data"] == SAMPLE_PHOTOS[0]
         assert getattr(app, "yeni_hayvan_foto_datas", []) == []
+
+        for arama in ("TR987654321", "CF99123456", "123456", "TR 9876", "TR 76543"):
+            app.filtre_combo.set("Aktif")
+            app.arama_entry.delete(0, tk.END)
+            app.arama_entry.insert(0, arama)
+            app.hayvan_listesini_guncelle()
+            assert len(app.hayvan_tree.get_children()) == 1, f"search failed: {arama}"
+        app.arama_entry.delete(0, tk.END)
+        app.arama_entry.insert(0, "ZZ 9876")
+        app.hayvan_listesini_guncelle()
+        assert len(app.hayvan_tree.get_children()) == 0, "wrong official tag abbreviation matched"
+        app.arama_entry.delete(0, tk.END)
 
         app.hayvanlar["arch"] = make_animal(
             id="arch",
@@ -214,7 +226,7 @@ def main():
         assert not app.hayvanlar["arch"].get("arsivli")
 
         app.tohumlama_ekranina_hayvanla_git(created_id)
-        assert app.tohumlama_hayvan_combo.get() == "C001", app.tohumlama_hayvan_combo.get()
+        assert app.tohumlama_hayvan_combo.get() == "CF99123456", app.tohumlama_hayvan_combo.get()
         assert app.tohumlama_tarih_entry.get()
 
         created.setdefault("tohumlamalar", []).append({

@@ -186,8 +186,8 @@ def main():
         animal_payload = {
             "id": "api-smoke-h1",
             "ciftlik_id": farm_id,
-            "resmi_kupe_no": "TRAPI001",
-            "ciftlik_kupe_no": "CAPI001",
+            "resmi_kupe_no": "TR987654321",
+            "ciftlik_kupe_no": "CAPI123456",
             "dogum_tarihi": "01/01/2024",
             "cins": "D\u00fcve",
             "irk": "Simental",
@@ -197,6 +197,17 @@ def main():
         _, animal = request(base_url, "POST", "/api/hayvanlar", animal_payload, token=farm_token, expected=201)
         assert animal["foto_data"] == animal_payload["foto_data"]
         assert animal["irk"] == "Simental", animal
+
+        _, normal_search = request(base_url, "GET", "/api/hayvanlar?q=TR%209876", token=farm_token, expected=200)
+        assert any(item["id"] == "api-smoke-h1" for item in normal_search), normal_search
+        _, last6_search = request(base_url, "GET", "/api/hayvanlar?q=123456", token=farm_token, expected=200)
+        assert any(item["id"] == "api-smoke-h1" for item in last6_search), last6_search
+        _, camera_search = request(base_url, "GET", "/api/hayvanlar/bul?ref=OCR-000123456&kaynak=kamera", token=farm_token, expected=200)
+        assert camera_search["tekil"] and camera_search["hayvanlar"][0]["id"] == "api-smoke-h1", camera_search
+        _, official_camera = request(base_url, "GET", "/api/hayvanlar/bul?ref=TR987654321&kaynak=kamera", token=farm_token, expected=200)
+        assert official_camera["tekil"] and official_camera["hayvanlar"][0]["id"] == "api-smoke-h1", official_camera
+        _, camera_abbr = request(base_url, "GET", "/api/hayvanlar/bul?ref=TR%209876&kaynak=kamera", token=farm_token, expected=200)
+        assert camera_abbr["eslesme_sayisi"] == 0, camera_abbr
 
         _, patched_animal = request(
             base_url,
