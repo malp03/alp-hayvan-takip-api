@@ -8,6 +8,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 
@@ -47,7 +48,40 @@ def expect_http_error(base_url, method, path, status_code, payload=None, token=N
         if f"returned {status_code}" in str(exc):
             return
         raise
-    raise AssertionError(f"{method} {path} should have returned {status_code}")
+        raise AssertionError(f"{method} {path} should have returned {status_code}")
+
+
+def multipart_request(base_url, path, files, fields=None, token=None, expected=None):
+    boundary = "----alp-smoke-boundary"
+    body = bytearray()
+    fields = fields or {}
+    for name, value in fields.items():
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        body.extend(str(value).encode("utf-8"))
+        body.extend(b"\r\n")
+    for field_name, filename, content_type, data in files:
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(
+            f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'.encode("utf-8")
+        )
+        body.extend(f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"))
+        body.extend(data)
+        body.extend(b"\r\n")
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(base_url + path, data=bytes(body), headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            payload = resp.read().decode("utf-8")
+            if expected is not None and resp.status != expected:
+                raise AssertionError(f"POST {path} returned {resp.status}: {payload}")
+            return resp.status, json.loads(payload) if payload else None
+    except urllib.error.HTTPError as exc:
+        payload = exc.read().decode("utf-8", errors="replace")
+        raise AssertionError(f"POST {path} returned {exc.code}: {payload}") from exc
 
 
 def wait_for_health(proc, base_url):
@@ -197,6 +231,30 @@ def main():
         _, animal = request(base_url, "POST", "/api/hayvanlar", animal_payload, token=farm_token, expected=201)
         assert animal["foto_data"] == animal_payload["foto_data"]
         assert animal["irk"] == "Simental", animal
+        tiny_png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04"
+            b"\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        _, photo_upload = multipart_request(
+            base_url,
+            "/api/hayvanlar/api-smoke-h1/fotograflar",
+            [
+                ("fotograflar", "smoke-1.png", "image/png", tiny_png),
+                ("fotograflar", "smoke-2.png", "image/png", tiny_png + b"2"),
+            ],
+            token=farm_token,
+            expected=200,
+        )
+        assert len(photo_upload.get("foto_datas") or []) == 3, photo_upload
+        _, photo_delete = request(
+            base_url,
+            "DELETE",
+            "/api/hayvanlar/api-smoke-h1/fotograflar/2",
+            token=farm_token,
+            expected=200,
+        )
+        assert len(photo_delete.get("foto_datas") or []) == 2, photo_delete
 
         _, normal_search = request(base_url, "GET", "/api/hayvanlar?q=TR%209876", token=farm_token, expected=200)
         assert any(item["id"] == "api-smoke-h1" for item in normal_search), normal_search
@@ -219,7 +277,7 @@ def main():
                 "gebe_mi": True,
                 "gebelik_tarihi": "01/02/2026",
                 "aktif_tohumlama_id": "smoke",
-                "son_guncelleme": "21/05/2026 01:11:00",
+                "son_guncelleme": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
             },
             token=farm_token,
             expected=200,
@@ -276,6 +334,12 @@ def main():
             expected=200,
         )
         assert remaining_animals == [], remaining_animals
+        _, reset = request(base_url, "POST", "/api/admin/test-verilerini-sifirla", token=admin_token, expected=200)
+        assert reset["status"] == "ok", reset
+        _, final_users = request(base_url, "GET", "/api/kullanicilar", token=admin_token, expected=200)
+        assert final_users and all(k["rol"] == "admin" for k in final_users), final_users
+        _, final_animals = request(base_url, "GET", "/api/hayvanlar?arsiv_dahil=true", token=admin_token, expected=200)
+        assert final_animals == [], final_animals
 
         print(f"API smoke OK: {base_url}")
         return 0
