@@ -203,6 +203,8 @@ class HayvanBase(AlpModel):
     arsiv_tarihi: Optional[str] = None
     foto_data: Optional[str] = None
     foto_datas: List[str] = Field(default_factory=list)
+    foto_path: Optional[str] = None
+    foto_paths: List[str] = Field(default_factory=list)
     foto_url: Optional[str] = None
     foto_urls: List[str] = Field(default_factory=list)
     son_guncelleme: Optional[str] = None
@@ -245,6 +247,8 @@ class HayvanUpdate(AlpModel):
     arsiv_tarihi: Optional[str] = None
     foto_data: Optional[str] = None
     foto_datas: Optional[List[str]] = None
+    foto_path: Optional[str] = None
+    foto_paths: Optional[List[str]] = None
     foto_url: Optional[str] = None
     foto_urls: Optional[List[str]] = None
     son_guncelleme: Optional[str] = None
