@@ -5,7 +5,9 @@ param(
 $ErrorActionPreference = "Stop"
 $appName = "ALP Ziraat Hayvan Takip"
 $exeName = "ALP_Ziraat_Hayvan_Takip.exe"
+$iconName = "alp_ziraat_logo_led.ico"
 $sourceExe = Join-Path $PSScriptRoot $exeName
+$sourceIcon = Join-Path $PSScriptRoot $iconName
 
 if (!(Test-Path $sourceExe)) {
     throw "Kurulum dosyasi bulunamadi: $sourceExe"
@@ -13,6 +15,9 @@ if (!(Test-Path $sourceExe)) {
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Copy-Item -Path $sourceExe -Destination (Join-Path $InstallDir $exeName) -Force
+if (Test-Path $sourceIcon) {
+    Copy-Item -Path $sourceIcon -Destination (Join-Path $InstallDir $iconName) -Force
+}
 
 $uninstallSource = Join-Path $PSScriptRoot "uninstall.ps1"
 if (Test-Path $uninstallSource) {
@@ -20,20 +25,25 @@ if (Test-Path $uninstallSource) {
 }
 
 $shell = New-Object -ComObject WScript.Shell
+$exePath = Join-Path $InstallDir $exeName
+$iconPath = Join-Path $InstallDir $iconName
+$shortcutIcon = if (Test-Path $iconPath) { "$iconPath,0" } else { "$exePath,0" }
 $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "$appName.lnk"
 $shortcut = $shell.CreateShortcut($desktopShortcut)
-$shortcut.TargetPath = Join-Path $InstallDir $exeName
+$shortcut.TargetPath = $exePath
 $shortcut.WorkingDirectory = $InstallDir
-$shortcut.IconLocation = (Join-Path $InstallDir $exeName) + ",0"
+$shortcut.IconLocation = $shortcutIcon
+$shortcut.Description = "ALP Ziraat Suru Takip Sistemi"
 $shortcut.Save()
 
 $startDir = Join-Path ([Environment]::GetFolderPath("Programs")) "ALP Ziraat"
 New-Item -ItemType Directory -Force -Path $startDir | Out-Null
 $startShortcut = Join-Path $startDir "$appName.lnk"
 $shortcut = $shell.CreateShortcut($startShortcut)
-$shortcut.TargetPath = Join-Path $InstallDir $exeName
+$shortcut.TargetPath = $exePath
 $shortcut.WorkingDirectory = $InstallDir
-$shortcut.IconLocation = (Join-Path $InstallDir $exeName) + ",0"
+$shortcut.IconLocation = $shortcutIcon
+$shortcut.Description = "ALP Ziraat Suru Takip Sistemi"
 $shortcut.Save()
 
 $uninstallShortcut = Join-Path $startDir "ALP Ziraat Kaldir.lnk"

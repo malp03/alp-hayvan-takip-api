@@ -9,6 +9,7 @@ from pathlib import Path
 
 APP_NAME = "ALP Ziraat Hayvan Takip"
 APP_EXE = "ALP_Ziraat_Hayvan_Takip.exe"
+APP_ICON = "alp_ziraat_logo_led.ico"
 INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Programs" / APP_NAME
 
 
@@ -28,18 +29,22 @@ def show_message(title: str, message: str, error: bool = False) -> None:
 
 def create_shortcuts() -> None:
     exe_path = INSTALL_DIR / APP_EXE
+    icon_path = INSTALL_DIR / APP_ICON
     uninstall_path = INSTALL_DIR / "uninstall.ps1"
     script = f"""
 $appName = {ps_quote(APP_NAME)}
 $installDir = {ps_quote(INSTALL_DIR)}
 $exePath = {ps_quote(exe_path)}
+$iconPath = {ps_quote(icon_path)}
 $uninstallPath = {ps_quote(uninstall_path)}
+$shortcutIcon = if (Test-Path $iconPath) {{ "$iconPath,0" }} else {{ "$exePath,0" }}
 $shell = New-Object -ComObject WScript.Shell
 $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "$appName.lnk"
 $shortcut = $shell.CreateShortcut($desktopShortcut)
 $shortcut.TargetPath = $exePath
 $shortcut.WorkingDirectory = $installDir
-$shortcut.IconLocation = "$exePath,0"
+$shortcut.IconLocation = $shortcutIcon
+$shortcut.Description = "ALP Ziraat Suru Takip Sistemi"
 $shortcut.Save()
 $startDir = Join-Path ([Environment]::GetFolderPath("Programs")) "ALP Ziraat"
 New-Item -ItemType Directory -Force -Path $startDir | Out-Null
@@ -47,7 +52,8 @@ $startShortcut = Join-Path $startDir "$appName.lnk"
 $shortcut = $shell.CreateShortcut($startShortcut)
 $shortcut.TargetPath = $exePath
 $shortcut.WorkingDirectory = $installDir
-$shortcut.IconLocation = "$exePath,0"
+$shortcut.IconLocation = $shortcutIcon
+$shortcut.Description = "ALP Ziraat Suru Takip Sistemi"
 $shortcut.Save()
 $uninstallShortcut = Join-Path $startDir "ALP Ziraat Kaldir.lnk"
 $shortcut = $shell.CreateShortcut($uninstallShortcut)
@@ -78,6 +84,7 @@ def wait_for_process(pid: int, timeout: int = 45) -> None:
 
 def install() -> None:
     source_exe = resource_path(APP_EXE)
+    source_icon = resource_path(APP_ICON)
     uninstall_script = resource_path("uninstall.ps1")
     uninstall_bat = resource_path("Kaldir.bat")
 
@@ -86,6 +93,8 @@ def install() -> None:
 
     INSTALL_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_exe, INSTALL_DIR / APP_EXE)
+    if source_icon.exists():
+        shutil.copy2(source_icon, INSTALL_DIR / APP_ICON)
 
     if uninstall_script.exists():
         shutil.copy2(uninstall_script, INSTALL_DIR / "uninstall.ps1")
