@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.8"
+APP_VERSION = "1.9.9"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
@@ -164,6 +164,9 @@ class HayvanTakipSistemi:
             self.yeni_hayvan_foto_datas = []
             self._foto_referanslari = []
             self._foto_url_cache = {}
+            self._foto_loading_urls = set()
+            self._foto_loading_callbacks = {}
+            self._foto_cache_lock = threading.Lock()
             self.admin_aktif_ciftlik_id = None
             self.admin_aktif_ciftlik_ad = None
             self._login_yeniden_iste = False
@@ -670,32 +673,189 @@ class HayvanTakipSistemi:
             return raw.strip("/")
         return None
 
-    def foto_referans_bytes(self, foto):
+    def foto_cache_identity(self, foto):
+        raw = str(foto or "").strip()
+        path = self.foto_storage_path_from_ref(raw)
+        if path:
+            return f"path:{path}"
+        return raw
+
+    def foto_cache_dosya_yolu(self, foto):
+        identity = self.foto_cache_identity(foto)
+        if not identity:
+            return None
+        cache_dir = getattr(self, "foto_cache_dir", None)
+        if not cache_dir:
+            cache_dir = os.path.join(getattr(self, "data_dir", os.getcwd()), "foto_onbellek")
+            self.foto_cache_dir = cache_dir
+        os.makedirs(cache_dir, exist_ok=True)
+        ad = hashlib.sha256(identity.encode("utf-8")).hexdigest() + ".jpg"
+        return os.path.join(cache_dir, ad)
+
+    def foto_cache_oku(self, foto):
+        yol = self.foto_cache_dosya_yolu(foto)
+        if not yol or not os.path.exists(yol):
+            return None
+        try:
+            if os.path.getsize(yol) > 6 * 1024 * 1024:
+                return None
+            with open(yol, "rb") as f:
+                return f.read()
+        except Exception:
+            return None
+
+    def foto_cache_yaz(self, foto, data):
+        if not data:
+            return
+        yol = self.foto_cache_dosya_yolu(foto)
+        if not yol:
+            return
+        try:
+            tmp = yol + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, yol)
+        except Exception:
+            pass
+
+    def foto_referans_bytes_cached(self, foto):
         if not foto:
             return None
         raw = str(foto).strip()
         try:
-            if self.foto_referansi_url_mu(raw):
+            identity = self.foto_cache_identity(raw)
+            storage_path = self.foto_storage_path_from_ref(raw)
+            if self.foto_referansi_url_mu(raw) or storage_path:
                 cache = getattr(self, "_foto_url_cache", {})
-                if raw in cache:
-                    return cache[raw]
-                req = urllib.request.Request(raw, headers={"User-Agent": "ALP-Ziraat-Hayvan-Takip/1.0"})
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    data = resp.read(5 * 1024 * 1024)
-                cache[raw] = data
-                self._foto_url_cache = cache
-                return data
+                with getattr(self, "_foto_cache_lock", threading.Lock()):
+                    if identity in cache:
+                        return cache[identity]
+                    if raw in cache:
+                        return cache[raw]
+                data = self.foto_cache_oku(raw)
+                if data:
+                    with getattr(self, "_foto_cache_lock", threading.Lock()):
+                        cache[identity] = data
+                        self._foto_url_cache = cache
+                    return data
+                return None
             if "," in raw:
                 raw = raw.split(",", 1)[1]
             return base64.b64decode(raw)
         except Exception:
             return None
 
+    def foto_referans_bytes(self, foto):
+        if not foto:
+            return None
+        raw = str(foto).strip()
+        try:
+            cached = self.foto_referans_bytes_cached(raw)
+            if cached:
+                return cached
+            if self.foto_referansi_url_mu(raw):
+                req = urllib.request.Request(raw, headers={"User-Agent": "ALP-Ziraat-Hayvan-Takip/1.0"})
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    data = resp.read(5 * 1024 * 1024)
+                identity = self.foto_cache_identity(raw)
+                cache = getattr(self, "_foto_url_cache", {})
+                with getattr(self, "_foto_cache_lock", threading.Lock()):
+                    cache[identity] = data
+                    self._foto_url_cache = cache
+                self.foto_cache_yaz(raw, data)
+                return data
+            return None
+        except Exception:
+            return None
+
+    def foto_url_arka_planda_yukle(self, foto, tamam_callback=None):
+        raw = str(foto or "").strip()
+        if not raw:
+            return
+        cached = self.foto_referans_bytes_cached(raw)
+        if cached:
+            if tamam_callback:
+                try:
+                    self.root.after(0, lambda: tamam_callback(cached))
+                except tk.TclError:
+                    pass
+            return
+        if not self.foto_referansi_url_mu(raw):
+            if tamam_callback:
+                try:
+                    self.root.after(0, lambda: tamam_callback(None))
+                except tk.TclError:
+                    pass
+            return
+
+        identity = self.foto_cache_identity(raw)
+        lock = getattr(self, "_foto_cache_lock", threading.Lock())
+        with lock:
+            loading = getattr(self, "_foto_loading_urls", set())
+            callbacks = getattr(self, "_foto_loading_callbacks", {})
+            if identity in loading:
+                if tamam_callback:
+                    callbacks.setdefault(identity, []).append(tamam_callback)
+                    self._foto_loading_callbacks = callbacks
+                return
+            loading.add(identity)
+            self._foto_loading_urls = loading
+            if tamam_callback:
+                callbacks.setdefault(identity, []).append(tamam_callback)
+                self._foto_loading_callbacks = callbacks
+
+        def worker():
+            data = None
+            try:
+                req = urllib.request.Request(raw, headers={"User-Agent": "ALP-Ziraat-Hayvan-Takip/1.0"})
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    data = resp.read(5 * 1024 * 1024)
+                cache = getattr(self, "_foto_url_cache", {})
+                with lock:
+                    cache[identity] = data
+                    self._foto_url_cache = cache
+                self.foto_cache_yaz(raw, data)
+            except Exception:
+                data = None
+
+            def finish():
+                try:
+                    with lock:
+                        getattr(self, "_foto_loading_urls", set()).discard(identity)
+                        callbacks = getattr(self, "_foto_loading_callbacks", {}).pop(identity, [])
+                    for callback in callbacks:
+                        try:
+                            callback(data)
+                        except Exception:
+                            pass
+                except tk.TclError:
+                    pass
+
+            try:
+                self.root.after(0, finish)
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def foto_data_to_image(self, foto_data, max_size=(180, 140)):
         if not (PIL_AVAILABLE and foto_data):
             return None
         try:
             data = self.foto_referans_bytes(foto_data)
+            if not data:
+                return None
+            img = Image.open(io.BytesIO(data)).convert("RGB")
+            img.thumbnail(max_size, Image.Resampling.LANCZOS)
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
+
+    def foto_data_to_image_cached(self, foto_data, max_size=(180, 140)):
+        if not (PIL_AVAILABLE and foto_data):
+            return None
+        try:
+            data = self.foto_referans_bytes_cached(foto_data)
             if not data:
                 return None
             img = Image.open(io.BytesIO(data)).convert("RGB")
@@ -718,6 +878,20 @@ class HayvanTakipSistemi:
         except Exception:
             return None
 
+    def foto_data_to_cover_image_cached(self, foto_data, size=(160, 90)):
+        if not (PIL_AVAILABLE and foto_data):
+            return None
+        try:
+            size = (max(int(size[0]), 1), max(int(size[1]), 1))
+            data = self.foto_referans_bytes_cached(foto_data)
+            if not data:
+                return None
+            img = Image.open(io.BytesIO(data)).convert("RGB")
+            img = ImageOps.fit(img, size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
+
     def foto_onizleme_guncelle(self, label, foto_data, max_size=(180, 140), bos_metin="Fotoğraf yok"):
         img = self.foto_data_to_image(foto_data, max_size=max_size)
         if img:
@@ -728,15 +902,15 @@ class HayvanTakipSistemi:
             label.configure(image="", text=bos_metin)
             label.image = None
 
-    def foto_slot_canvas_ciz(self, canvas, foto_data, slot_no, remove_callback=None, max_size=(154, 86), bind_resize=True):
+    def foto_slot_canvas_ciz(self, canvas, foto_data, slot_no, remove_callback=None, max_size=(154, 86), bind_resize=True, open_callback=None):
         try:
-            canvas._alp_foto_slot_payload = (foto_data, slot_no, remove_callback, max_size)
+            canvas._alp_foto_slot_payload = (foto_data, slot_no, remove_callback, max_size, open_callback)
             if bind_resize and not getattr(canvas, "_alp_foto_resize_bound", False):
                 def yeniden_ciz(event=None, hedef=canvas):
                     payload = getattr(hedef, "_alp_foto_slot_payload", None)
                     if payload:
-                        foto, no, kaldir, boyut = payload
-                        self.foto_slot_canvas_ciz(hedef, foto, no, kaldir, boyut, bind_resize=False)
+                        foto, no, kaldir, boyut, ac = payload
+                        self.foto_slot_canvas_ciz(hedef, foto, no, kaldir, boyut, bind_resize=False, open_callback=ac)
 
                 canvas.bind("<Configure>", yeniden_ciz)
                 canvas._alp_foto_resize_bound = True
@@ -752,22 +926,50 @@ class HayvanTakipSistemi:
             w = max(canvas.winfo_width(), int(canvas.cget("width")), 1)
             h = max(canvas.winfo_height(), int(canvas.cget("height")), 1)
             canvas.configure(bg=self.renkler["input_bg"], highlightbackground=self.renkler["kenarlik"])
-            img = self.foto_data_to_cover_image(foto_data, size=(w, h))
+            img = self.foto_data_to_cover_image_cached(foto_data, size=(w, h))
+            yukleniyor = bool(foto_data and not img and self.foto_referansi_url_mu(foto_data))
+            if yukleniyor:
+                def tamamlandi(_data, hedef=canvas, beklenen=foto_data):
+                    try:
+                        payload = getattr(hedef, "_alp_foto_slot_payload", None)
+                        if payload and payload[0] == beklenen:
+                            foto, no, kaldir, boyut, ac = payload
+                            self.foto_slot_canvas_ciz(hedef, foto, no, kaldir, boyut, bind_resize=False, open_callback=ac)
+                    except tk.TclError:
+                        pass
+
+                self.foto_url_arka_planda_yukle(foto_data, tamamlandi)
             if img:
                 canvas.image = img
                 self._foto_referanslari.append(img)
                 canvas.create_image(0, 0, image=img, anchor="nw")
                 canvas.create_rectangle(0, h - 24, w, h, fill="#020817", outline="#020817", stipple="gray50")
-                canvas.create_rectangle(w - 24, 2, w - 4, 22, fill=self.renkler["button_danger_bg"], outline=self.renkler["button_danger_bg"])
-                canvas.create_text(w - 14, 12, text="X", fill=self.renkler["button_danger_fg"], font=("Segoe UI", 9, "bold"))
+                if remove_callback:
+                    canvas.create_rectangle(w - 24, 2, w - 4, 22, fill=self.renkler["button_danger_bg"], outline=self.renkler["button_danger_bg"])
+                    canvas.create_text(w - 14, 12, text="X", fill=self.renkler["button_danger_fg"], font=("Segoe UI", 9, "bold"))
                 canvas.create_text(8, h - 12, text=f"{slot_no}. fotoğraf", fill=self.renkler["yazi_rengi"], font=("Segoe UI", 8, "bold"), anchor="w")
 
                 def click(event):
                     if event.x >= w - 28 and event.y <= 26 and remove_callback:
                         remove_callback()
+                    elif open_callback:
+                        open_callback()
 
-                canvas.configure(cursor="hand2")
+                canvas.configure(cursor="hand2" if remove_callback or open_callback else "")
                 canvas.bind("<Button-1>", click)
+            elif yukleniyor:
+                canvas.image = None
+                canvas.configure(cursor="")
+                canvas.unbind("<Button-1>")
+                canvas.create_text(
+                    w // 2,
+                    h // 2,
+                    text="Yukleniyor...",
+                    fill=self.renkler["muted"],
+                    font=("Segoe UI", 9, "bold"),
+                )
+                canvas.create_rectangle(0, h - 22, w, h, fill="#020817", outline="#020817", stipple="gray50")
+                canvas.create_text(8, h - 11, text=f"{slot_no}. fotograf", fill=self.renkler["yazi_rengi"], font=("Segoe UI", 8, "bold"), anchor="w")
             else:
                 canvas.image = None
                 canvas.configure(cursor="")
@@ -784,8 +986,8 @@ class HayvanTakipSistemi:
 
     def fotograf_buyut_penceresi(self, foto_data, baslik="Fotoğraf", parent=None):
         parent = parent or self.root
-        img = self.foto_data_to_image(foto_data, max_size=(980, 680))
-        if not img:
+        img = self.foto_data_to_image_cached(foto_data, max_size=(980, 680))
+        if not img and not self.foto_referansi_url_mu(foto_data):
             return messagebox.showerror("Fotoğraf", "Fotoğraf görüntülenemedi.", parent=parent)
 
         pencere = tk.Toplevel(parent)
@@ -814,10 +1016,32 @@ class HayvanTakipSistemi:
 
         govde = tk.Frame(kart, bg=self.renkler["input_bg"], padx=10, pady=10)
         govde.pack(fill="both", expand=True, padx=18, pady=(0, 18))
-        foto_lbl = tk.Label(govde, image=img, bg=self.renkler["input_bg"])
+        foto_lbl = tk.Label(
+            govde,
+            image=img if img else "",
+            text="" if img else "Yukleniyor...",
+            bg=self.renkler["input_bg"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 11, "bold"),
+        )
         foto_lbl.image = img
-        self._foto_referanslari.append(img)
+        if img:
+            self._foto_referanslari.append(img)
         foto_lbl.pack(fill="both", expand=True)
+        if not img and self.foto_referansi_url_mu(foto_data):
+            def yukleme_bitti(_data):
+                try:
+                    yeni_img = self.foto_data_to_image_cached(foto_data, max_size=(980, 680))
+                    if yeni_img:
+                        foto_lbl.configure(image=yeni_img, text="")
+                        foto_lbl.image = yeni_img
+                        self._foto_referanslari.append(yeni_img)
+                    else:
+                        foto_lbl.configure(text="Fotograf goruntulenemedi.")
+                except tk.TclError:
+                    pass
+
+            self.foto_url_arka_planda_yukle(foto_data, yukleme_bitti)
         self.pencere_ortala(pencere, parent)
         pencere.lift(parent)
         pencere.focus_force()
@@ -1411,7 +1635,9 @@ class HayvanTakipSistemi:
         self.remembered_session_file = os.path.join(self.data_dir, "taninan_bilgisayar.json")
         self.pending_sync_file = os.path.join(self.data_dir, "bekleyen_senkron.json")
         self.admin_cache_file = os.path.join(self.data_dir, "admin_onbellek.json")
+        self.foto_cache_dir = os.path.join(self.data_dir, "foto_onbellek")
         os.makedirs(self.islem_yedek_dir, exist_ok=True)
+        os.makedirs(self.foto_cache_dir, exist_ok=True)
 
         self.eski_veriyi_tasi("hayvan_verileri.json", self.data_file)
         self.eski_veriyi_tasi("okunan_uyarilar.json", self.uyari_file)
@@ -8170,30 +8396,34 @@ class HayvanTakipSistemi:
                 highlightbackground=self.renkler["kenarlik"],
             )
             slot.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 7, 0), pady=(0, 8))
+            foto_canvas = tk.Canvas(
+                slot,
+                width=150,
+                height=92,
+                bg=self.renkler["input_bg"],
+                highlightthickness=1,
+                highlightbackground=self.renkler["kenarlik"],
+                bd=0,
+            )
+            foto_canvas.pack(fill="both", expand=True)
             if idx < len(fotograflar):
-                foto_img = self.foto_data_to_image(fotograflar[idx], max_size=(120, 90))
-                if foto_img:
-                    foto_lbl = tk.Label(slot, image=foto_img, bg=self.renkler["kart_ikincil"])
-                    foto_lbl.image = foto_img
-                    self._foto_referanslari.append(foto_img)
-                    foto_lbl.configure(cursor="hand2")
-                    foto_lbl.bind(
-                        "<Button-1>",
-                        lambda event, f=fotograflar[idx], i=idx: self.fotograf_buyut_penceresi(
-                            f,
-                            f"{gorunen_kupe} - {i + 1}. Fotoğraf",
-                            detay_window,
-                        ),
-                    )
-                    foto_lbl.pack(fill="both", expand=True)
-                else:
-                    tk.Label(slot, text="Açılamadı", bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold"), height=5).pack(fill="both", expand=True)
+                self.foto_slot_canvas_ciz(
+                    foto_canvas,
+                    fotograflar[idx],
+                    idx + 1,
+                    max_size=(150, 92),
+                    open_callback=lambda f=fotograflar[idx], i=idx: self.fotograf_buyut_penceresi(
+                        f,
+                        f"{gorunen_kupe} - {i + 1}. Fotoğraf",
+                        detay_window,
+                    ),
+                )
                 alt_satir = tk.Frame(slot, bg=self.renkler["kart_ikincil"])
                 alt_satir.pack(fill="x", pady=(6, 0))
                 tk.Label(alt_satir, text=f"{idx + 1}. fotoğraf", bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 8, "bold")).pack(side="left")
                 self.modern_buton(alt_satir, "Sil", lambda i=idx: self.hayvan_fotograf_sil(hayvan_id, i, detay_window), purpose='danger', width=5, small=True).pack(side="right")
             else:
-                tk.Label(slot, text=f"{idx + 1}. slot boş", bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 9, "bold"), height=6).pack(fill="both", expand=True)
+                self.foto_slot_canvas_ciz(foto_canvas, None, idx + 1, max_size=(150, 92))
 
         foto_alt = tk.Frame(foto_body, bg=self.renkler["kart_arkaplan"])
         foto_alt.pack(fill="x")
