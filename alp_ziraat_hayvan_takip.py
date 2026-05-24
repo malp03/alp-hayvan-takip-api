@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.6"
+APP_VERSION = "1.9.8"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
@@ -639,6 +639,37 @@ class HayvanTakipSistemi:
         raw = str(foto or "").strip()
         return raw.startswith("http://") or raw.startswith("https://")
 
+    def foto_storage_path_from_ref(self, foto):
+        raw = str(foto or "").strip()
+        if not raw:
+            return None
+        if raw.startswith("http://") or raw.startswith("https://"):
+            parsed = urllib.parse.urlparse(raw)
+            path = parsed.path or ""
+            markers = (
+                "/storage/v1/object/public/",
+                "/storage/v1/object/sign/",
+                "/storage/v1/object/authenticated/",
+                "/storage/v1/object/",
+            )
+            for marker in markers:
+                if marker in path:
+                    tail = path.split(marker, 1)[1]
+                    parts = tail.split("/", 1)
+                    if len(parts) == 2:
+                        return urllib.parse.unquote(parts[1]).strip("/")
+            return None
+        if raw.startswith("storage://"):
+            tail = raw[len("storage://"):]
+            if "/" in tail:
+                return tail.split("/", 1)[1].strip("/")
+            return tail.strip("/")
+        if raw.startswith("data:"):
+            return None
+        if "/" in raw and len(raw) < 260:
+            return raw.strip("/")
+        return None
+
     def foto_referans_bytes(self, foto):
         if not foto:
             return None
@@ -800,6 +831,12 @@ class HayvanTakipSistemi:
         eski_url = hayvan.get('foto_url')
         if eski_url and eski_url not in fotograflar:
             fotograflar.append(eski_url)
+        for foto in hayvan.get('foto_paths') or []:
+            if foto and foto not in fotograflar:
+                fotograflar.append(foto)
+        eski_path = hayvan.get('foto_path')
+        if eski_path and eski_path not in fotograflar:
+            fotograflar.append(eski_path)
         for foto in hayvan.get('foto_datas') or []:
             if foto and foto not in fotograflar:
                 fotograflar.append(foto)
@@ -815,8 +852,19 @@ class HayvanTakipSistemi:
                 temiz.append(foto)
             if len(temiz) >= 3:
                 break
-        url_liste = [foto for foto in temiz if self.foto_referansi_url_mu(foto)]
-        data_liste = [foto for foto in temiz if not self.foto_referansi_url_mu(foto)]
+        path_liste = []
+        url_liste = []
+        data_liste = []
+        for foto in temiz:
+            path = self.foto_storage_path_from_ref(foto)
+            if path and path not in path_liste:
+                path_liste.append(path)
+            if self.foto_referansi_url_mu(foto):
+                url_liste.append(foto)
+            elif not path:
+                data_liste.append(foto)
+        hayvan['foto_paths'] = path_liste
+        hayvan['foto_path'] = path_liste[0] if path_liste else None
         hayvan['foto_urls'] = url_liste
         hayvan['foto_url'] = url_liste[0] if url_liste else None
         hayvan['foto_datas'] = data_liste
@@ -1929,7 +1977,7 @@ class HayvanTakipSistemi:
 
     def taninan_bilgisayar_token_al(self):
         try:
-            yanit = self.api_istek("POST", "/api/auth/device-token", {}, timeout=8)
+            yanit = self.api_istek("POST", "/api/auth/device-token", {}, timeout=20)
             return (yanit or {}).get("device_token")
         except ApiHatasi as e:
             print(f"Tanınan bilgisayar token alınamadı: {e}")
@@ -1949,7 +1997,7 @@ class HayvanTakipSistemi:
                 "POST",
                 "/api/auth/device-login",
                 {"device_token": device_token},
-                timeout=6,
+                timeout=25,
                 auth=False,
             )
             token = (yanit or {}).get("access_token")
@@ -2103,7 +2151,7 @@ class HayvanTakipSistemi:
                 "POST",
                 "/api/auth/login",
                 {"kullanici_adi": kullanici_adi, "sifre": sifre},
-                timeout=20,
+                timeout=60,
                 auth=False
             )
         except ApiHatasi as e:
@@ -2144,7 +2192,7 @@ class HayvanTakipSistemi:
             "POST",
             "/api/auth/login",
             {"kullanici_adi": kullanici_adi, "sifre": sifre},
-            timeout=20,
+            timeout=60,
             auth=False,
         )
         token = (yanit or {}).get("access_token")
@@ -2800,7 +2848,7 @@ class HayvanTakipSistemi:
 
         foto_kart = kart("Fotoğraflar", self.renkler["uyari"])
         satir(foto_kart, "Fotoğraflı hayvan", fotograflar.get("fotografli_hayvan", 0))
-        satir(foto_kart, "Storage URL", fotograflar.get("storage_url_adet", 0))
+        satir(foto_kart, "Storage dosya", fotograflar.get("storage_path_adet", fotograflar.get("storage_url_adet", 0)))
         satir(foto_kart, "DB içindeki foto", fotograflar.get("database_base64_adet", 0))
         satir(foto_kart, "DB foto boyutu", f"{fotograflar.get('database_base64_mb', 0)} MB")
 
@@ -4084,6 +4132,8 @@ class HayvanTakipSistemi:
         veri.setdefault('foto_url', None)
         veri.setdefault('foto_datas', [])
         veri.setdefault('foto_urls', [])
+        veri.setdefault('foto_path', None)
+        veri.setdefault('foto_paths', [])
         self.hayvan_fotograflari_ata(veri, self.hayvan_fotograflari(veri))
         veri.setdefault('son_guncelleme', "")
         return veri
@@ -5058,7 +5108,7 @@ class HayvanTakipSistemi:
             onceki_bekleyen = self.bekleyen_senkron_sayisi()
             onceki_offline = self.offline_modda_mi()
             try:
-                self.api_istek("GET", "/api/health", timeout=4, auth=False)
+                self.api_istek("GET", "/api/health", timeout=10, auth=False)
                 if self.api_baglantiyi_yenile_sessiz():
                     self.api_durum_guncelle()
                     if onceki_offline or onceki_bekleyen:

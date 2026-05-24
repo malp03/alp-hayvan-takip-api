@@ -73,15 +73,25 @@ Hayvan payload ek alanlari:
 - `irk`: Simental, Holstein vb. serbest metin/opsiyonel irk bilgisi. Desktop, Android ve API yanitlarinda ayni alan adi kullanilir.
 - `foto_datas`: geriye donuk uyumluluk icin max 3 kucultulmus JPEG data URI. Storage aktif degilse kullanilir.
 - `foto_data`: ilk fotograf icin eski tekil alan; yeni istemciler `foto_datas` / `foto_urls` kullanmali.
-- `foto_urls`: Storage aktifken max 3 fotograf URL'si. Yeni kayitlarda asil hedef alan budur.
-- `foto_url`: ilk Storage fotografi icin eski tekil URL alani.
+- `foto_paths`: Storage aktifken max 3 private dosya yolu. API/veritabani icin kalici alan budur.
+- `foto_path`: ilk private dosya yolu icin eski tekil alan.
+- `foto_urls`: Storage aktifken API tarafindan uretilen gecici signed URL listesi. Ekranda gostermek icin kullanilir, kalici kayit gibi saklanmamali.
+- `foto_url`: ilk gecici signed URL icin eski tekil URL alani.
 
 Foto notu:
-- API'de Supabase Storage ayarlari varsa (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ALP_PHOTO_BUCKET`) istemci base64 `foto_datas` gonderse bile API bunu Storage'a yukleyip `foto_urls` olarak dondurur.
-- Android tarafinda yeni foto eklerken simdilik desktop ile ayni sekilde kucultulmus data URI gonderilebilir; API Storage'a tasir. Daha sonra istenirse Android direkt Storage upload akisi da eklenebilir.
+- API'de Supabase Storage ayarlari varsa (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ALP_PHOTO_BUCKET`) istemci base64 `foto_datas` gonderse bile API bunu private Storage'a yukler, DB'de `foto_paths` saklar ve cevapta oturumlu kullanici icin gecici `foto_urls` dondurur.
+- Supabase bucket canli kullanimda private olmali. Signed URL suresi `ALP_PHOTO_SIGNED_URL_TTL_SECONDS` ile belirlenir; varsayilan 7 gundur.
+- Android tarafinda yeni foto eklerken desktop ile ayni sekilde kucultulmus data URI gonderilebilir; daha verimli yol multipart endpoint'idir. Signed URL 401/403 verirse hayvan profilini API'den tekrar cekip yeni URL alin.
 
 Alt kayitlar:
 
+- `POST /api/hayvanlar/{hayvan_ref}/fotograflar`
+  - `multipart/form-data`
+  - alanlar: `fotograflar` (1-3 adet image dosyasi), `replace` (opsiyonel boolean)
+  - Android kamera/galeri yuklemelerinde base64 yerine bu endpoint tercih edilmeli. Storage aktifse cevapta `foto_paths` ve gecici `foto_urls` doner.
+- `DELETE /api/hayvanlar/{hayvan_ref}/fotograflar/{foto_index}`
+  - `foto_index` 1 tabanlidir.
+  - Storage aktifse silinen dosya Supabase Storage'dan da temizlenir.
 - `POST /api/hayvanlar/{hayvan_ref}/tohumlamalar`
 - `PATCH /api/hayvanlar/{hayvan_ref}/tohumlamalar/{tohumlama_ref}`
 - `DELETE /api/hayvanlar/{hayvan_ref}/tohumlamalar/{tohumlama_ref}`
@@ -139,6 +149,7 @@ Rapor, uyari, gecmis, yedek:
 - `GET /api/islem-gecmisi`
 - `GET /api/yedek`
 - `GET /api/sistem-durumu` (admin): database boyutu, Storage aktifligi, kayit sayilari ve fotograf istatistikleri.
+- `POST /api/admin/test-verilerini-sifirla` (admin): gercek kullanima gecmeden once test ciftlik/kullanici/hayvan/gecmis verilerini temizler, admin hesaplarini korur.
 
 ## Offline Senkron Kurali
 
