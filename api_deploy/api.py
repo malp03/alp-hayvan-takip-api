@@ -14,7 +14,7 @@ import urllib.request
 import uuid
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import or_, text as sql_text
 from sqlalchemy.orm import Session
@@ -99,6 +99,14 @@ ALP_PHOTO_BUCKET = os.getenv("ALP_PHOTO_BUCKET", "animal-photos").strip() or "an
 ALP_DB_QUOTA_MB = float(os.getenv("ALP_DB_QUOTA_MB", "500"))
 ALP_STORAGE_QUOTA_MB = float(os.getenv("ALP_STORAGE_QUOTA_MB", "1024"))
 ALP_MAX_PHOTOS_PER_ANIMAL = 3
+ALP_PHOTO_BUCKET_PUBLIC = os.getenv("ALP_PHOTO_BUCKET_PUBLIC", "false").strip().lower() in {
+    "1",
+    "true",
+    "evet",
+    "public",
+    "on",
+}
+ALP_PHOTO_SIGNED_URL_TTL_SECONDS = int(os.getenv("ALP_PHOTO_SIGNED_URL_TTL_SECONDS", str(7 * 24 * 60 * 60)))
 
 
 def simdi() -> str:
@@ -411,8 +419,93 @@ def foto_data_ayristir(foto: str) -> tuple[str, bytes]:
         raise HTTPException(status_code=400, detail="Fotoğraf verisi okunamadı.") from hata
 
 
+def storage_public_url(path: str, version_hash: str = "") -> str:
+    bucket = urllib.parse.quote(ALP_PHOTO_BUCKET, safe="")
+    quoted_path = urllib.parse.quote(path, safe="/")
+    version = f"?v={version_hash[:12]}" if version_hash else ""
+    return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{quoted_path}{version}"
+
+
+def storage_signed_url(path: str) -> Optional[str]:
+    if not storage_aktif_mi():
+        return None
+    bucket = urllib.parse.quote(ALP_PHOTO_BUCKET, safe="")
+    quoted_path = urllib.parse.quote(path, safe="/")
+    sign_url = f"{SUPABASE_URL}/storage/v1/object/sign/{bucket}/{quoted_path}"
+    request = urllib.request.Request(
+        sign_url,
+        data=json.dumps({"expiresIn": ALP_PHOTO_SIGNED_URL_TTL_SECONDS}).encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read().decode("utf-8") or "{}")
+    signed = payload.get("signedURL") or payload.get("signedUrl") or payload.get("signed_url")
+    if not signed:
+        return None
+    signed = str(signed)
+    if signed.startswith("http://") or signed.startswith("https://"):
+        return signed
+    if signed.startswith("/storage/v1"):
+        return f"{SUPABASE_URL}{signed}"
+    return f"{SUPABASE_URL}/storage/v1/{signed.lstrip('/')}"
+
+
+def storage_goruntuleme_url(path: str) -> Optional[str]:
+    if not path:
+        return None
+    if ALP_PHOTO_BUCKET_PUBLIC:
+        return storage_public_url(path)
+    try:
+        return storage_signed_url(path)
+    except Exception as hata:
+        print(f"Storage signed URL olusturma hatasi: {hata}")
+        return None
+
+
+def storage_path_from_url(url: str) -> Optional[str]:
+    if not foto_url_mu(url):
+        return None
+    parsed = urllib.parse.urlparse(str(url))
+    path = parsed.path or ""
+    markers = (
+        f"/storage/v1/object/public/{ALP_PHOTO_BUCKET}/",
+        f"/storage/v1/object/sign/{ALP_PHOTO_BUCKET}/",
+        f"/storage/v1/object/authenticated/{ALP_PHOTO_BUCKET}/",
+        f"/storage/v1/object/{ALP_PHOTO_BUCKET}/",
+    )
+    for marker in markers:
+        if marker in path:
+            return urllib.parse.unquote(path.split(marker, 1)[1]).strip("/")
+    return None
+
+
+def storage_path_from_ref(ref: Any) -> Optional[str]:
+    raw = metin(ref)
+    if not raw:
+        return None
+    if foto_url_mu(raw):
+        return storage_path_from_url(raw)
+    if raw.startswith("storage://"):
+        parca = raw[len("storage://") :]
+        if "/" in parca:
+            bucket, path = parca.split("/", 1)
+            if bucket == ALP_PHOTO_BUCKET:
+                return path.strip("/")
+        return parca.strip("/")
+    if raw.startswith("data:"):
+        return None
+    if "/" in raw and len(raw) < 260:
+        return raw.strip("/")
+    return None
+
+
 def foto_base64_boyutu(foto: Any) -> int:
-    if not foto or foto_url_mu(foto):
+    if not foto or foto_url_mu(foto) or storage_path_from_ref(foto):
         return 0
     try:
         _, data = foto_data_ayristir(str(foto))
@@ -421,7 +514,8 @@ def foto_base64_boyutu(foto: Any) -> int:
         return 0
 
 
-def foto_referanslarini_topla(veri: Dict[str, Any]) -> tuple[List[str], List[str]]:
+def foto_referanslarini_topla(veri: Dict[str, Any]) -> tuple[List[str], List[str], List[str]]:
+    paths: List[str] = []
     urls: List[str] = []
     datas: List[str] = []
 
@@ -429,33 +523,97 @@ def foto_referanslarini_topla(veri: Dict[str, Any]) -> tuple[List[str], List[str
         deger = metin(foto)
         if not deger:
             return
-        hedef = urls if foto_url_mu(deger) else datas
-        if deger not in hedef:
-            hedef.append(deger)
+        path = storage_path_from_ref(deger)
+        if path:
+            if path not in paths:
+                paths.append(path)
+            return
+        if foto_url_mu(deger):
+            if deger not in urls:
+                urls.append(deger)
+            return
+        if deger not in datas:
+            datas.append(deger)
 
-    for alan in ("foto_urls", "foto_url", "foto_datas", "foto_data"):
+    for alan in ("foto_paths", "foto_path", "foto_urls", "foto_url", "foto_datas", "foto_data"):
         deger = veri.get(alan)
         if isinstance(deger, list):
             for foto in deger:
                 ekle(foto)
         else:
             ekle(deger)
-    return urls[:ALP_MAX_PHOTOS_PER_ANIMAL], datas[:ALP_MAX_PHOTOS_PER_ANIMAL]
+
+    kalan = ALP_MAX_PHOTOS_PER_ANIMAL
+    paths = paths[:kalan]
+    kalan -= len(paths)
+    urls = urls[:kalan]
+    kalan -= len(urls)
+    datas = datas[:kalan]
+    return paths, urls, datas
 
 
 def foto_alanlarini_normalize_et(veri: Dict[str, Any]) -> Dict[str, Any]:
-    urls, datas = foto_referanslarini_topla(veri)
-    veri["foto_urls"] = urls[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    paths, urls, datas = foto_referanslarini_topla(veri)
+    veri["foto_paths"] = paths
+    veri["foto_path"] = paths[0] if paths else None
+    veri["foto_urls"] = urls
     veri["foto_url"] = veri["foto_urls"][0] if veri["foto_urls"] else None
-    veri["foto_datas"] = datas[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    veri["foto_datas"] = datas
     veri["foto_data"] = veri["foto_datas"][0] if veri["foto_datas"] else None
     return veri
 
 
-def storage_public_url(path: str, version_hash: str) -> str:
+def foto_goruntuleme_url_ekle(veri: Dict[str, Any]) -> Dict[str, Any]:
+    sonuc = dict(veri or {})
+    paths, urls, datas = foto_referanslarini_topla(sonuc)
+    goruntuleme_urls: List[str] = []
+    for path in paths:
+        url = storage_goruntuleme_url(path)
+        if url and url not in goruntuleme_urls:
+            goruntuleme_urls.append(url)
+    sonuc["foto_paths"] = paths
+    sonuc["foto_path"] = paths[0] if paths else None
+    sonuc["foto_urls"] = (goruntuleme_urls + urls)[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    sonuc["foto_url"] = sonuc["foto_urls"][0] if sonuc["foto_urls"] else None
+    sonuc["foto_datas"] = datas
+    sonuc["foto_data"] = datas[0] if datas else None
+    return sonuc
+
+
+def storage_pathlari(refs: Iterable[str]) -> List[str]:
+    paths: List[str] = []
+    for ref in refs or []:
+        path = storage_path_from_ref(ref)
+        if path and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def storage_fotograflari_sil(refs: Iterable[str]) -> int:
+    paths = storage_pathlari(refs)
+    if not paths:
+        return 0
     bucket = urllib.parse.quote(ALP_PHOTO_BUCKET, safe="")
-    quoted_path = urllib.parse.quote(path, safe="/")
-    return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{quoted_path}?v={version_hash[:12]}"
+    delete_url = f"{SUPABASE_URL}/storage/v1/object/{bucket}"
+    silinen = 0
+    for start in range(0, len(paths), 1000):
+        grup = paths[start:start + 1000]
+        request = urllib.request.Request(
+            delete_url,
+            data=json.dumps({"prefixes": grup}, ensure_ascii=False).encode("utf-8"),
+            method="DELETE",
+            headers={
+                "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30):
+                silinen += len(grup)
+        except Exception as hata:
+            print(f"Storage fotograf temizleme hatasi: {hata}")
+    return silinen
 
 
 def storage_foto_yukle(veri: Dict[str, Any], foto: str, index: int) -> str:
@@ -473,7 +631,7 @@ def storage_foto_yukle(veri: Dict[str, Any], foto: str, index: int) -> str:
     version_hash = hashlib.sha256(data).hexdigest()
     ciftlik_id = kupe_arama_temizle(veri.get("ciftlik_id")) or "genel"
     hayvan_id = kupe_arama_temizle(veri.get("id")) or yeni_id(12)
-    path = f"{ciftlik_id}/{hayvan_id}/foto-{index}.{uzanti}"
+    path = f"{ciftlik_id}/{hayvan_id}/foto-{index}-{version_hash[:12]}.{uzanti}"
     bucket = urllib.parse.quote(ALP_PHOTO_BUCKET, safe="")
     quoted_path = urllib.parse.quote(path, safe="/")
     upload_url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{quoted_path}"
@@ -498,22 +656,24 @@ def storage_foto_yukle(veri: Dict[str, Any], foto: str, index: int) -> str:
         raise HTTPException(status_code=502, detail=f"Fotoğraf storage yüklemesi başarısız oldu: {detay}") from hata
     except urllib.error.URLError as hata:
         raise HTTPException(status_code=502, detail=f"Storage bağlantısı kurulamadı: {hata.reason}") from hata
-    return storage_public_url(path, version_hash)
+    return path
 
 
 def fotograflari_storagea_tasi(veri: Dict[str, Any]) -> Dict[str, Any]:
     veri = dict(veri)
-    urls, datas = foto_referanslarini_topla(veri)
+    paths, urls, datas = foto_referanslarini_topla(veri)
     if storage_aktif_mi() and datas:
-        kalan_slot = ALP_MAX_PHOTOS_PER_ANIMAL - len(urls)
-        for index, foto in enumerate(datas[:kalan_slot], start=len(urls) + 1):
-            yuklenen_url = storage_foto_yukle(veri, foto, index)
-            if yuklenen_url not in urls:
-                urls.append(yuklenen_url)
+        kalan_slot = ALP_MAX_PHOTOS_PER_ANIMAL - len(paths) - len(urls)
+        for index, foto in enumerate(datas[:kalan_slot], start=len(paths) + len(urls) + 1):
+            yuklenen_path = storage_foto_yukle(veri, foto, index)
+            if yuklenen_path not in paths:
+                paths.append(yuklenen_path)
         datas = []
-    veri["foto_urls"] = urls[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    veri["foto_paths"] = paths[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    veri["foto_path"] = veri["foto_paths"][0] if veri["foto_paths"] else None
+    veri["foto_urls"] = urls[: max(0, ALP_MAX_PHOTOS_PER_ANIMAL - len(veri["foto_paths"]))]
     veri["foto_url"] = veri["foto_urls"][0] if veri["foto_urls"] else None
-    veri["foto_datas"] = datas[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    veri["foto_datas"] = datas[: max(0, ALP_MAX_PHOTOS_PER_ANIMAL - len(veri["foto_paths"]) - len(veri["foto_urls"]))]
     veri["foto_data"] = veri["foto_datas"][0] if veri["foto_datas"] else None
     return veri
 
@@ -528,15 +688,16 @@ def veri_json_fotograf_istatistikleri(db: Session) -> Dict[str, Any]:
             veri = json.loads(satir[0] or "{}")
         except (TypeError, json.JSONDecodeError):
             continue
-        urls, datas = foto_referanslarini_topla(veri if isinstance(veri, dict) else {})
-        if urls or datas:
+        paths, urls, datas = foto_referanslarini_topla(veri if isinstance(veri, dict) else {})
+        if paths or urls or datas:
             foto_hayvan_adet += 1
-        storage_url_adet += len(urls)
+        storage_url_adet += len(paths)
         database_base64_adet += len(datas)
         tahmini_base64_bytes += sum(foto_base64_boyutu(foto) for foto in datas)
     return {
         "fotografli_hayvan": foto_hayvan_adet,
         "storage_url_adet": storage_url_adet,
+        "storage_path_adet": storage_url_adet,
         "database_base64_adet": database_base64_adet,
         "database_base64_mb": round(tahmini_base64_bytes / (1024 * 1024), 2),
     }
@@ -801,7 +962,7 @@ def db_hayvandan_payload(h: models.Hayvan) -> Dict[str, Any]:
                 veri["ciftlik_id"] = h.ciftlik_id or veri.get("ciftlik_id")
                 if h.ciftlik:
                     veri["ciftlik_ad"] = h.ciftlik.ad
-                return normalize_hayvan(veri, hayvan_id=h.id)
+                return foto_goruntuleme_url_ekle(normalize_hayvan(veri, hayvan_id=h.id))
         except json.JSONDecodeError:
             pass
 
@@ -831,7 +992,7 @@ def db_hayvandan_payload(h: models.Hayvan) -> Dict[str, Any]:
     ]
     aktif_tohumlama = next((t for t in reversed(tohumlamalar) if t.get("gebe_mi") is True), None)
     yas_gun = (h.yas_yil or 0) * 365 + (h.yas_ay or 0) * 30
-    return normalize_hayvan(
+    return foto_goruntuleme_url_ekle(normalize_hayvan(
         {
             "id": h.id,
             "ciftlik_id": h.ciftlik_id,
@@ -863,7 +1024,7 @@ def db_hayvandan_payload(h: models.Hayvan) -> Dict[str, Any]:
             "asi_prosedurler": asi_prosedurler,
         },
         hayvan_id=h.id,
-    )
+    ))
 
 
 def db_hayvana_yaz(db: Session, db_hayvan: models.Hayvan, veri: Dict[str, Any]) -> models.Hayvan:
@@ -1335,6 +1496,10 @@ def delete_ciftlik(
 ):
     db_ciftlik = ciftlik_bul(db, ciftlik_id)
     silinen_ad = db_ciftlik.ad
+    silinecek_fotograflar: List[str] = []
+    for hayvan in db.query(models.Hayvan).filter(models.Hayvan.ciftlik_id == ciftlik_id).all():
+        paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(hayvan))
+        silinecek_fotograflar.extend(paths)
     hayvan_idleri = [
         satir[0]
         for satir in db.query(models.Hayvan.id).filter(models.Hayvan.ciftlik_id == ciftlik_id).all()
@@ -1372,6 +1537,7 @@ def delete_ciftlik(
         hedef_id=ciftlik_id,
     )
     db.commit()
+    storage_fotograflari_sil(silinecek_fotograflar)
     return {
         "status": "ok",
         "message": (
@@ -1636,6 +1802,7 @@ def update_hayvan(
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     mevcut = db_hayvandan_payload(db_hayvan)
+    onceki_foto_paths, _, _ = foto_referanslarini_topla(mevcut)
     guncelleme = model_verisi(hayvan, exclude_unset=True)
     guncelleme.pop("id", None)
     gelen_son_guncelleme = guncelleme.get("son_guncelleme")
@@ -1660,7 +1827,12 @@ def update_hayvan(
         hedef_tipi="hayvan",
         hedef_id=db_hayvan.id,
     )
-    return response_kaydet(db, db_hayvan, veri, son_guncelleme=gelen_son_guncelleme or simdi())
+    sonuc = response_kaydet(db, db_hayvan, veri, son_guncelleme=gelen_son_guncelleme or simdi())
+    yeni_foto_paths, _, _ = foto_referanslarini_topla(sonuc)
+    yeni_paths = set(yeni_foto_paths)
+    silinecek_paths = [path for path in onceki_foto_paths if path not in yeni_paths]
+    storage_fotograflari_sil(silinecek_paths)
+    return sonuc
 
 
 @app.delete("/api/hayvanlar/{hayvan_ref}", response_model=schemas.IslemSonucResponse)
@@ -1682,6 +1854,7 @@ def delete_hayvan(
         silinen_id = db_hayvan.id
         silinen_kupe = db_hayvan.ciftlik_kupe_no or db_hayvan.resmi_kupe_no or db_hayvan.id
         silinen_ciftlik_id = db_hayvan.ciftlik_id
+        silinecek_foto_paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(db_hayvan))
         db.delete(db_hayvan)
         audit_kaydi(
             db,
@@ -1693,6 +1866,7 @@ def delete_hayvan(
             hedef_id=silinen_id,
         )
         db.commit()
+        storage_fotograflari_sil(silinecek_foto_paths)
         return {"status": "ok", "message": "Hayvan kalıcı olarak silindi.", "id": silinen_id}
 
     veri = db_hayvandan_payload(db_hayvan)
@@ -1709,6 +1883,103 @@ def delete_hayvan(
     )
     response_kaydet(db, db_hayvan, veri)
     return {"status": "ok", "message": "Hayvan arşive alındı.", "id": db_hayvan.id}
+
+
+@app.post("/api/hayvanlar/{hayvan_ref}/fotograflar", response_model=schemas.HayvanResponse)
+async def upload_hayvan_fotograflari(
+    hayvan_ref: str,
+    fotograflar: List[UploadFile] = File(...),
+    replace: bool = Form(False),
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    veri = db_hayvandan_payload(db_hayvan)
+    onceki_paths, _, _ = foto_referanslarini_topla(veri)
+    mevcut_paths, mevcut_urls, mevcut_datas = foto_referanslarini_topla(veri)
+    mevcut_fotograflar = [] if replace else mevcut_paths + mevcut_urls + mevcut_datas
+    kalan_slot = ALP_MAX_PHOTOS_PER_ANIMAL - len(mevcut_fotograflar)
+    if kalan_slot <= 0:
+        raise HTTPException(status_code=400, detail="Bu hayvan için en fazla 3 fotoğraf eklenebilir.")
+    if not fotograflar:
+        raise HTTPException(status_code=400, detail="Yüklenecek fotoğraf seçilmedi.")
+    yeni_fotograflar: List[str] = []
+    for dosya in fotograflar[:kalan_slot]:
+        mime = dosya.content_type or "image/jpeg"
+        if not mime.startswith("image/"):
+            raise HTTPException(status_code=400, detail="Sadece görsel dosyası yüklenebilir.")
+        data = await dosya.read()
+        if not data:
+            continue
+        if len(data) > 3 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Fotoğraf çok büyük. Lütfen 3 MB altında fotoğraf seçin.")
+        encoded = base64.b64encode(data).decode("ascii")
+        yeni_fotograflar.append(f"data:{mime};base64,{encoded}")
+    if not yeni_fotograflar:
+        raise HTTPException(status_code=400, detail="Yüklenecek geçerli fotoğraf bulunamadı.")
+    tum_fotograflar = (mevcut_fotograflar + yeni_fotograflar)[:ALP_MAX_PHOTOS_PER_ANIMAL]
+    paths = [foto for foto in tum_fotograflar if storage_path_from_ref(foto)]
+    urls = [foto for foto in tum_fotograflar if foto_url_mu(foto) and not storage_path_from_ref(foto)]
+    datas = [foto for foto in tum_fotograflar if not foto_url_mu(foto) and not storage_path_from_ref(foto)]
+    veri["foto_paths"] = paths
+    veri["foto_path"] = paths[0] if paths else None
+    veri["foto_urls"] = urls
+    veri["foto_url"] = urls[0] if urls else None
+    veri["foto_datas"] = datas
+    veri["foto_data"] = datas[0] if datas else None
+    audit_kaydi(
+        db,
+        kullanici,
+        "hayvan_fotograf_yukle",
+        f"Hayvan fotoğrafı yüklendi: {veri.get('kupe_no') or db_hayvan.id} ({len(yeni_fotograflar)} adet)",
+        ciftlik_id=veri.get("ciftlik_id"),
+        hedef_tipi="hayvan",
+        hedef_id=db_hayvan.id,
+    )
+    sonuc = response_kaydet(db, db_hayvan, veri)
+    if replace:
+        yeni_paths, _, _ = foto_referanslarini_topla(sonuc)
+        yeni_path_set = set(yeni_paths)
+        silinecek_paths = [path for path in onceki_paths if path not in yeni_path_set]
+        storage_fotograflari_sil(silinecek_paths)
+    return sonuc
+
+
+@app.delete("/api/hayvanlar/{hayvan_ref}/fotograflar/{foto_index}", response_model=schemas.HayvanResponse)
+def delete_hayvan_fotografi(
+    hayvan_ref: str,
+    foto_index: int,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    veri = db_hayvandan_payload(db_hayvan)
+    paths, urls, datas = foto_referanslarini_topla(veri)
+    fotograflar = paths + urls + datas
+    if foto_index < 1 or foto_index > len(fotograflar):
+        raise HTTPException(status_code=404, detail="Fotoğraf bulunamadı.")
+    silinen = fotograflar.pop(foto_index - 1)
+    paths = [foto for foto in fotograflar if storage_path_from_ref(foto)]
+    urls = [foto for foto in fotograflar if foto_url_mu(foto) and not storage_path_from_ref(foto)]
+    datas = [foto for foto in fotograflar if not foto_url_mu(foto) and not storage_path_from_ref(foto)]
+    veri["foto_paths"] = paths
+    veri["foto_path"] = paths[0] if paths else None
+    veri["foto_urls"] = urls
+    veri["foto_url"] = urls[0] if urls else None
+    veri["foto_datas"] = datas
+    veri["foto_data"] = datas[0] if datas else None
+    audit_kaydi(
+        db,
+        kullanici,
+        "hayvan_fotograf_sil",
+        f"Hayvan fotoğrafı silindi: {veri.get('kupe_no') or db_hayvan.id}",
+        ciftlik_id=veri.get("ciftlik_id"),
+        hedef_tipi="hayvan",
+        hedef_id=db_hayvan.id,
+    )
+    sonuc = response_kaydet(db, db_hayvan, veri)
+    storage_fotograflari_sil([silinen])
+    return sonuc
 
 
 @app.post(
@@ -2044,6 +2315,8 @@ def get_sistem_durumu(
         "storage": {
             "aktif": storage_aktif,
             "bucket": ALP_PHOTO_BUCKET,
+            "public_url": ALP_PHOTO_BUCKET_PUBLIC,
+            "signed_url_ttl_seconds": ALP_PHOTO_SIGNED_URL_TTL_SECONDS,
             "limit_mb": ALP_STORAGE_QUOTA_MB,
             "tahmini_foto_kapasitesi": tahmini_foto_adet,
             "not": "Kapasite tahmini 180 KB ortalama sıkıştırılmış fotoğrafa göre hesaplanır.",
@@ -2063,6 +2336,57 @@ def get_sistem_durumu(
             "hayvan_basi_maks_fotograf": ALP_MAX_PHOTOS_PER_ANIMAL,
             "storage_env": "SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + ALP_PHOTO_BUCKET",
         },
+    }
+
+
+@app.post("/api/admin/test-verilerini-sifirla", response_model=schemas.IslemSonucResponse)
+def test_verilerini_sifirla(
+    db: Session = Depends(get_db),
+    admin: models.Kullanici = Depends(require_admin),
+):
+    silinecek_fotograflar: List[str] = []
+    for hayvan in db.query(models.Hayvan).all():
+        paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(hayvan))
+        silinecek_fotograflar.extend(paths)
+
+    sayilar = {
+        "hayvan": db.query(models.Hayvan).count(),
+        "ciftlik": db.query(models.Ciftlik).count(),
+        "kullanici": db.query(models.Kullanici).filter(models.Kullanici.rol != "admin").count(),
+        "tohumlama": db.query(models.Tohumlama).count(),
+        "asi_prosedur": db.query(models.AsiProsedur).count(),
+        "uyari": db.query(models.Uyari).count(),
+        "islem_gecmisi": db.query(models.IslemGecmisi).count(),
+    }
+
+    db.query(models.Tohumlama).delete(synchronize_session=False)
+    db.query(models.AsiProsedur).delete(synchronize_session=False)
+    db.query(models.Uyari).delete(synchronize_session=False)
+    db.query(models.Hayvan).delete(synchronize_session=False)
+    db.query(models.Kullanici).filter(models.Kullanici.rol != "admin").delete(synchronize_session=False)
+    db.query(models.Ciftlik).delete(synchronize_session=False)
+    db.query(models.IslemGecmisi).delete(synchronize_session=False)
+    audit_kaydi(
+        db,
+        admin,
+        "test_verilerini_sifirla",
+        (
+            "Test verileri sifirlandi. "
+            f"{sayilar['hayvan']} hayvan, {sayilar['ciftlik']} ciftlik, "
+            f"{sayilar['kullanici']} kullanici temizlendi."
+        ),
+        hedef_tipi="sistem",
+        hedef_id="test-verileri",
+    )
+    db.commit()
+    storage_fotograflari_sil(silinecek_fotograflar)
+    return {
+        "status": "ok",
+        "message": (
+            "Test verileri sifirlandi; admin hesaplari korundu. "
+            f"Silinen: {sayilar}"
+        ),
+        "id": "test-verileri",
     }
 
 
