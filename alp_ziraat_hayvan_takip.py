@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.9"
+APP_VERSION = "1.9.13"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
@@ -141,8 +141,12 @@ class HayvanTakipSistemi:
             self.themed_widgets = []
             self.themed_buttons = []
 
-            self.logo_path = resource_path("alp_ziraat_logo.png")
-            self.icon_path = resource_path("alp_ziraat_icon.png")
+            self.logo_path = resource_path("alp_ziraat_logo_led.png")
+            if not os.path.exists(self.logo_path):
+                self.logo_path = resource_path("alp_ziraat_logo.png")
+            self.icon_path = resource_path("alp_ziraat_icon_led.png")
+            if not os.path.exists(self.icon_path):
+                self.icon_path = resource_path("alp_ziraat_icon.png")
             
             self.root.title("ALP ZİRAAT - Sürü Takip Sistemi")
             self.root.geometry("1500x900")
@@ -167,6 +171,7 @@ class HayvanTakipSistemi:
             self._foto_loading_urls = set()
             self._foto_loading_callbacks = {}
             self._foto_cache_lock = threading.Lock()
+            self._hayvan_kayit_devam_ediyor = False
             self.admin_aktif_ciftlik_id = None
             self.admin_aktif_ciftlik_ad = None
             self._login_yeniden_iste = False
@@ -2293,8 +2298,17 @@ class HayvanTakipSistemi:
             "zaman": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         }
 
-    def bekleyen_senkron_snapshot_guncelle(self):
+    def bekleyen_senkron_snapshot_guncelle(self, hedef_id=None):
         onceki_idler = set(getattr(self, "_api_son_idler", set()))
+        if hedef_id is not None:
+            h_id = str(hedef_id)
+            hayvanlar = getattr(self, "hayvanlar", {}) or {}
+            if h_id in hayvanlar:
+                self.bekleyen_senkron_upsert(h_id, hayvanlar[h_id])
+            elif h_id in onceki_idler:
+                self.bekleyen_senkron_delete(h_id)
+            return self.bekleyen_senkron_kaydet()
+
         mevcut_idler = {str(h_id) for h_id in getattr(self, "hayvanlar", {}).keys()}
         for silinen_id in sorted(onceki_idler - mevcut_idler):
             self.bekleyen_senkron_delete(silinen_id)
@@ -2488,7 +2502,7 @@ class HayvanTakipSistemi:
         kayit_id = str((kayit or {}).get("id") or h_id)
         return kayit_id, self.hayvan_kayit_tamamla(kayit_id, kayit or payload)
 
-    def bekleyen_senkron_gonder(self, sessiz=False):
+    def bekleyen_senkron_gonder(self, sessiz=False, ui_guncelle=True):
         if not getattr(self, "api_modu", False):
             return True
         if not self.bekleyen_senkron_var():
@@ -2713,15 +2727,15 @@ class HayvanTakipSistemi:
         login_header.pack(fill="x", pady=(0, 16))
         self.themed_widgets.append((login_header, 'kart'))
 
-        logo_kutu = tk.Frame(login_header, bg="#FFFFFF", padx=6, pady=5, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+        logo_kutu = tk.Frame(login_header, bg=self.renkler["kart_arkaplan"], padx=0, pady=0, highlightthickness=0)
         logo_kutu.pack(side="left")
         try:
             logo_img = Image.open(self.logo_path).convert("RGBA")
-            logo_img.thumbnail((118, 46), Image.Resampling.LANCZOS)
+            logo_img.thumbnail((132, 54), Image.Resampling.LANCZOS)
             self.login_logo_gorsel = ImageTk.PhotoImage(logo_img)
-            tk.Label(logo_kutu, image=self.login_logo_gorsel, bg="#FFFFFF").pack()
+            tk.Label(logo_kutu, image=self.login_logo_gorsel, bg=self.renkler["kart_arkaplan"]).pack()
         except Exception:
-            tk.Label(logo_kutu, text="ALP", bg="#FFFFFF", fg=self.renkler["ana_kirmizi"], font=("Segoe UI", 18, "bold")).pack()
+            tk.Label(logo_kutu, text="ALP", bg=self.renkler["kart_arkaplan"], fg=self.renkler["ana_kirmizi"], font=("Segoe UI", 18, "bold")).pack()
 
         baslik_kutu = tk.Frame(login_header, bg=self.renkler["kart_arkaplan"])
         baslik_kutu.pack(side="left", padx=(14, 0), fill="x", expand=True)
@@ -4271,6 +4285,42 @@ class HayvanTakipSistemi:
         self._api_son_hata = None
         return self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
 
+    def api_hayvan_kaydet_tekil(self, h_id, ui_guncelle=True):
+        if self.offline_modda_mi():
+            raise ApiHatasi("API offline modda; kayit yerel senkron kuyruguna alinacak.")
+        if self.bekleyen_senkron_var() and not self.bekleyen_senkron_gonder(sessiz=True, ui_guncelle=ui_guncelle):
+            hata = getattr(self, "_api_son_hata", None) or "Bekleyen offline degisiklikler senkronlanamadi."
+            raise ApiHatasi(f"Bekleyen offline degisiklikler senkronlanamadi.\n\nDetay: {hata}")
+
+        h_id = str(h_id)
+        onceki_idler = set(getattr(self, "_api_son_idler", set()))
+        if h_id not in self.hayvanlar:
+            if h_id in onceki_idler:
+                self.api_istek("DELETE", f"/api/hayvanlar/{self.api_ref(h_id)}?kalici=true")
+                onceki_idler.discard(h_id)
+                self._api_son_idler = onceki_idler
+            self.api_cevrimdisi = False
+            self.api_offline_oturum = False
+            self._api_son_hata = None
+            return self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
+
+        kayit_id, tamamlanmis = self.api_hayvan_kayit_gonder(h_id, self.hayvanlar[h_id], onceki_idler)
+        if tamamlanmis is None:
+            self.hayvanlar.pop(h_id, None)
+            onceki_idler.discard(h_id)
+        else:
+            if h_id != kayit_id:
+                self.hayvanlar.pop(h_id, None)
+            self.hayvanlar[kayit_id] = tamamlanmis
+            onceki_idler.discard(h_id)
+            onceki_idler.add(kayit_id)
+
+        self._api_son_idler = onceki_idler
+        self.api_cevrimdisi = False
+        self.api_offline_oturum = False
+        self._api_son_hata = None
+        return self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
+
     def api_verilerini_yenile(self, sessiz=False):
         if not getattr(self, "api_modu", False):
             self.hayvan_listesini_guncelle()
@@ -4585,24 +4635,29 @@ class HayvanTakipSistemi:
             self._api_son_idler = set(hayvanlar_dict.keys())
         return hayvanlar_dict
 
-    def veri_kaydet(self, kupe_no=None):
+    def veri_kaydet(self, kupe_no=None, hata_mesaji_goster=True, ui_guncelle=True):
         if getattr(self, "api_modu", False):
             if self.offline_modda_mi():
-                self.bekleyen_senkron_snapshot_guncelle()
-                self.api_durum_guncelle()
+                self.bekleyen_senkron_snapshot_guncelle(kupe_no)
+                if ui_guncelle:
+                    self.api_durum_guncelle()
                 return self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "Veri Kayit Hatasi")
             try:
+                if kupe_no is not None:
+                    return self.api_hayvan_kaydet_tekil(kupe_no, ui_guncelle=ui_guncelle)
                 return self.api_hayvanlari_kaydet()
             except ApiHatasi as e:
                 self.api_cevrimdisi = True
                 self._api_son_hata = str(e)
-                self.bekleyen_senkron_snapshot_guncelle()
-                self.api_durum_guncelle()
+                self.bekleyen_senkron_snapshot_guncelle(kupe_no)
+                if ui_guncelle:
+                    self.api_durum_guncelle()
                 print(f"API kaydetme hatası: {e}")
-                messagebox.showerror(
-                    "API Kayıt Hatası",
-                    f"Merkezi API'ye kayıt gönderilemedi:\n{e}\n\nVeri yerel önbelleğe kaydedilecek."
-                )
+                if hata_mesaji_goster:
+                    messagebox.showerror(
+                        "API Kayıt Hatası",
+                        f"Merkezi API'ye kayıt gönderilemedi:\n{e}\n\nVeri yerel önbelleğe kaydedilecek."
+                    )
                 return self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "Veri Kayıt Hatası")
 
         db = None
@@ -4913,29 +4968,28 @@ class HayvanTakipSistemi:
         self.baslik_frame.pack_propagate(False)
         self.themed_widgets.append((self.baslik_frame, 'baslik_frame'))
 
-        #  Sol: Logo paneli (beyaz arka plan — görünürlük için) 
+        #  Sol: logo + baslik
         sol_grup = tk.Frame(self.baslik_frame, bg=self.renkler["siyah"])
         sol_grup.pack(side='left', fill='y', padx=(16, 0))
 
-        # Logo beyaz pill — logo PNG'nin karanlık elemanları görünsün diye
         logo_pill = tk.Frame(
             sol_grup,
-            bg='#FFFFFF',
-            padx=8,
-            pady=5,
-            highlightthickness=1,
-            highlightbackground=self.renkler.get("kenarlik", self.renkler["gri"]),
+            bg=self.renkler["siyah"],
+            padx=0,
+            pady=0,
+            highlightthickness=0,
             bd=0
         )
-        logo_pill.pack(side='left', fill='y', pady=12, padx=(0, 14))
+        logo_pill.pack(side='left', fill='y', pady=8, padx=(0, 14))
         try:
-            logo_image = Image.open(self.logo_path).resize((120, 48), Image.Resampling.LANCZOS)
+            logo_image = Image.open(self.logo_path).convert("RGBA")
+            logo_image.thumbnail((148, 58), Image.Resampling.LANCZOS)
             self.logo_gorsel = ImageTk.PhotoImage(logo_image)
-            tk.Label(logo_pill, image=self.logo_gorsel, bg='#FFFFFF').pack()
+            tk.Label(logo_pill, image=self.logo_gorsel, bg=self.renkler["siyah"]).pack()
         except Exception as e:
             print(f"Logo yüklenemedi: {e}")
             tk.Label(logo_pill, text="ALP\nZİRAAT", font=('Segoe UI', 11, 'bold'),
-                     bg='#FFFFFF', fg=self.renkler["siyah"]).pack(padx=6)
+                     bg=self.renkler["siyah"], fg=self.renkler["ana_kirmizi"]).pack(padx=6)
 
         # Başlık + tagline grubu
         baslik_metin_grup = tk.Frame(sol_grup, bg=self.renkler["siyah"])
@@ -5659,6 +5713,7 @@ class HayvanTakipSistemi:
         self.themed_widgets.append((baslik_lbl, 'label'))
 
         kaydet_btn = self.modern_buton(header, "HAYVANI KAYDET", self.hayvan_kaydet, purpose='success', width=22, small=True)
+        self.hayvan_kaydet_btn = kaydet_btn
         kaydet_btn.pack(side='right')
 
         sep = tk.Frame(main_card, bg=self.renkler["kenarlik"], height=1)
@@ -7033,6 +7088,8 @@ class HayvanTakipSistemi:
     # #################################################################
     def hayvan_kaydet(self):
         import uuid
+        if getattr(self, "_hayvan_kayit_devam_ediyor", False):
+            return
         resmi_kupe = self.resmi_kupe_no_entry.get().strip().upper()
         ciftlik_kupe = self.ciftlik_kupe_no_entry.get().strip().upper()
         dogum_tarihi = self.dogum_tarihi_entry.get().strip()
@@ -7119,22 +7176,83 @@ class HayvanTakipSistemi:
             'foto_datas': yeni_fotograflar,
             'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         }
-        self.veri_kaydet()
-        messagebox.showinfo("Başarılı", f"Hayvan {gorunen_kupe} başarıyla kaydedildi!")
-        
-        for entry in [self.resmi_kupe_no_entry, self.ciftlik_kupe_no_entry, self.dogum_tarihi_entry, self.anne_kupe_entry, self.laktasyon_no_entry, self.son_dogum_tarihi_entry]:
-            entry.delete(0, tk.END)
+        if getattr(self, "api_modu", False) and not self.offline_modda_mi():
+            self.hayvan_kaydet_arka_planda(yeni_id, gorunen_kupe)
+            return
+
+        self.veri_kaydet(yeni_id)
+        self.hayvan_kayit_tamamlandi(gorunen_kupe)
+
+    def hayvan_kaydet_buton_durum(self, kaydediyor=False):
+        btn = getattr(self, "hayvan_kaydet_btn", None)
+        if not btn:
+            return
+        try:
+            btn.enabled = not kaydediyor
+            btn.itemconfig(btn.text_item, text="KAYDEDİLİYOR..." if kaydediyor else "HAYVANI KAYDET")
+        except tk.TclError:
+            pass
+
+    def hayvan_kayit_formunu_temizle(self):
+        for entry in [
+            self.resmi_kupe_no_entry,
+            self.ciftlik_kupe_no_entry,
+            self.dogum_tarihi_entry,
+            self.anne_kupe_entry,
+            self.laktasyon_no_entry,
+            self.son_dogum_tarihi_entry,
+        ]:
+            try:
+                entry.delete(0, tk.END)
+            except tk.TclError:
+                pass
         self.cins_combo.set('')
         self.irk_combo.set('')
         self.yeni_hayvan_foto_data = None
         self.yeni_hayvan_foto_datas = []
         if hasattr(self, "yeni_hayvan_foto_onizleme_guncelle"):
             self.yeni_hayvan_foto_onizleme_guncelle()
-        self._on_cins_change() 
-        
+        self._on_cins_change()
+
+    def hayvan_kayit_tamamlandi(self, gorunen_kupe, cevrimdisi=False):
+        if cevrimdisi:
+            messagebox.showinfo("Kaydedildi", f"Hayvan {gorunen_kupe} yerel önbelleğe kaydedildi; internet gelince senkronize edilecek.")
+        else:
+            messagebox.showinfo("Başarılı", f"Hayvan {gorunen_kupe} başarıyla kaydedildi!")
+        self.hayvan_kayit_formunu_temizle()
         self.hayvan_listesini_guncelle()
         self.header_ozet_guncelle()
         self.raporlari_guncelle()
+        self.api_durum_guncelle()
+
+    def hayvan_kaydet_arka_planda(self, yeni_id, gorunen_kupe):
+        self._hayvan_kayit_devam_ediyor = True
+        self.hayvan_kaydet_buton_durum(True)
+
+        def worker():
+            sonuc = {"ok": False, "cevrimdisi": False, "hata": None}
+            try:
+                sonuc["ok"] = bool(self.veri_kaydet(yeni_id, hata_mesaji_goster=False, ui_guncelle=False))
+                sonuc["cevrimdisi"] = self.offline_modda_mi()
+            except Exception as e:
+                sonuc["hata"] = e
+
+            def tamamla():
+                self._hayvan_kayit_devam_ediyor = False
+                self.hayvan_kaydet_buton_durum(False)
+                if sonuc["ok"]:
+                    self.hayvan_kayit_tamamlandi(gorunen_kupe, cevrimdisi=sonuc["cevrimdisi"])
+                else:
+                    self.api_durum_guncelle()
+                    mesaj = sonuc["hata"] or getattr(self, "_api_son_hata", None) or "Kayıt tamamlanamadı."
+                    messagebox.showerror("Kayıt Hatası", f"Hayvan kaydedilemedi:\n{mesaj}")
+
+            try:
+                self.root.after(0, tamamla)
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def otomatik_cins_guncelle(self, mevcut_cins, yas_gun):
         return is_otomatik_cins_guncelle(mevcut_cins, yas_gun)
