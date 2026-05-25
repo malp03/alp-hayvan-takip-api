@@ -228,6 +228,13 @@ def main():
         app.tohumlama_ekranina_hayvanla_git(created_id)
         assert app.tohumlama_hayvan_combo.get() == "CF99123456", app.tohumlama_hayvan_combo.get()
         assert app.tohumlama_tarih_entry.get()
+        app.tohumlama_sekli_combo.set("Suni")
+        app.suni_entry.delete(0, tk.END)
+        app.suni_entry.insert(0, "Smoke")
+        app.tohumlama_kaydet()
+        created = app.hayvanlar[created_id]
+        assert len(created.get("tohumlamalar", [])) == 1
+        assert created["tohumlamalar"][0]["suni_isim"] == "Smoke"
 
         created.setdefault("tohumlamalar", []).append({
             "id": "smoke-toh",
