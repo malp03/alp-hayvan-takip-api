@@ -7,10 +7,14 @@ import time
 from pathlib import Path
 
 
-APP_NAME = "ALP Ziraat Hayvan Takip"
-APP_EXE = "ALP_Ziraat_Hayvan_Takip.exe"
-APP_ICON = "alp_ziraat_logo_led.ico"
+APP_NAME = "Alp Ziraat Sürü Takip"
+APP_EXE = "ALP_Ziraat_Suru_Takip.exe"
+APP_ICON = "alp_ziraat_pdf_dark.ico"
 INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Programs" / APP_NAME
+LEGACY_APP_NAMES = ("ALP Ziraat Hayvan Takip",)
+LEGACY_INSTALL_DIRS = (
+    Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Programs" / "ALP Ziraat Hayvan Takip",
+)
 
 
 def resource_path(name: str) -> Path:
@@ -44,7 +48,7 @@ $shortcut = $shell.CreateShortcut($desktopShortcut)
 $shortcut.TargetPath = $exePath
 $shortcut.WorkingDirectory = $installDir
 $shortcut.IconLocation = $shortcutIcon
-$shortcut.Description = "ALP Ziraat Suru Takip Sistemi"
+$shortcut.Description = "Alp Ziraat Sürü Takip Sistemi"
 $shortcut.Save()
 $startDir = Join-Path ([Environment]::GetFolderPath("Programs")) "ALP Ziraat"
 New-Item -ItemType Directory -Force -Path $startDir | Out-Null
@@ -53,7 +57,7 @@ $shortcut = $shell.CreateShortcut($startShortcut)
 $shortcut.TargetPath = $exePath
 $shortcut.WorkingDirectory = $installDir
 $shortcut.IconLocation = $shortcutIcon
-$shortcut.Description = "ALP Ziraat Suru Takip Sistemi"
+$shortcut.Description = "Alp Ziraat Sürü Takip Sistemi"
 $shortcut.Save()
 $uninstallShortcut = Join-Path $startDir "ALP Ziraat Kaldir.lnk"
 $shortcut = $shell.CreateShortcut($uninstallShortcut)
@@ -67,6 +71,23 @@ $shortcut.Save()
         check=True,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
+
+
+def cleanup_legacy_install() -> None:
+    desktop = Path(os.path.expandvars(r"%USERPROFILE%\Desktop"))
+    start_dir = Path(os.environ.get("APPDATA", str(Path.home()))) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "ALP Ziraat"
+    for old_name in LEGACY_APP_NAMES:
+        for shortcut in (desktop / f"{old_name}.lnk", start_dir / f"{old_name}.lnk"):
+            try:
+                shortcut.unlink(missing_ok=True)
+            except Exception:
+                pass
+    for old_dir in LEGACY_INSTALL_DIRS:
+        try:
+            if old_dir.exists() and old_dir.resolve() != INSTALL_DIR.resolve():
+                shutil.rmtree(old_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def wait_for_process(pid: int, timeout: int = 45) -> None:
@@ -91,6 +112,7 @@ def install() -> None:
     if not source_exe.exists():
         raise FileNotFoundError(f"Kurulum paketi eksik: {source_exe}")
 
+    cleanup_legacy_install()
     INSTALL_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_exe, INSTALL_DIR / APP_EXE)
     if source_icon.exists():

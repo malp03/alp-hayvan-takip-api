@@ -3,10 +3,10 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $root "dist"
 $packageDir = Join-Path $dist "installer_package"
-$zipPath = Join-Path $dist "ALP_Ziraat_Hayvan_Takip_Kurulum.zip"
-$exePath = Join-Path $dist "ALP_Ziraat_Hayvan_Takip_Setup.exe"
-$appExe = Join-Path $dist "ALP_Ziraat_Hayvan_Takip.exe"
-$appIcon = Join-Path $root "alp_ziraat_logo_led.ico"
+$zipPath = Join-Path $dist "ALP_Ziraat_Suru_Takip_Kurulum.zip"
+$exePath = Join-Path $dist "ALP_Ziraat_Suru_Takip_Setup.exe"
+$appExe = Join-Path $dist "ALP_Ziraat_Suru_Takip.exe"
+$appIcon = Join-Path $root "alp_ziraat_pdf_dark.ico"
 
 if (!(Test-Path $appExe)) {
     throw "Once EXE uretin: python -m PyInstaller alp_ziraat_hayvan_takip.spec --noconfirm"
@@ -47,7 +47,7 @@ if ($python) {
     & $python.Source -m PyInstaller $setupScript `
         --onefile `
         --noconsole `
-        --name "ALP_Ziraat_Hayvan_Takip_Setup" `
+        --name "ALP_Ziraat_Suru_Takip_Setup" `
         --icon "$installerIcon" `
         --distpath $dist `
         --workpath $setupWork `
