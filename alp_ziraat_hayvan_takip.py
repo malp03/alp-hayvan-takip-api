@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.20"
+APP_VERSION = "1.9.21"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -6151,6 +6151,24 @@ class HayvanTakipSistemi:
         except tk.TclError:
             return
 
+    def hayvan_secimlerini_temizle(self, sadece_gorunen_idler=None):
+        self.hayvan_secimleri = set()
+        tree = getattr(self, "hayvan_tree", None)
+        if tree is None:
+            return
+        gorunen = {str(x) for x in sadece_gorunen_idler} if sadece_gorunen_idler is not None else None
+        try:
+            for item in tree.get_children():
+                degerler = list(tree.item(item, "values") or [])
+                if len(degerler) < 2:
+                    continue
+                if gorunen is not None and str(degerler[0]) not in gorunen:
+                    continue
+                degerler[1] = "\u2610"
+                tree.item(item, values=tuple(degerler))
+        except tk.TclError:
+            pass
+
     def secili_hayvan_yas_ortalamasi(self):
         tree = getattr(self, "hayvan_tree", None)
         if tree is None:
@@ -6185,6 +6203,7 @@ class HayvanTakipSistemi:
             f"Seçilen {len(yaslar)} hayvanın yaş ortalaması:\n\n{yil} yıl {ay} ay\n({ortalama:.0f} gün)",
             parent=self.root,
         )
+        self.hayvan_secimlerini_temizle(gorunen_idler)
 
 
     def raporlama_sekmesi(self):
@@ -7422,7 +7441,8 @@ class HayvanTakipSistemi:
         self.islem_kaydi_baslat(f"Tohumlama kaydı eklendi: {kupe_no}")
         self.hayvanlar[kupe_no]['tohumlamalar'].append(tohumlama_bilgi)
         self.hayvanlar[kupe_no]['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        self.veri_kaydet()
+        if not self.veri_kaydet(kupe_no=kupe_no, ui_guncelle=False):
+            return
         messagebox.showinfo("Başarılı", f"Tohumlama kaydı başarılı!\nTohumlama ID: {tohumlama_id}")
         self.tohumlama_hayvan_combo.set('')
         self.suni_entry.delete(0, tk.END)
@@ -7945,10 +7965,27 @@ class HayvanTakipSistemi:
         if not messagebox.askyesno("Kalıcı Silme Onayı", uyari, parent=pencere):
             return
         self.islem_kaydi_baslat(f"Arşivli hayvan kalıcı silindi: {kupe_no}")
-        if getattr(self, "api_modu", False) and self.offline_modda_mi():
-            self.bekleyen_senkron_delete(kupe_no)
+        api_modu = getattr(self, "api_modu", False)
+        if api_modu:
+            if self.offline_modda_mi():
+                self.bekleyen_senkron_delete(kupe_no)
+            else:
+                try:
+                    self.api_istek("DELETE", f"/api/hayvanlar/{self.api_ref(kupe_no)}?kalici=true", timeout=30)
+                    onceki_idler = set(getattr(self, "_api_son_idler", set()))
+                    onceki_idler.discard(str(kupe_no))
+                    self._api_son_idler = onceki_idler
+                except ApiHatasi as e:
+                    if getattr(e, "status", None) != 404:
+                        self.api_cevrimdisi = True
+                        self._api_son_hata = str(e)
+                        self.bekleyen_senkron_delete(kupe_no)
         del self.hayvanlar[kupe_no]
-        self.veri_kaydet()
+        if api_modu:
+            self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
+            self.api_durum_guncelle()
+        else:
+            self.veri_kaydet()
         messagebox.showinfo("Başarılı", f"{kupe_no} kalıcı olarak silindi.", parent=pencere)
         pencere.destroy()
         self.ekranlari_guncelle()
@@ -8559,7 +8596,7 @@ class HayvanTakipSistemi:
 
         # Aksiyon butonları — sağ sütunda, ortalanmış dikey
         aksiyon_frame = tk.Frame(header_top, bg=self.renkler["siyah"])
-        aksiyon_frame.grid(row=0, column=1, sticky="se", padx=(14, 0), pady=(6, 0))
+        aksiyon_frame.grid(row=0, column=1, sticky="se", padx=(14, 0), pady=(20, 0))
 
         aksiyonlar = [
             ("Düzenle", lambda: self.hayvan_duzenle_penceresi(hayvan_id, detay_window), "default"),
@@ -8602,11 +8639,11 @@ class HayvanTakipSistemi:
                 if genislik < ESIK:
                     # Dar: buton frame'i başlığın altına al
                     sol_header.grid(row=0, column=0, columnspan=2, sticky="w")
-                    aksiyon_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+                    aksiyon_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
                 else:
                     # Geniş: yan yana
                     sol_header.grid(row=0, column=0, sticky="w")
-                    aksiyon_frame.grid(row=0, column=1, sticky="se", padx=(14, 0), pady=(6, 0))
+                    aksiyon_frame.grid(row=0, column=1, sticky="se", padx=(14, 0), pady=(20, 0))
             except tk.TclError:
                 pass
 
