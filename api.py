@@ -32,7 +32,7 @@ import models
 import schemas
 
 
-app = FastAPI(title="ALP Ziraat Hayvan Takip API", version="1.0.0")
+app = FastAPI(title="ALP Ziraat Sürü Takip API", version="1.0.0")
 
 cors_origins = [
     origin.strip()
@@ -1340,7 +1340,7 @@ auth_baslangic_verisini_hazirla()
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "ALP Ziraat Hayvan Takip API çalışıyor."}
+    return {"status": "ok", "message": "ALP Ziraat Sürü Takip API çalışıyor."}
 
 
 @app.get("/api/health")

@@ -44,10 +44,11 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.13"
+APP_VERSION = "1.9.18"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-UPDATE_SETUP_ASSET = "ALP_Ziraat_Hayvan_Takip_Setup.exe"
+UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
+LEGACY_UPDATE_SETUP_ASSETS = ("ALP_Ziraat_Hayvan_Takip_Setup.exe",)
 # --------------------------------------------------------------------
 
 
@@ -147,6 +148,9 @@ class HayvanTakipSistemi:
             self.icon_path = resource_path("alp_ziraat_icon_led.png")
             if not os.path.exists(self.icon_path):
                 self.icon_path = resource_path("alp_ziraat_icon.png")
+            self.icon_ico_path = resource_path("alp_ziraat_pdf_dark.ico")
+            if not os.path.exists(self.icon_ico_path):
+                self.icon_ico_path = resource_path("alp_ziraat_shortcut_led.ico")
             
             self.root.title("ALP ZİRAAT - Sürü Takip Sistemi")
             self.root.geometry("1500x900")
@@ -154,9 +158,10 @@ class HayvanTakipSistemi:
 
             try:
                 self.logo_ikon = ImageTk.PhotoImage(file=self.icon_path)
-                self.root.iconphoto(True, self.logo_ikon)
             except Exception as e:
+                self.logo_ikon = None
                 print(f"Logo ikonu yüklenemedi: {e}")
+            self.uygula_pencere_ikonu(self.root)
 
             self.stil_ayarla()
             self.veri_klasoru_hazirla()
@@ -598,6 +603,19 @@ class HayvanTakipSistemi:
             accent_bar.pack(fill='x', side='top')
         return kart
 
+    def uygula_pencere_ikonu(self, pencere):
+        """PDF kaynakli dark ICO'yu Windows titlebar/kisayol ikonuna uygula."""
+        try:
+            if getattr(self, "icon_ico_path", None) and os.path.exists(self.icon_ico_path):
+                pencere.iconbitmap(self.icon_ico_path)
+        except Exception:
+            pass
+        try:
+            if getattr(self, "logo_ikon", None):
+                pencere.iconphoto(True, self.logo_ikon)
+        except Exception:
+            pass
+
     def modern_popup(self, baslik, genislik=520, yukseklik=420, parent=None):
         parent = parent if parent is not None else self.root
         pencere = tk.Toplevel(parent)
@@ -606,10 +624,7 @@ class HayvanTakipSistemi:
         pencere.minsize(min(genislik, 420), min(yukseklik, 320))
         pencere.configure(bg=self.renkler["arkaplan"])
         pencere.transient(parent)
-        try:
-            pencere.iconphoto(True, self.logo_ikon)
-        except Exception:
-            pass
+        self.uygula_pencere_ikonu(pencere)
         kart = self.modern_kart(pencere, accent=self.renkler["button_primary_bg"])
         kart.pack(fill="both", expand=True, padx=18, pady=18)
         return pencere, kart
@@ -1001,10 +1016,7 @@ class HayvanTakipSistemi:
         pencere.minsize(720, 520)
         pencere.configure(bg=self.renkler["arkaplan"])
         pencere.transient(parent)
-        try:
-            pencere.iconphoto(True, self.logo_ikon)
-        except Exception:
-            pass
+        self.uygula_pencere_ikonu(pencere)
 
         kart = self.modern_kart(pencere, accent=self.renkler["button_primary_bg"])
         kart.pack(fill="both", expand=True, padx=18, pady=18)
@@ -1735,7 +1747,7 @@ class HayvanTakipSistemi:
         req = urllib.request.Request(
             GITHUB_LATEST_RELEASE_API,
             headers={
-                "User-Agent": f"ALP-Ziraat-Hayvan-Takip/{APP_VERSION}",
+                "User-Agent": f"ALP-Ziraat-Suru-Takip/{APP_VERSION}",
                 "Accept": "application/vnd.github+json",
             },
         )
@@ -1752,8 +1764,10 @@ class HayvanTakipSistemi:
 
     def guncelleme_asset_bul(self, release):
         assets = release.get("assets") or []
+        aranan_adlar = (UPDATE_SETUP_ASSET, *LEGACY_UPDATE_SETUP_ASSETS)
         for asset in assets:
-            if str(asset.get("name", "")).lower() == UPDATE_SETUP_ASSET.lower():
+            asset_adi = str(asset.get("name", "")).lower()
+            if any(asset_adi == ad.lower() for ad in aranan_adlar):
                 return asset
         for asset in assets:
             ad = str(asset.get("name", "")).lower()
@@ -1777,10 +1791,13 @@ class HayvanTakipSistemi:
 
         hedef_klasor = os.path.join(tempfile.gettempdir(), "ALP_Ziraat_Update")
         os.makedirs(hedef_klasor, exist_ok=True)
-        hedef = os.path.join(hedef_klasor, UPDATE_SETUP_ASSET)
+        asset_adi = os.path.basename(str(asset.get("name") or UPDATE_SETUP_ASSET))
+        if not asset_adi.lower().endswith(".exe"):
+            asset_adi = UPDATE_SETUP_ASSET
+        hedef = os.path.join(hedef_klasor, asset_adi)
         gecici = hedef + ".download"
 
-        req = urllib.request.Request(url, headers={"User-Agent": f"ALP-Ziraat-Hayvan-Takip/{APP_VERSION}"})
+        req = urllib.request.Request(url, headers={"User-Agent": f"ALP-Ziraat-Suru-Takip/{APP_VERSION}"})
         with urllib.request.urlopen(req, timeout=180) as response, open(gecici, "wb") as f:
             shutil.copyfileobj(response, f)
         if os.path.exists(hedef):
@@ -2742,18 +2759,11 @@ class HayvanTakipSistemi:
         self.themed_widgets.append((baslik_kutu, 'kart'))
         tk.Label(
             baslik_kutu,
-            text="ALP Ziraat",
-            bg=self.renkler["kart_arkaplan"],
-            fg=self.renkler["yazi_rengi"],
-            font=("Segoe UI", 19, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            baslik_kutu,
             text="Çiftlik hesabınıza giriş yapın",
             bg=self.renkler["kart_arkaplan"],
             fg=self.renkler["muted"],
-            font=("Segoe UI", 10),
-        ).pack(anchor="w", pady=(2, 0))
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w", pady=(16, 0))
 
         tk.Label(
             kutu,
@@ -3010,10 +3020,7 @@ class HayvanTakipSistemi:
         pencere.minsize(620, 480)
         pencere.configure(bg=self.renkler["arkaplan"])
         pencere.transient(parent)
-        try:
-            pencere.iconphoto(True, self.logo_ikon)
-        except Exception:
-            pass
+        self.uygula_pencere_ikonu(pencere)
 
         sayfa = self.kaydirilabilir_sayfa(pencere, padx=20, pady=18)
         tk.Label(
@@ -3667,10 +3674,7 @@ class HayvanTakipSistemi:
         pencere.minsize(720, 460)
         pencere.configure(bg=self.renkler["arkaplan"])
         pencere.transient(self.root)
-        try:
-            pencere.iconphoto(True, self.logo_ikon)
-        except Exception:
-            pass
+        self.uygula_pencere_ikonu(pencere)
         pencere.grab_set()
 
         ciftlikler = []
@@ -3927,10 +3931,7 @@ class HayvanTakipSistemi:
         pencere.minsize(760, 500)
         pencere.configure(bg=self.renkler["arkaplan"])
         pencere.transient(self.root)
-        try:
-            pencere.iconphoto(True, self.logo_ikon)
-        except Exception:
-            pass
+        self.uygula_pencere_ikonu(pencere)
         pencere.grab_set()
 
         kullanicilar = []
@@ -4963,7 +4964,7 @@ class HayvanTakipSistemi:
         header_accentstrip = tk.Frame(self.root, bg=self.renkler["ana_kirmizi"], height=4)
         header_accentstrip.pack(fill='x')
 
-        self.baslik_frame = tk.Frame(self.root, bg=self.renkler["siyah"], height=88)
+        self.baslik_frame = tk.Frame(self.root, bg=self.renkler["siyah"], height=96)
         self.baslik_frame.pack(fill='x')
         self.baslik_frame.pack_propagate(False)
         self.themed_widgets.append((self.baslik_frame, 'baslik_frame'))
@@ -4983,7 +4984,7 @@ class HayvanTakipSistemi:
         logo_pill.pack(side='left', fill='y', pady=8, padx=(0, 14))
         try:
             logo_image = Image.open(self.logo_path).convert("RGBA")
-            logo_image.thumbnail((148, 58), Image.Resampling.LANCZOS)
+            logo_image.thumbnail((190, 74), Image.Resampling.LANCZOS)
             self.logo_gorsel = ImageTk.PhotoImage(logo_image)
             tk.Label(logo_pill, image=self.logo_gorsel, bg=self.renkler["siyah"]).pack()
         except Exception as e:
@@ -4998,10 +4999,10 @@ class HayvanTakipSistemi:
         baslik_label = tk.Label(baslik_metin_grup, text="SÜRÜ TAKİP SİSTEMİ",
                                 bg=self.renkler["siyah"], fg='#F1F5F9',
                                 font=('Segoe UI', 18, 'bold'), anchor='w')
-        baslik_label.pack(anchor='w', pady=(18, 0))
+        baslik_label.pack(anchor='w', pady=(22, 0))
         self.themed_widgets.append((baslik_label, 'baslik_label'))
 
-        alt_baslik = tk.Label(baslik_metin_grup, text="Alp Ziraat  ·  Hayvan Yönetim Platformu",
+        alt_baslik = tk.Label(baslik_metin_grup, text="Hayvan Yönetim Platformu",
                               bg=self.renkler["siyah"], fg=self.renkler["muted"],
                               font=('Segoe UI', 9), anchor='w')
         alt_baslik.pack(anchor='w')
@@ -5740,7 +5741,7 @@ class HayvanTakipSistemi:
 
         # --- Row 2 ---
         self.irk_combo = self.modern_form_satir(form_frame, "Irk", ttk.Combobox, row=2, col=0, values=self.hayvan_irk_secenekleri(), font=('Segoe UI', 11), style='TCombobox')
-        self.anne_kupe_entry = self.modern_form_satir(form_frame, "Anne Çiftlik Küpe No", ttk.Entry, row=2, col=1, font=('Segoe UI', 11), style='TEntry')
+        self.anne_kupe_entry = self.modern_form_satir(form_frame, "Anne Resmi Küpe No", ttk.Entry, row=2, col=1, font=('Segoe UI', 11), style='TEntry')
         self.irk_combo.master.grid_configure(pady=6)
         self.anne_kupe_entry.master.grid_configure(pady=6)
 
@@ -7882,7 +7883,7 @@ class HayvanTakipSistemi:
             ("Doğum Tarihi", dogum_entry),
             ("Cinsi", cins_combo),
             ("Irk", irk_combo),
-            ("Anne Küpe No", anne_entry),
+            ("Anne Resmi Küpe No", anne_entry),
         ]):
             label = tk.Label(form, text=label_text, bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold'))
             label.grid(row=row, column=0, sticky='w', pady=12, padx=(0, 20))
@@ -8563,7 +8564,7 @@ class HayvanTakipSistemi:
         self.profil_bilgi_satiri(kimlik_body, "Yaş", yas_metin)
         self.profil_bilgi_satiri(kimlik_body, "Cinsi", hayvan.get("cins") or "-")
         self.profil_bilgi_satiri(kimlik_body, "Irk", hayvan.get("irk") or "-")
-        self.profil_bilgi_satiri(kimlik_body, "Anne Küpe", hayvan.get("anne_kupe") or "Bilinmiyor")
+        self.profil_bilgi_satiri(kimlik_body, "Anne Resmi Küpe", hayvan.get("anne_kupe") or "Bilinmiyor")
         self.profil_bilgi_satiri(kimlik_body, "Durum", durum)
 
         metrik_kart, metrik_body = self.profil_kart_olustur(ust, "Özet", accent=self.renkler["uyari"])

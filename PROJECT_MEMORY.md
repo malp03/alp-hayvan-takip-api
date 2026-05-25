@@ -6,7 +6,7 @@ Bu dosya projenin mevcut halini, yapilan degisiklikleri, testleri ve dagitim not
 
 ## Proje Ozeti
 
-ALP Ziraat Hayvan Takip uygulamasi, ciftliklerin suru kayitlarini yonetmesi icin yazilmis bir masaustu uygulamasidir.
+Alp Ziraat Suru Takip uygulamasi, ciftliklerin suru kayitlarini yonetmesi icin yazilmis bir masaustu uygulamasidir.
 
 - Masaustu uygulamasi: `alp_ziraat_hayvan_takip.py`
 - Arayuz: Tkinter tabanli koyu dashboard tasarimi
@@ -293,7 +293,7 @@ Desktop profil ile ayni sekmeleri icermeli:
 - Desktop uygulama surumu `alp_ziraat_hayvan_takip.py` icindeki `APP_VERSION` sabitinden okunur. Yeni release cikarken bu deger GitHub tag'iyle ayni olmalidir, ornek: `APP_VERSION = "1.9.0"` ve release tag `v1.9.0`.
 - Kurulu EXE calistiginda login tamamlanip ana ekran acildiktan sonra GitHub latest release kontrol edilir. Kaynak koddan/testten calisirken kontrol varsayilan olarak kapali; EXE icinde aktiftir. Test icin `ALP_FORCE_UPDATE_CHECK=1`, kapatmak icin `ALP_SKIP_UPDATE_CHECK=1` kullanilir.
 - Latest release mevcut surumden yeniyse modal popup acilir: kullanici uygulamayi kullanmadan once `Guncelle`ye basmak zorundadir veya uygulamadan cikar.
-- Guncelleme popup'i GitHub release asset'leri icinden once `ALP_Ziraat_Hayvan_Takip_Setup.exe` dosyasini arar; yoksa `setup` iceren `.exe`, o da yoksa herhangi `.exe` asset'e duser.
+- Guncelleme popup'i GitHub release asset'leri icinden once `ALP_Ziraat_Suru_Takip_Setup.exe` dosyasini arar; geriye donuk uyumluluk icin `ALP_Ziraat_Hayvan_Takip_Setup.exe` asset'ini de kabul eder. Bunlar yoksa `setup` iceren `.exe`, o da yoksa herhangi `.exe` asset'e duser.
 - Uygulama setup dosyasini temp klasore indirir, release notlarini `bekleyen_guncelleme_notu.json` olarak AppData'ya yazar, setup'i `--launch --wait-pid <pid>` ile calistirir ve kapanir.
 - `installer/setup_installer.py` `--wait-pid` gelirse eski uygulama kapanana kadar bekler, EXE'yi kurar, `--launch` gelirse yeni uygulamayi tekrar baslatir.
 - Yeni surum acildiginda AppData'daki bekleyen release notu, `APP_VERSION` ile eslesiyorsa kullaniciya `Uygulama Guncellendi` penceresi olarak gosterilir ve sonra dosya temizlenir.
@@ -341,7 +341,11 @@ Desktop profil ile ayni sekmeleri icermeli:
 - 25 Mayis 2026: Hayvan kaydi performansi iyilestirildi. API modunda yeni hayvan kaydi artik UI'yi kilitlemeden arka planda calisir; buton `KAYDEDILIYOR...` durumuna gecer ve tamamlaninca form temizlenir. `veri_kaydet(kupe_no=...)` yolu gercek tekil API kaydina baglandi; yeni/degisen hayvan icin tum suru tekrar gonderilmez. `Senkronize Et` ve liste yenileme hala tam API yenilemesi yapar. Desktop `APP_VERSION` `1.9.10` yapildi. Son tam test: `python tools\run_smoke_tests.py` gecti.
 - 25 Mayis 2026: Logo gorunumu yenilendi. Beyaz logo zeminleri login ve ana header alanindan kaldirildi; transparent LED vurgulu `alp_ziraat_logo_led.png`, `alp_ziraat_icon_led.png` ve `alp_ziraat_logo_led.ico` eklendi. Uygulama, pencere ve kisayol ikonlari LED ikonla paketlenir; eski logo dosyalari geriye donuk yedek olarak kalir. Desktop `APP_VERSION` `1.9.11` yapildi.
 - 25 Mayis 2026: Kurulum ve kisayol gorunumu modernlestirildi. Hem ZIP icindeki `install.ps1` hem de tek tik `Setup.exe`, LED `alp_ziraat_logo_led.ico` dosyasini kurulum klasorune kopyalar ve Masaustu/Baslat menusu kisayollarinda dogrudan bu ikonu kullanir. Kisa yollara aciklama metni de eklendi. Desktop `APP_VERSION` `1.9.12` yapildi.
-- 25 Mayis 2026: Kucuk Windows kisayolunda tam logo okunmadigi icin ikon yeniden tasarlandi. `alp_ziraat_icon_led.png` ve `alp_ziraat_logo_led.ico` artik buyuk ALP monogram, parlak kirmizi/camgobegi cerceve ve koyu kontrastli zemin kullanir; kucuk masaustu ikonunda gorunurluk artirildi. Desktop `APP_VERSION` `1.9.13` yapildi.
+- 25 Mayis 2026: Kucuk Windows kisayolu icin denenen monogram tasarim kullanilmadi; resmi sirket logosu korunacak sekilde geri donuldu. `alp_ziraat_logo_led.png` mevcut resmi `alp_ziraat_logo.png` dosyasindan sadece yuksek cozunurluklu/upscale uretildi, tasarim/renk/kompozisyon degistirilmedi. Kisa yol cache sorununu kirmak icin resmi kare ikon yeni `alp_ziraat_shortcut_led.ico` adiyla paketlenir. Header logo gosterimi biraz buyutuldu. Desktop `APP_VERSION` `1.9.14` yapildi.
+- 25 Mayis 2026: Logo varliklari kullanicinin verdigi `C:\Users\mehme\Desktop\alpziraatwebsite\logo.pdf` dosyasindan yeniden uretildi. PDF kaynakli logo yuksek cozunurlukte render edildi, beyaz PDF zemini kaldirildi ve logonun sekli/yazi tipi/yerlesimi korunarak sadece arka parilti katmani eklendi. `alp_ziraat_logo_led.png`, `alp_ziraat_icon_led.png`, `alp_ziraat_logo_led.ico` ve `alp_ziraat_shortcut_led.ico` PDF kalitesine gore guncellendi. Desktop `APP_VERSION` `1.9.15` yapildi.
+- 25 Mayis 2026: Baslik cubugu/titlebar ikonu da PDF kaynakli dark ICO'ya baglandi. Uygulama artik Windows tarafinda `iconbitmap` ile `alp_ziraat_shortcut_led.ico` dosyasini, Tk tarafinda `iconphoto` ile `alp_ziraat_icon_led.png` dosyasini birlikte uygular. Modern popup ve alt pencereler ayni ikon yardimcisini kullanir. Desktop `APP_VERSION` `1.9.16` yapildi.
+- 25 Mayis 2026: Windows icon cache eski beyaz kisayol ikonunu gosterebildigi icin PDF kaynakli dark ikon yeni `alp_ziraat_pdf_dark.ico` dosya adiyla uretildi ve EXE, setup, install scriptleri ve titlebar ikon yolu buna baglandi. Login ekranindaki tekrar eden `ALP Ziraat` metni kaldirildi; ana header alt basligi `Hayvan Yonetim Platformu` olarak sadelestirildi. Desktop `APP_VERSION` `1.9.17` yapildi.
+- 25 Mayis 2026: Dagitim/kurulum adi `Alp Ziraat Suru Takip` olarak guncellendi. Yeni EXE `ALP_Ziraat_Suru_Takip.exe`, setup asset'i `ALP_Ziraat_Suru_Takip_Setup.exe`, ZIP `ALP_Ziraat_Suru_Takip_Kurulum.zip` olarak uretilir; updater eski `ALP_Ziraat_Hayvan_Takip_Setup.exe` asset'ini de yedek olarak kabul eder. Installer eski `ALP Ziraat Hayvan Takip` kisayollarini ve eski kurulum klasorunu temizler. `Anne Ciftlik Kupe No` gorunen etiketleri `Anne Resmi Kupe No` olarak duzeltildi. Desktop `APP_VERSION` `1.9.18` yapildi.
 
 ## 22 Mayis 2026 v1.9.1 Release Notu
 
