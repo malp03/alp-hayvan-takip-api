@@ -199,6 +199,9 @@ class HayvanBase(AlpModel):
     kesildi: bool = False
     kesim_tarihi: Optional[str] = None
     kesim_bilgisi: Optional[KesimBilgisi] = None
+    satildi: bool = False
+    satis_tarihi: Optional[str] = None
+    satis_bilgisi: Optional[Dict[str, Any]] = None
     arsivli: bool = False
     arsiv_tarihi: Optional[str] = None
     foto_data: Optional[str] = None
@@ -243,6 +246,9 @@ class HayvanUpdate(AlpModel):
     kesildi: Optional[bool] = None
     kesim_tarihi: Optional[str] = None
     kesim_bilgisi: Optional[KesimBilgisi] = None
+    satildi: Optional[bool] = None
+    satis_tarihi: Optional[str] = None
+    satis_bilgisi: Optional[Dict[str, Any]] = None
     arsivli: Optional[bool] = None
     arsiv_tarihi: Optional[str] = None
     foto_data: Optional[str] = None

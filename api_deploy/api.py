@@ -56,8 +56,8 @@ TARIH_FORMATI = "%d/%m/%Y"
 ZAMAN_FORMATI = "%d/%m/%Y %H:%M:%S"
 ERKEK_CINSLER = {"Erkek Buzağı", "Dana"}
 DISI_CINSLER = {"Dişi Buzağı", "Düve", "Sağmal İnek", "Kuru İnek"}
-DEFAULT_CIFTLIK_ID = os.getenv("ALP_DEFAULT_CIFTLIK_ID", "varsayilan-ciftlik")
-DEFAULT_CIFTLIK_ADI = os.getenv("ALP_DEFAULT_CIFTLIK_ADI", "Varsayılan Çiftlik")
+LEGACY_DEFAULT_CIFTLIK_ID = "varsayilan-ciftlik"
+LEGACY_DEFAULT_CIFTLIK_ADI = "Varsayılan Çiftlik"
 AUTH_SECRET = os.getenv("ALP_AUTH_SECRET", "alp-ziraat-dev-secret-change-me")
 TOKEN_TTL_SECONDS = int(os.getenv("ALP_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 DEVICE_TOKEN_TTL_SECONDS = int(os.getenv("ALP_DEVICE_TOKEN_TTL_SECONDS", str(90 * 24 * 60 * 60)))
@@ -590,6 +590,8 @@ def storage_pathlari(refs: Iterable[str]) -> List[str]:
 
 
 def storage_fotograflari_sil(refs: Iterable[str]) -> int:
+    if not storage_aktif_mi():
+        return 0
     paths = storage_pathlari(refs)
     if not paths:
         return 0
@@ -614,6 +616,65 @@ def storage_fotograflari_sil(refs: Iterable[str]) -> int:
         except Exception as hata:
             print(f"Storage fotograf temizleme hatasi: {hata}")
     return silinen
+
+
+def storage_dosyalari_listele(prefix: str = "", max_derinlik: int = 8) -> List[str]:
+    if not storage_aktif_mi():
+        return []
+    bucket = urllib.parse.quote(ALP_PHOTO_BUCKET, safe="")
+    list_url = f"{SUPABASE_URL}/storage/v1/object/list/{bucket}"
+    bulunan: List[str] = []
+    gorulen_prefixler: set[str] = set()
+
+    def gez(aktif_prefix: str, derinlik: int) -> None:
+        if derinlik > max_derinlik or aktif_prefix in gorulen_prefixler:
+            return
+        gorulen_prefixler.add(aktif_prefix)
+        limit = 1000
+        offset = 0
+        while True:
+            body = {
+                "prefix": aktif_prefix,
+                "limit": limit,
+                "offset": offset,
+                "sortBy": {"column": "name", "order": "asc"},
+            }
+            request = urllib.request.Request(
+                list_url,
+                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                    "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                    "Content-Type": "application/json",
+                },
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    kayitlar = json.loads(response.read().decode("utf-8") or "[]")
+            except Exception as hata:
+                print(f"Storage listeleme hatasi: {hata}")
+                return
+            if not isinstance(kayitlar, list) or not kayitlar:
+                return
+            for kayit in kayitlar:
+                if not isinstance(kayit, dict):
+                    continue
+                ad = metin(kayit.get("name"))
+                if not ad:
+                    continue
+                yol = f"{aktif_prefix.rstrip('/')}/{ad}" if aktif_prefix else ad
+                if kayit.get("id") or kayit.get("metadata") or kayit.get("updated_at"):
+                    if yol not in bulunan:
+                        bulunan.append(yol)
+                else:
+                    gez(yol, derinlik + 1)
+            if len(kayitlar) < limit:
+                return
+            offset += limit
+
+    gez(prefix.strip("/"), 0)
+    return bulunan
 
 
 def storage_foto_yukle(veri: Dict[str, Any], foto: str, index: int) -> str:
@@ -913,6 +974,20 @@ def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -
     if kesim_bilgisi.get("tarih"):
         parse_tarih(kesim_bilgisi.get("tarih"), "Kesim tarihi")
     sonuc["kesim_bilgisi"] = kesim_bilgisi or None
+    sonuc["satildi"] = bool(sonuc.get("satildi", False))
+    sonuc["satis_tarihi"] = bos_yoksa_none(sonuc.get("satis_tarihi"))
+    satis_bilgisi = sonuc.get("satis_bilgisi") or {}
+    if not satis_bilgisi and sonuc["satis_tarihi"]:
+        satis_bilgisi = {"tarih": sonuc["satis_tarihi"]}
+    if satis_bilgisi.get("tarih"):
+        parse_tarih(satis_bilgisi.get("tarih"), "Satış tarihi")
+    sonuc["satis_bilgisi"] = satis_bilgisi or None
+    if sonuc["satildi"]:
+        sonuc["durum"] = "Satıldı"
+        sonuc["durum_notu"] = "Satıldı"
+        sonuc["gebe_mi"] = False
+        sonuc["gebelik_tarihi"] = None
+        sonuc["aktif_tohumlama_id"] = None
     sonuc["arsivli"] = bool(sonuc.get("arsivli", False))
     sonuc["arsiv_tarihi"] = bos_yoksa_none(sonuc.get("arsiv_tarihi"))
     if sonuc["arsiv_tarihi"]:
@@ -922,6 +997,7 @@ def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -
         ("dogum_tarihi", "Doğum tarihi"),
         ("gebelik_tarihi", "Gebelik tarihi"),
         ("olum_tarihi", "Ölüm tarihi"),
+        ("satis_tarihi", "Satış tarihi"),
         ("arsiv_tarihi", "Arşiv tarihi"),
     ]:
         tarih = parse_tarih_sessiz(sonuc.get(alan))
@@ -1016,6 +1092,9 @@ def db_hayvandan_payload(h: models.Hayvan) -> Dict[str, Any]:
             "kesildi": bool(h.kesildi),
             "kesim_tarihi": h.kesim_tarihi,
             "kesim_bilgisi": {"tarih": h.kesim_tarihi} if h.kesim_tarihi else None,
+            "satildi": h.durum_notu == "Satıldı",
+            "satis_tarihi": None,
+            "satis_bilgisi": None,
             "arsivli": bool(h.arsivli),
             "arsiv_tarihi": h.arsiv_tarihi,
             "son_guncelleme": h.son_guncelleme or "",
@@ -1144,32 +1223,9 @@ def kupe_cakismasi_kontrol(
             raise HTTPException(status_code=400, detail=f"{kupe} küpe numarası bu çiftlikte zaten kayıtlı.")
 
 
-def varsayilan_ciftlik_ve_kayitlari_hazirla(db: Session) -> Optional[models.Ciftlik]:
-    ciftlik = db.query(models.Ciftlik).filter(models.Ciftlik.id == DEFAULT_CIFTLIK_ID).first()
-    ciftliksiz_hayvan_sayisi = db.query(models.Hayvan).filter(models.Hayvan.ciftlik_id.is_(None)).count()
-    if ciftliksiz_hayvan_sayisi == 0:
-        return ciftlik
-    if not ciftlik:
-        ciftlik = models.Ciftlik(
-            id=DEFAULT_CIFTLIK_ID,
-            ad=DEFAULT_CIFTLIK_ADI,
-            aciklama="Mevcut kayıtların taşındığı varsayılan çiftlik",
-            aktif=True,
-            olusturma_tarihi=simdi(),
-        )
-        db.add(ciftlik)
-        db.flush()
-    db.query(models.Hayvan).filter(models.Hayvan.ciftlik_id.is_(None)).update(
-        {models.Hayvan.ciftlik_id: ciftlik.id},
-        synchronize_session=False,
-    )
-    return ciftlik
-
-
 def auth_baslangic_verisini_hazirla():
     db = next(get_db())
     try:
-        varsayilan_ciftlik_ve_kayitlari_hazirla(db)
         if db.query(models.Kullanici).count() == 0:
             admin_sifre = os.getenv("ALP_BOOTSTRAP_ADMIN_PASSWORD")
             if admin_sifre:
@@ -1190,7 +1246,7 @@ def auth_baslangic_verisini_hazirla():
 
 
 def hayvan_aktif_mi(veri: Dict[str, Any]) -> bool:
-    return not (veri.get("arsivli") or veri.get("olu") or veri.get("kesildi"))
+    return not (veri.get("arsivli") or veri.get("olu") or veri.get("kesildi") or veri.get("satildi"))
 
 
 def tohumlama_kurallarini_kontrol(veri: Dict[str, Any], tohumlama: Dict[str, Any]) -> None:
@@ -1710,6 +1766,7 @@ def get_hayvanlar(
             models.Hayvan.arsivli.is_(False),
             models.Hayvan.olu.is_(False),
             models.Hayvan.kesildi.is_(False),
+            or_(models.Hayvan.durum_notu.is_(None), models.Hayvan.durum_notu != "Satıldı"),
         )
     if q:
         eslesenler = [h for h in sorgu.all() if hayvan_arama_eslesir(h, q, kaynak="normal")]
@@ -1735,6 +1792,7 @@ def hayvan_ref_ara(
             models.Hayvan.arsivli.is_(False),
             models.Hayvan.olu.is_(False),
             models.Hayvan.kesildi.is_(False),
+            or_(models.Hayvan.durum_notu.is_(None), models.Hayvan.durum_notu != "Satıldı"),
         )
     eslesenler = [h for h in sorgu.all() if hayvan_arama_eslesir(h, ref, kaynak=kaynak)]
     return {
@@ -1763,7 +1821,9 @@ def create_hayvan(
 ):
     veri = normalize_hayvan(model_verisi(hayvan))
     hedef_ciftlik_id = kullanici_ciftlik_id(kullanici, veri.get("ciftlik_id"))
-    veri["ciftlik_id"] = hedef_ciftlik_id or DEFAULT_CIFTLIK_ID
+    if not hedef_ciftlik_id:
+        raise HTTPException(status_code=400, detail="Hayvan kaydı için çiftlik seçilmelidir.")
+    veri["ciftlik_id"] = hedef_ciftlik_id
     ciftlik_bul(db, veri["ciftlik_id"])
     if db.query(models.Hayvan).filter(models.Hayvan.id == veri["id"]).first():
         raise HTTPException(status_code=400, detail="Bu id ile kayıt zaten var.")
@@ -2294,6 +2354,7 @@ def get_sistem_durumu(
             models.Hayvan.arsivli.is_(False),
             models.Hayvan.olu.is_(False),
             models.Hayvan.kesildi.is_(False),
+            or_(models.Hayvan.durum_notu.is_(None), models.Hayvan.durum_notu != "Satıldı"),
         )
         .count()
     )
@@ -2387,6 +2448,70 @@ def test_verilerini_sifirla(
             f"Silinen: {sayilar}"
         ),
         "id": "test-verileri",
+    }
+
+
+@app.post("/api/admin/canli-temizlik", response_model=schemas.IslemSonucResponse)
+def canli_temizlik(
+    varsayilan_ciftlik: bool = Query(default=True),
+    islem_gecmisi: bool = Query(default=True),
+    storage: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    _: models.Kullanici = Depends(require_admin),
+):
+    silinecek_fotograflar: List[str] = []
+    sonuc = {
+        "varsayilan_ciftlik": 0,
+        "varsayilan_hayvan": 0,
+        "varsayilan_kullanici": 0,
+        "islem_gecmisi": 0,
+        "storage": 0,
+    }
+
+    if varsayilan_ciftlik:
+        legacy_ciftlikler = db.query(models.Ciftlik).filter(
+            or_(
+                models.Ciftlik.id == LEGACY_DEFAULT_CIFTLIK_ID,
+                models.Ciftlik.ad == LEGACY_DEFAULT_CIFTLIK_ADI,
+            )
+        ).all()
+        for ciftlik in legacy_ciftlikler:
+            ciftlik_id = ciftlik.id
+            for hayvan in db.query(models.Hayvan).filter(models.Hayvan.ciftlik_id == ciftlik_id).all():
+                paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(hayvan))
+                silinecek_fotograflar.extend(paths)
+            hayvan_idleri = [
+                satir[0]
+                for satir in db.query(models.Hayvan.id).filter(models.Hayvan.ciftlik_id == ciftlik_id).all()
+            ]
+            if hayvan_idleri:
+                db.query(models.Tohumlama).filter(models.Tohumlama.hayvan_id.in_(hayvan_idleri)).delete(synchronize_session=False)
+                db.query(models.AsiProsedur).filter(models.AsiProsedur.hayvan_id.in_(hayvan_idleri)).delete(synchronize_session=False)
+                db.query(models.Uyari).filter(models.Uyari.hayvan_id.in_(hayvan_idleri)).delete(synchronize_session=False)
+            sonuc["varsayilan_hayvan"] += db.query(models.Hayvan).filter(
+                models.Hayvan.ciftlik_id == ciftlik_id
+            ).delete(synchronize_session=False)
+            sonuc["varsayilan_kullanici"] += db.query(models.Kullanici).filter(
+                models.Kullanici.ciftlik_id == ciftlik_id
+            ).delete(synchronize_session=False)
+            db.query(models.IslemGecmisi).filter(models.IslemGecmisi.ciftlik_id == ciftlik_id).delete(synchronize_session=False)
+            db.delete(ciftlik)
+            sonuc["varsayilan_ciftlik"] += 1
+
+    if islem_gecmisi:
+        sonuc["islem_gecmisi"] = db.query(models.IslemGecmisi).delete(synchronize_session=False)
+
+    db.commit()
+
+    if storage:
+        silinecek_fotograflar.extend(storage_dosyalari_listele())
+    sonuc["storage"] = storage_fotograflari_sil(silinecek_fotograflar)
+
+    return {
+        "status": "ok",
+        "message": f"Canli temizlik tamamlandi: {sonuc}",
+        "id": "canli-temizlik",
+        "detay": sonuc,
     }
 
 
