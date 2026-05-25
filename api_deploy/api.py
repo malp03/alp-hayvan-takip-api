@@ -1914,7 +1914,20 @@ def delete_hayvan(
         silinen_id = db_hayvan.id
         silinen_kupe = db_hayvan.ciftlik_kupe_no or db_hayvan.resmi_kupe_no or db_hayvan.id
         silinen_ciftlik_id = db_hayvan.ciftlik_id
-        silinecek_foto_paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(db_hayvan))
+        silinecek_refs: List[str] = []
+        for kaynak in (db_hayvandan_payload(db_hayvan),):
+            paths, urls, _ = foto_referanslarini_topla(kaynak)
+            silinecek_refs.extend(paths)
+            silinecek_refs.extend(urls)
+        try:
+            ham_veri = json.loads(db_hayvan.veri_json or "{}")
+            if isinstance(ham_veri, dict):
+                paths, urls, _ = foto_referanslarini_topla(ham_veri)
+                silinecek_refs.extend(paths)
+                silinecek_refs.extend(urls)
+        except (TypeError, json.JSONDecodeError):
+            pass
+        silinecek_foto_paths = storage_pathlari(silinecek_refs)
         db.delete(db_hayvan)
         audit_kaydi(
             db,
