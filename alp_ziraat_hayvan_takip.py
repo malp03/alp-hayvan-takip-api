@@ -6069,10 +6069,10 @@ class HayvanTakipSistemi:
         tree_frame.pack(fill='both', expand=True)
         self.themed_widgets.append((tree_frame, 'kart'))
 
-        columns = ('ID', 'Çiftlik', 'Resmi Küpe', 'Çiftlik Küpesi', 'Yaş', 'Cinsi', 'Durum', 'Son Tohumlama', 'Doğum Tahmini', 'Sağım Günü', 'Uyarılar')
+        columns = ('ID', 'Çiftlik', 'Resmi Küpe', 'Çiftlik Küpesi', 'Irk', 'Yaş', 'Cinsi', 'Durum', 'Son Tohumlama', 'Doğum Tahmini', 'Sağım Günü', 'Uyarılar')
         self.hayvan_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', style='Modern.Treeview')
         col_widths = {
-            'ID': 0, 'Çiftlik': 160, 'Resmi Küpe': 130, 'Çiftlik Küpesi': 110, 'Yaş': 90, 'Cinsi': 150, 'Durum': 140,
+            'ID': 0, 'Çiftlik': 150, 'Resmi Küpe': 135, 'Çiftlik Küpesi': 115, 'Irk': 110, 'Yaş': 90, 'Cinsi': 140, 'Durum': 130,
             'Son Tohumlama': 145, 'Doğum Tahmini': 145, 'Sağım Günü': 120, 'Uyarılar': 240
         }
         
@@ -8815,8 +8815,9 @@ class HayvanTakipSistemi:
                 final_tags = ['odd' if row_idx % 2 == 0 else 'even']
             resmi = hayvan.get('resmi_kupe_no', '-') or '-'
             ciftlik = hayvan.get('ciftlik_kupe_no', '-') or '-'
+            irk = hayvan.get('irk', '-') or '-'
             ciftlik_ad = hayvan.get('ciftlik_ad') or hayvan.get('ciftlik_id') or '-'
-            self.hayvan_tree.insert('', 'end', values=(kupe_no, ciftlik_ad, resmi, ciftlik, yas_str, hayvan['cins'], mevcut_durum, son_tohumlama, dogum_tahmini, sagim_gun_str, uyarilar), tags=tuple(final_tags))
+            self.hayvan_tree.insert('', 'end', values=(kupe_no, ciftlik_ad, resmi, ciftlik, irk, yas_str, hayvan['cins'], mevcut_durum, son_tohumlama, dogum_tahmini, sagim_gun_str, uyarilar), tags=tuple(final_tags))
             row_idx += 1
 
         #  TAG RENKLERI 
