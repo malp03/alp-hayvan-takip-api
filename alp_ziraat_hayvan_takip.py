@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.18"
+APP_VERSION = "1.9.19"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -177,6 +177,7 @@ class HayvanTakipSistemi:
             self._foto_loading_callbacks = {}
             self._foto_cache_lock = threading.Lock()
             self._hayvan_kayit_devam_ediyor = False
+            self.hayvan_secimleri = set()
             self.admin_aktif_ciftlik_id = None
             self.admin_aktif_ciftlik_ad = None
             self._login_yeniden_iste = False
@@ -4396,6 +4397,12 @@ class HayvanTakipSistemi:
         veri['olu'] = bool(veri.get('olu', False))
         veri['kesildi'] = bool(veri.get('kesildi', False))
         veri['arsivli'] = bool(veri.get('arsivli', False))
+        veri['satildi'] = bool(veri.get('satildi', False))
+        if veri['satildi']:
+            veri['durum'] = "Satıldı"
+            veri['gebe_mi'] = False
+            veri['gebelik_tarihi'] = None
+            veri['aktif_tohumlama_id'] = None
         veri.setdefault('anne_kupe', "")
         veri.setdefault('ciftlik_id', None)
         veri.setdefault('ciftlik_ad', None)
@@ -4405,6 +4412,8 @@ class HayvanTakipSistemi:
         veri.setdefault('olum_tarihi', None)
         veri.setdefault('kesim_bilgisi', None)
         veri.setdefault('arsiv_tarihi', None)
+        veri.setdefault('satis_tarihi', None)
+        veri.setdefault('satis_bilgisi', None)
         veri.setdefault('foto_data', None)
         veri.setdefault('foto_url', None)
         veri.setdefault('foto_datas', [])
@@ -4479,7 +4488,7 @@ class HayvanTakipSistemi:
         for h_id, hayvan in self.hayvanlar.items():
             if haric_id is not None and str(h_id) == haric_id:
                 continue
-            if aktif_olsun and (hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi')):
+            if aktif_olsun and (hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi') or hayvan.get('satildi')):
                 continue
             if self.hayvan_arama_eslesir(h_id, hayvan, arama, kaynak=kaynak):
                 eslesenler.append(h_id)
@@ -4500,7 +4509,7 @@ class HayvanTakipSistemi:
         for h_id, hayvan in self.hayvanlar.items():
             if haric_id is not None and str(h_id) == haric_id:
                 continue
-            if aktif_olsun and (hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi')):
+            if aktif_olsun and (hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi') or hayvan.get('satildi')):
                 continue
             if aranan in self.hayvan_kimlikleri(h_id, hayvan):
                 return h_id
@@ -4829,6 +4838,9 @@ class HayvanTakipSistemi:
         columns = list(self.hayvan_tree["columns"])
         rows = [self.hayvan_tree.item(item, "values") for item in self.hayvan_tree.get_children()]
         if columns and columns[0] == "ID":
+            columns = columns[1:]
+            rows = [tuple(row[1:]) for row in rows]
+        if columns and columns[0] == "Seç":
             columns = columns[1:]
             rows = [tuple(row[1:]) for row in rows]
         return columns, rows
@@ -5205,9 +5217,9 @@ class HayvanTakipSistemi:
         for hayvan in self.hayvanlar.values():
             if hayvan.get('arsivli'):
                 arsivli += 1
-            if not hayvan.get('arsivli') and not hayvan.get('olu') and not hayvan.get('kesildi'):
+            if not hayvan.get('arsivli') and not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('satildi'):
                 aktif += 1
-            if hayvan.get('gebe_mi') and not hayvan.get('arsivli') and not hayvan.get('olu') and not hayvan.get('kesildi'):
+            if hayvan.get('gebe_mi') and not hayvan.get('arsivli') and not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('satildi'):
                 gebe += 1
         self.header_stats_label.config(text=f"{aktif} aktif  ·  {gebe} gebe  ·  {arsivli} arşiv")
         ozet_label_map = {
@@ -5230,6 +5242,11 @@ class HayvanTakipSistemi:
                 return
         except tk.TclError:
             return
+        ciftlik_ad = (
+            getattr(self, "admin_aktif_ciftlik_ad", None)
+            or ((getattr(self, "api_kullanici", None) or {}).get("ciftlik") or {}).get("ad")
+            or ""
+        )
         if getattr(self, "api_modu", False):
             bekleyen = self.bekleyen_senkron_sayisi()
             bekleyen_metin = f" | {bekleyen} bekliyor" if bekleyen else ""
@@ -5244,6 +5261,8 @@ class HayvanTakipSistemi:
         else:
             metin = "Yerel veri"
             renk = self.renkler["muted"]
+        if ciftlik_ad:
+            metin = f"{ciftlik_ad} - {metin}"
         self.api_status_label.config(text=metin, fg=renk, bg=self.api_status_pill.cget("bg"))
 
     def api_ayar_penceresi(self):
@@ -5422,7 +5441,7 @@ class HayvanTakipSistemi:
         for h_id, hayvan in self.hayvanlar.items():
             if hayvan.get('arsivli'):
                 arsiv += 1
-            aktif_mi = not hayvan.get('arsivli') and not hayvan.get('olu') and not hayvan.get('kesildi')
+            aktif_mi = not hayvan.get('arsivli') and not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('satildi')
             if aktif_mi:
                 aktif += 1
             if hayvan.get('gebe_mi') and aktif_mi:
@@ -5997,7 +6016,7 @@ class HayvanTakipSistemi:
         filtre_lbl.pack(anchor='w', pady=(0, 4))
         self.filtre_combo = ttk.Combobox(filtre_grup,
             values=["Aktif", "Tümü", "Dişi Buzağı", "Erkek Buzağı", "Dana",
-                    "Düve", "Sağmal İnek", "Kuru İnek", "Gebe", "Ölü", "Kesildi", "Arşivli"],
+                    "Düve", "Sağmal İnek", "Kuru İnek", "Gebe", "Ölü", "Kesildi", "Satıldı", "Arşivli"],
             width=16, font=('Segoe UI', 11), state="readonly", style='TCombobox')
         self.filtre_combo.set("Aktif")
         self.filtre_combo.pack(anchor='w')
@@ -6014,6 +6033,13 @@ class HayvanTakipSistemi:
         self.arama_entry = ttk.Entry(ara_grup, font=('Segoe UI', 11), style='TEntry')
         self.arama_entry.grid(row=1, column=0, sticky="ew")
         self.arama_entry.bind('<KeyRelease>', self.arama_degisti)
+        self.modern_buton(
+            ara_grup,
+            "Ortalama Yaş Hesapla",
+            self.secili_hayvan_yas_ortalamasi,
+            purpose='primary',
+            small=True,
+        ).grid(row=1, column=1, sticky="e", padx=(10, 0))
         self.themed_widgets.append((ara_lbl, 'muted_label'))
 
         sag = tk.Frame(toolbar, bg=self.renkler["kart_arkaplan"])
@@ -6069,10 +6095,10 @@ class HayvanTakipSistemi:
         tree_frame.pack(fill='both', expand=True)
         self.themed_widgets.append((tree_frame, 'kart'))
 
-        columns = ('ID', 'Çiftlik', 'Resmi Küpe', 'Çiftlik Küpesi', 'Irk', 'Yaş', 'Cinsi', 'Durum', 'Son Tohumlama', 'Doğum Tahmini', 'Sağım Günü', 'Uyarılar')
+        columns = ('ID', 'Seç', 'Resmi Küpe', 'Çiftlik Küpesi', 'Irk', 'Yaş', 'Cinsi', 'Durum', 'Son Tohumlama', 'Doğum Tahmini', 'Sağım Günü', 'Uyarılar')
         self.hayvan_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', style='Modern.Treeview')
         col_widths = {
-            'ID': 0, 'Çiftlik': 150, 'Resmi Küpe': 135, 'Çiftlik Küpesi': 115, 'Irk': 110, 'Yaş': 90, 'Cinsi': 140, 'Durum': 130,
+            'ID': 0, 'Seç': 58, 'Resmi Küpe': 145, 'Çiftlik Küpesi': 120, 'Irk': 110, 'Yaş': 90, 'Cinsi': 140, 'Durum': 130,
             'Son Tohumlama': 145, 'Doğum Tahmini': 145, 'Sağım Günü': 120, 'Uyarılar': 240
         }
         
@@ -6080,7 +6106,8 @@ class HayvanTakipSistemi:
         self.hayvan_tree.column('ID', width=0, stretch=tk.NO) # Hide ID column
         for col in columns[1:]:
             self.hayvan_tree.heading(col, text=col)
-            self.hayvan_tree.column(col, width=col_widths.get(col, 120), anchor='center', minwidth=80)
+            min_width = 46 if col == 'Seç' else 80
+            self.hayvan_tree.column(col, width=col_widths.get(col, 120), anchor='center', minwidth=min_width, stretch=(col != 'Seç'))
 
         sb_v = ttk.Scrollbar(tree_frame, orient='vertical', command=self.hayvan_tree.yview)
         sb_h = ttk.Scrollbar(tree_frame, orient='horizontal', command=self.hayvan_tree.xview)
@@ -6092,7 +6119,72 @@ class HayvanTakipSistemi:
         tree_frame.grid_columnconfigure(0, weight=1)
 
         self.hayvan_tree.bind('<Double-Button-1>', self.hayvan_detay_ac)
+        self.hayvan_tree.bind('<Button-1>', self.hayvan_secim_tiklandi, add='+')
         self.hayvan_tree.bind('<Button-3>', self.sag_tik_menu)
+
+    def hayvan_secim_tiklandi(self, event):
+        tree = getattr(self, "hayvan_tree", None)
+        if tree is None:
+            return
+        try:
+            if tree.identify("region", event.x, event.y) != "cell":
+                return
+            if tree.identify_column(event.x) != "#2":
+                return
+            satir = tree.identify_row(event.y)
+            if not satir:
+                return "break"
+            degerler = list(tree.item(satir, "values") or [])
+            if not degerler:
+                return "break"
+            hayvan_id = str(degerler[0])
+            secimler = getattr(self, "hayvan_secimleri", set())
+            if hayvan_id in secimler:
+                secimler.remove(hayvan_id)
+                degerler[1] = "☐"
+            else:
+                secimler.add(hayvan_id)
+                degerler[1] = "☑"
+            self.hayvan_secimleri = secimler
+            tree.item(satir, values=tuple(degerler))
+            return "break"
+        except tk.TclError:
+            return
+
+    def secili_hayvan_yas_ortalamasi(self):
+        tree = getattr(self, "hayvan_tree", None)
+        if tree is None:
+            return
+        secili_idler = set(getattr(self, "hayvan_secimleri", set()))
+        gorunen_idler = set()
+        try:
+            for item in tree.get_children():
+                degerler = tree.item(item, "values") or []
+                if degerler:
+                    gorunen_idler.add(str(degerler[0]))
+        except tk.TclError:
+            gorunen_idler = set()
+        hesaplanacak = [h_id for h_id in secili_idler if h_id in gorunen_idler and h_id in self.hayvanlar]
+        if not hesaplanacak:
+            messagebox.showwarning("Ortalama Yaş", "Yaş ortalaması için listeden en az bir hayvan seçin.", parent=self.root)
+            return
+        yaslar = []
+        for h_id in hesaplanacak:
+            try:
+                yaslar.append(max(int(self.hayvanlar[h_id].get("yas_gun", 0) or 0), 0))
+            except (ValueError, TypeError):
+                pass
+        if not yaslar:
+            messagebox.showwarning("Ortalama Yaş", "Seçilen hayvanların yaş bilgisi hesaplanamadı.", parent=self.root)
+            return
+        ortalama = sum(yaslar) / len(yaslar)
+        yil = int(ortalama // 365)
+        ay = int((ortalama % 365) // 30)
+        messagebox.showinfo(
+            "Ortalama Yaş",
+            f"Seçilen {len(yaslar)} hayvanın yaş ortalaması:\n\n{yil} yıl {ay} ay\n({ortalama:.0f} gün)",
+            parent=self.root,
+        )
 
 
     def raporlama_sekmesi(self):
@@ -6286,11 +6378,17 @@ class HayvanTakipSistemi:
         for widget in self.rapor_frame.winfo_children():
             widget.destroy()
 
-        aktif_hayvanlar = {kupe: h for kupe, h in self.hayvanlar.items() if not h.get('arsivli', False)}
+        aktif_hayvanlar = {
+            kupe: h for kupe, h in self.hayvanlar.items()
+            if not h.get('arsivli', False)
+            and not h.get('olu', False)
+            and not h.get('kesildi', False)
+            and not h.get('satildi', False)
+        }
 
         cinsiyet_dagilimi = {'Dişi': 0, 'Erkek': 0}
         cins_dagilimi = {} 
-        ozel_durum_dagilimi = {'Gebe': 0, 'Ölü': 0, 'Kesildi': 0}
+        ozel_durum_dagilimi = {'Gebe': 0, 'Ölü': 0, 'Kesildi': 0, 'Satıldı': 0}
         erkek_cinsler = ["Erkek Buzağı", "Dana"]
         
         for hayvan in aktif_hayvanlar.values():
@@ -6305,12 +6403,14 @@ class HayvanTakipSistemi:
                 ozel_durum_dagilimi['Ölü'] += 1
             elif hayvan.get('kesildi', False):
                 ozel_durum_dagilimi['Kesildi'] += 1
+            elif hayvan.get('satildi', False):
+                ozel_durum_dagilimi['Satıldı'] += 1
             else:
                 cins_dagilimi[cins] = cins_dagilimi.get(cins, 0) + 1
                 if hayvan.get('gebe_mi', False):
                     ozel_durum_dagilimi['Gebe'] += 1
 
-        arsivli_sayi = len(self.hayvanlar) - len(aktif_hayvanlar)
+        arsivli_sayi = sum(1 for h in self.hayvanlar.values() if h.get('arsivli', False))
         ozet = self.dashboard_ozeti_hesapla()
 
         content = tk.Frame(self.rapor_frame, bg=self.renkler["kart_arkaplan"])
@@ -6492,7 +6592,7 @@ class HayvanTakipSistemi:
             
             aktif_hayvanlar_map = {}
             for k, v in self.hayvanlar.items():
-                if not v.get('arsivli') and not v.get('olu') and not v.get('kesildi'):
+                if not v.get('arsivli') and not v.get('olu') and not v.get('kesildi') and not v.get('satildi'):
                     gorunen = v.get('ciftlik_kupe_no') or v.get('resmi_kupe_no') or k
                     aktif_hayvanlar_map[gorunen] = k
                     
@@ -6552,7 +6652,7 @@ class HayvanTakipSistemi:
         bugun = datetime.now().date()
         satirlar = []
         for kupe_no, hayvan in self.hayvanlar.items():
-            if hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi'):
+            if hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi') or hayvan.get('satildi'):
                 continue
             for kayit in hayvan.get('asi_prosedurler', []):
                 sonraki = kayit.get('sonraki_tarih') or ""
@@ -6844,7 +6944,7 @@ class HayvanTakipSistemi:
             return
         eslesenler = []
         for h_id, hayvan in self.hayvanlar.items():
-            if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False):
+            if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('satildi', False):
                 continue
             if self.hayvan_arama_eslesir(h_id, hayvan, text):
                 gorunen = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or h_id
@@ -6856,7 +6956,7 @@ class HayvanTakipSistemi:
     def aktif_hayvan_secim_degerleri(self):
         degerler = []
         for h_id, hayvan in self.hayvanlar.items():
-            if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False):
+            if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('satildi', False):
                 continue
             gorunen = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or h_id
             if gorunen:
@@ -6890,7 +6990,7 @@ class HayvanTakipSistemi:
     def hayvan_tohumlanabilir_mi(self, hayvan):
         if not hayvan:
             return False
-        if hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi'):
+        if hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi') or hayvan.get('satildi'):
             return False
         if hayvan.get('gebe_mi', False):
             return False
@@ -6980,7 +7080,7 @@ class HayvanTakipSistemi:
 
         aktif_uyari_keyleri = []
         for kupe_no, hayvan in self.hayvanlar.items():
-            if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False):
+            if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('satildi', False):
                 continue
             aktif_tohumlama_id = hayvan.get('aktif_tohumlama_id')
 
@@ -7171,6 +7271,7 @@ class HayvanTakipSistemi:
             'gebe_mi': False, 'gebelik_tarihi': None, 'aktif_tohumlama_id': None,
             'olu': False, 'olum_tarihi': None,
             'kesildi': False, 'kesim_bilgisi': None,
+            'satildi': False, 'satis_tarihi': None, 'satis_bilgisi': None,
             'asi_prosedurler': [],
             'arsivli': False, 'arsiv_tarihi': None,
             'foto_data': yeni_fotograflar[0] if yeni_fotograflar else None,
@@ -7273,7 +7374,7 @@ class HayvanTakipSistemi:
         
         hayvan = self.hayvanlar[kupe_no]
         
-        if hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('arsivli', False):
+        if hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('arsivli', False) or hayvan.get('satildi', False):
             messagebox.showerror("İşlem Başarısız", f"'{kupe_no}' küpeli hayvan sürüde aktif değil.")
             return
 
@@ -7579,7 +7680,8 @@ class HayvanTakipSistemi:
                         'dogum_tarihi': dogum_tarihi, 'cins': yavru_data['cins'], 'anne_kupe': anne_kupe,
                         'kayit_tarihi': datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'yas_gun': (datetime.now() - dogum_dt).days, 'tohumlamalar': [], 'dogumlar': [],
                         'durum': 'Buzağı', 'gebe_mi': False, 'gebelik_tarihi': None, 'aktif_tohumlama_id': None, 'olu': False, 'olum_tarihi': None,
-                        'kesildi': False, 'kesim_bilgisi': None, 'asi_prosedurler': [], 'arsivli': False, 'arsiv_tarihi': None, 'foto_data': None, 'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                        'kesildi': False, 'kesim_bilgisi': None, 'satildi': False, 'satis_tarihi': None, 'satis_bilgisi': None,
+                        'asi_prosedurler': [], 'arsivli': False, 'arsiv_tarihi': None, 'foto_data': None, 'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
                     }
                     kaydedilen_yavrular_bilgi.append({
                         'kupe': yavru_gorunen or yeni_yavru_id,
@@ -7686,6 +7788,43 @@ class HayvanTakipSistemi:
             pencere.destroy()
             self.hayvan_listesini_guncelle()
             self.raporlari_guncelle()
+
+    def hayvan_satildi(self, kupe_no, pencere):
+        if kupe_no not in self.hayvanlar:
+            return
+        gorunen = self.hayvan_gorunen_kupe(kupe_no, self.hayvanlar[kupe_no])
+        if not messagebox.askyesno(
+            "Satıldı",
+            f"{gorunen} numaralı hayvan satıldı olarak işaretlensin mi?\n\nBu hayvan aktif sürüden çıkarılır ve sadece 'Satıldı' filtresinde görünür.",
+            parent=pencere,
+        ):
+            return
+        not_metin = simpledialog.askstring(
+            "Satış Notu",
+            "Satış notu veya fiyat bilgisi (isteğe bağlı):",
+            parent=pencere,
+        )
+        bugun = datetime.now().strftime("%d/%m/%Y")
+        hayvan = self.hayvanlar[kupe_no]
+        self.islem_kaydi_baslat(f"Satıldı işaretlendi: {gorunen}")
+        satis_bilgisi = {"tarih": bugun}
+        if not_metin:
+            satis_bilgisi["not"] = not_metin.strip()
+        hayvan.update({
+            'satildi': True,
+            'satis_tarihi': bugun,
+            'satis_bilgisi': satis_bilgisi,
+            'durum': 'Satıldı',
+            'gebe_mi': False,
+            'gebelik_tarihi': None,
+            'aktif_tohumlama_id': None,
+            'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        })
+        self.veri_kaydet()
+        messagebox.showinfo("Satıldı", f"{gorunen} satıldı olarak kaydedildi.", parent=pencere)
+        pencere.destroy()
+        self.hayvan_listesini_guncelle()
+        self.raporlari_guncelle()
 
     def hayvan_sil_detay(self, kupe_no, pencere):
         uyari = f"DİKKAT!\n\n{kupe_no} küpeli hayvan aktif sürüden arşive alınacak.\n\nKayıt geçmişi korunur; hayvan listesinde sadece 'Arşivli' filtresinde görünür."
@@ -7824,7 +7963,7 @@ class HayvanTakipSistemi:
         son_tohumlama = tohumlamalar[-1] if tohumlamalar else None
         is_male = hayvan.get('cins') in ["Erkek Buzağı", "Dana"]
 
-        if son_tohumlama and son_tohumlama.get('gebe_mi') is True and not is_male and not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('arsivli'):
+        if son_tohumlama and son_tohumlama.get('gebe_mi') is True and not is_male and not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('arsivli') and not hayvan.get('satildi'):
             hayvan['gebe_mi'] = True
             hayvan['gebelik_tarihi'] = son_tohumlama.get('tarih')
             hayvan['aktif_tohumlama_id'] = son_tohumlama.get('id')
@@ -7834,7 +7973,7 @@ class HayvanTakipSistemi:
             hayvan['gebe_mi'] = False
             hayvan['gebelik_tarihi'] = None
             hayvan['aktif_tohumlama_id'] = None
-            if not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('arsivli'):
+            if not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('arsivli') and not hayvan.get('satildi'):
                 hayvan['durum'] = self.durum_hesapla(hayvan.get('cins'), hayvan.get('yas_gun', 0))
 
     def hayvan_duzenle_penceresi(self, kupe_no, detay_pencere=None):
@@ -8270,6 +8409,8 @@ class HayvanTakipSistemi:
             return "Ölü"
         if hayvan.get("kesildi"):
             return "Kesildi"
+        if hayvan.get("satildi"):
+            return "Satıldı"
         if hayvan.get("gebe_mi"):
             return "Gebe"
         return hayvan.get("durum") or "Hayatta"
@@ -8318,7 +8459,7 @@ class HayvanTakipSistemi:
 
     def profil_uyarilari_hesapla(self, kupe_no, hayvan):
         uyarilar = []
-        if hayvan.get("arsivli") or hayvan.get("olu") or hayvan.get("kesildi"):
+        if hayvan.get("arsivli") or hayvan.get("olu") or hayvan.get("kesildi") or hayvan.get("satildi"):
             return uyarilar
 
         gorunen = self.hayvan_gorunen_kupe(kupe_no, hayvan)
@@ -8426,12 +8567,13 @@ class HayvanTakipSistemi:
         ]
         if self.hayvan_tohumlanabilir_mi(hayvan):
             aksiyonlar.append(("Tohumla", lambda: self.tohumlama_ekranina_hayvanla_git(hayvan_id, detay_window), "primary"))
-        if not hayvan.get("olu") and not hayvan.get("kesildi") and not hayvan.get("arsivli"):
+        if not hayvan.get("olu") and not hayvan.get("kesildi") and not hayvan.get("arsivli") and not hayvan.get("satildi"):
             if not is_male and hayvan.get("gebe_mi"):
                 aksiyonlar.append(("Doğum Kaydet", lambda: self.dogum_kayit_olustur(hayvan_id, detay_window), "success"))
             if not is_male and hayvan.get("durum") == "Sağmal İnek":
                 aksiyonlar.append(("Kuruya Ayır", lambda: self.kuruda_yap(hayvan_id, detay_window), "warning"))
             aksiyonlar.extend([
+                ("Satıldı", lambda: self.hayvan_satildi(hayvan_id, detay_window), "warning"),
                 ("Kesildi", lambda: self.hayvan_kesildi(hayvan_id, detay_window), "warning"),
                 ("Öldü", lambda: self.hayvan_oldu(hayvan_id, detay_window), "danger"),
             ])
@@ -8486,7 +8628,7 @@ class HayvanTakipSistemi:
 
         header_rozet("Yaş", yas_metin)
         header_rozet("Durum", durum,
-                     self.renkler["button_success_bg"] if durum not in {"Arşivli", "Ölü", "Kesildi"}
+                     self.renkler["button_success_bg"] if durum not in {"Arşivli", "Ölü", "Kesildi", "Satıldı"}
                      else self.renkler["uyari"])
         header_rozet("Fotoğraf", f"{len(fotograflar)}/3")
 
@@ -8574,7 +8716,7 @@ class HayvanTakipSistemi:
         for col in range(2):
             metrik_grid.grid_columnconfigure(col, weight=1)
         metrikler = [
-            ("Durum", durum, hayvan.get("cins") or "-", self.renkler["button_success_bg"] if durum not in {"Arşivli", "Ölü", "Kesildi"} else self.renkler["button_warning_bg"]),
+            ("Durum", durum, hayvan.get("cins") or "-", self.renkler["button_success_bg"] if durum not in {"Arşivli", "Ölü", "Kesildi", "Satıldı"} else self.renkler["button_warning_bg"]),
             ("Doğum Tahmini", dogum_tahmini, f"{kalan_dogum} gün" if kalan_dogum is not None else "Gebe değil", self.renkler["uyari"]),
             ("Laktasyon", laktasyon["laktasyon_sayisi"], f"Son doğum: {laktasyon['son_dogum']}", self.renkler["button_primary_bg"]),
             ("Aktif Sağım", laktasyon["aktif_sagim"], f"Toplam: {laktasyon['toplam_sagim']} gün", self.renkler["button_success_bg"]),
@@ -8738,17 +8880,21 @@ class HayvanTakipSistemi:
         self.tum_hayvanlari_guncelle()
         sorted_hayvanlar = sorted(self.hayvanlar.items(), key=lambda item: item[0])
         row_idx = 0
+        mevcut_idler = set()
         for kupe_no, hayvan in sorted_hayvanlar:
             if arama and not self.hayvan_arama_eslesir(kupe_no, hayvan, arama): continue
             arsivli = hayvan.get('arsivli', False)
-            aktif_degil = arsivli or hayvan.get('olu', False) or hayvan.get('kesildi', False)
+            satildi = hayvan.get('satildi', False)
+            aktif_degil = arsivli or hayvan.get('olu', False) or hayvan.get('kesildi', False) or satildi
             
             if filtre == "Aktif" and aktif_degil:
                 continue
             elif filtre == "Arşivli" and not arsivli:
                 continue
-            elif filtre not in ["Aktif", "Tümü", "Arşivli"]:
-                if arsivli:
+            elif filtre == "Satıldı" and not satildi:
+                continue
+            elif filtre not in ["Aktif", "Tümü", "Arşivli", "Satıldı"]:
+                if arsivli or satildi:
                     continue
                 filtre_durum_check = (filtre == "Gebe" and hayvan.get('gebe_mi', False)) or \
                                      (filtre == "Ölü" and hayvan.get('olu', False)) or \
@@ -8764,6 +8910,8 @@ class HayvanTakipSistemi:
                 mevcut_durum = " Ölü"
             elif hayvan.get('kesildi', False):
                 mevcut_durum = "Kesildi"
+            elif satildi:
+                mevcut_durum = "Satıldı"
             elif hayvan.get('gebe_mi', False):
                 mevcut_durum = "Gebe"
             else:
@@ -8800,6 +8948,8 @@ class HayvanTakipSistemi:
                 tag = "dead"
             elif hayvan.get('kesildi', False):
                 tag = "slaughtered"
+            elif satildi:
+                tag = "sold"
             elif hayvan.get('gebe_mi', False) and dogum_tahmini != "-":
                 try:
                     kalan_gun = (datetime.strptime(dogum_tahmini, "%d/%m/%Y") - datetime.now()).days
@@ -8816,9 +8966,11 @@ class HayvanTakipSistemi:
             resmi = hayvan.get('resmi_kupe_no', '-') or '-'
             ciftlik = hayvan.get('ciftlik_kupe_no', '-') or '-'
             irk = hayvan.get('irk', '-') or '-'
-            ciftlik_ad = hayvan.get('ciftlik_ad') or hayvan.get('ciftlik_id') or '-'
-            self.hayvan_tree.insert('', 'end', values=(kupe_no, ciftlik_ad, resmi, ciftlik, irk, yas_str, hayvan['cins'], mevcut_durum, son_tohumlama, dogum_tahmini, sagim_gun_str, uyarilar), tags=tuple(final_tags))
+            mevcut_idler.add(str(kupe_no))
+            secim = "☑" if str(kupe_no) in getattr(self, "hayvan_secimleri", set()) else "☐"
+            self.hayvan_tree.insert('', 'end', values=(kupe_no, secim, resmi, ciftlik, irk, yas_str, hayvan['cins'], mevcut_durum, son_tohumlama, dogum_tahmini, sagim_gun_str, uyarilar), tags=tuple(final_tags))
             row_idx += 1
+        self.hayvan_secimleri = set(getattr(self, "hayvan_secimleri", set())) & mevcut_idler
 
         #  TAG RENKLERI 
         # Zebra stripes için temel renkler
@@ -8842,6 +8994,7 @@ class HayvanTakipSistemi:
         
         self.hayvan_tree.tag_configure('dead',       background=self.renkler["gri"],         foreground=self.renkler["muted"])
         self.hayvan_tree.tag_configure('slaughtered',background=self.renkler["kesildi_bg"],  foreground=self.renkler["kesildi_fg"])
+        self.hayvan_tree.tag_configure('sold',       background=self.renkler["kart_ikincil"], foreground=self.renkler["uyari"])
         self.hayvan_tree.tag_configure('archived',   background=self.renkler["siyah"],       foreground=self.renkler["muted"])
         self.hayvan_tree.tag_configure('normal',     foreground=self.renkler["yazi_rengi"])
         self.tohumlama_hayvanlarini_guncelle()
@@ -8850,7 +9003,7 @@ class HayvanTakipSistemi:
     def tum_hayvanlari_guncelle(self):
         is_changed = False
         for kupe_no, hayvan in list(self.hayvanlar.items()):
-            if hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('arsivli', False): continue
+            if hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('arsivli', False) or hayvan.get('satildi', False): continue
             
             try:
                 dogum_tarihi = datetime.strptime(hayvan['dogum_tarihi'], "%d/%m/%Y")
@@ -8873,7 +9026,7 @@ class HayvanTakipSistemi:
     def uyarilari_guncelle(self):
         uyarilar, uyari_metni = [], ""
         for kupe_no, hayvan in self.hayvanlar.items():
-            if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False):
+            if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('satildi', False):
                 continue
             aktif_tohumlama_id = hayvan.get('aktif_tohumlama_id')
 
