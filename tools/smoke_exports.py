@@ -17,10 +17,10 @@ def main():
     xlsx_path = tmp / "hayvan_listesi.xlsx"
     pdf_path = tmp / "hayvan_listesi.pdf"
 
-    columns = ["Çiftlik", "Resmi Küpe", "Çiftlik Küpesi", "Yaş", "Cinsi", "Durum", "Uyarılar"]
+    columns = ["Çiftlik", "Resmi Küpe", "Çiftlik Küpesi", "Irk", "Yaş", "Cinsi", "Durum", "Uyarılar"]
     rows = [
-        ["Sametin Çiftliği", "TR001", "C001", "2 yıl 1 ay", "Düve", "Gebe", "Gebelik kontrolü yaklaşıyor"],
-        ["Sametin Çiftliği", "TR002", "C002", "8 ay", "Dana", "Aktif", "-"],
+        ["Sametin Çiftliği", "TR001", "C001", "Simental", "2 yıl 1 ay", "Düve", "Gebe", "Gebelik kontrolü yaklaşıyor"],
+        ["Sametin Çiftliği", "TR002", "C002", "Holstein", "8 ay", "Dana", "Aktif", "-"],
     ]
     metadata = [("Kullanıcı", "admin"), ("Çalışılan alan", "Sametin Çiftliği"), ("Bağlantı", "Online")]
 
@@ -50,6 +50,7 @@ def main():
     sheet = workbook["Hayvan Listesi"]
     assert sheet["A1"].value == "ALP Ziraat Hayvan Listesi"
     assert sheet.freeze_panes
+    assert any(sheet.cell(row=9, column=col).value == "Irk" for col in range(1, sheet.max_column + 1))
     assert "Kayıt sayısı" in [sheet.cell(row=i, column=1).value for i in range(1, 8)]
     assert sheet.max_row >= 8
 
