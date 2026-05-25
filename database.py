@@ -61,6 +61,10 @@ if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     )
 else:
     connect_args = {}
+    # Supabase pooler/PgBouncer transaction mode does not support driver-level
+    # prepared statements reliably; psycopg can otherwise crash on deploy with
+    # "prepared statement ... already exists".
+    connect_args["prepare_threshold"] = None
     if "supabase.com" in SQLALCHEMY_DATABASE_URL and "sslmode=" not in SQLALCHEMY_DATABASE_URL:
         connect_args["sslmode"] = "require"
     engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=connect_args)
