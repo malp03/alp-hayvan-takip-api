@@ -23,6 +23,7 @@ def walk_widgets(widget):
 
 def prepare_appdata():
     tmp = tempfile.mkdtemp(prefix="alp_login_responsive_")
+    os.environ.pop("ALP_API_URL", None)
     os.environ["APPDATA"] = tmp
     cfg_dir = Path(tmp) / "ALP Ziraat" / "HayvanTakip"
     cfg_dir.mkdir(parents=True, exist_ok=True)

@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def prepare_appdata():
     tmp = tempfile.mkdtemp(prefix="alp_update_smoke_")
+    os.environ.pop("ALP_API_URL", None)
     os.environ["APPDATA"] = tmp
     os.environ["ALP_SKIP_UPDATE_CHECK"] = "1"
     os.environ.pop("DATABASE_URL", None)

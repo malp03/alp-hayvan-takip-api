@@ -62,6 +62,7 @@ def start_api():
 
 def prepare_appdata(base_url):
     tmp = tempfile.mkdtemp(prefix="alp_login_ui_")
+    os.environ.pop("ALP_API_URL", None)
     os.environ["APPDATA"] = tmp
     cfg_dir = Path(tmp) / "ALP Ziraat" / "HayvanTakip"
     cfg_dir.mkdir(parents=True, exist_ok=True)

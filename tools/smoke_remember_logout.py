@@ -10,6 +10,7 @@ from smoke_login import ROOT, start_api
 
 def prepare_appdata(base_url, device_token, kullanici):
     tmp = tempfile.mkdtemp(prefix="alp_remember_logout_")
+    os.environ.pop("ALP_API_URL", None)
     os.environ["APPDATA"] = tmp
     os.environ["ALP_SKIP_UPDATE_CHECK"] = "1"
     os.environ.pop("DATABASE_URL", None)

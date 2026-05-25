@@ -1,10 +1,19 @@
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+SMOKE_ENV_BLOCKLIST = (
+    "ALP_API_URL",
+    "DATABASE_URL",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "ALP_PHOTO_BUCKET",
+)
 
 PYTHON_FILES = [
     "alp_ziraat_hayvan_takip.py",
@@ -37,7 +46,11 @@ PYTHON_FILES = [
 
 def run_step(name, command):
     print(f"\n== {name} ==", flush=True)
-    result = subprocess.run(command, cwd=ROOT)
+    env = os.environ.copy()
+    for key in SMOKE_ENV_BLOCKLIST:
+        env.pop(key, None)
+    env["ALP_SMOKE_TEST"] = "1"
+    result = subprocess.run(command, cwd=ROOT, env=env)
     if result.returncode != 0:
         raise SystemExit(result.returncode)
 
