@@ -8,6 +8,7 @@ from tkinter import ttk
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LIVE_ENV_KEYS = ("ALP_API_URL", "DATABASE_URL", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ALP_PHOTO_BUCKET")
 
 
 def walk_widgets(widget):
@@ -23,7 +24,8 @@ def walk_widgets(widget):
 
 def prepare_appdata():
     tmp = tempfile.mkdtemp(prefix="alp_login_responsive_")
-    os.environ.pop("ALP_API_URL", None)
+    for key in LIVE_ENV_KEYS:
+        os.environ.pop(key, None)
     os.environ["APPDATA"] = tmp
     cfg_dir = Path(tmp) / "ALP Ziraat" / "HayvanTakip"
     cfg_dir.mkdir(parents=True, exist_ok=True)

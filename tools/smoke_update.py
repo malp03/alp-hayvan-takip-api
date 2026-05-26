@@ -5,14 +5,15 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LIVE_ENV_KEYS = ("ALP_API_URL", "DATABASE_URL", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ALP_PHOTO_BUCKET")
 
 
 def prepare_appdata():
     tmp = tempfile.mkdtemp(prefix="alp_update_smoke_")
-    os.environ.pop("ALP_API_URL", None)
+    for key in LIVE_ENV_KEYS:
+        os.environ.pop(key, None)
     os.environ["APPDATA"] = tmp
     os.environ["ALP_SKIP_UPDATE_CHECK"] = "1"
-    os.environ.pop("DATABASE_URL", None)
     cfg_dir = Path(tmp) / "ALP Ziraat" / "HayvanTakip"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     (cfg_dir / "api_ayarlar.json").write_text('{"api_url":""}', encoding="utf-8")

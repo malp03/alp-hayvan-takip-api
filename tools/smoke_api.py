@@ -107,6 +107,8 @@ def main():
     base_url = f"http://127.0.0.1:{port}"
 
     env = os.environ.copy()
+    for key in ("ALP_API_URL", "DATABASE_URL", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ALP_PHOTO_BUCKET"):
+        env.pop(key, None)
     env["APPDATA"] = tmp
     env["DATABASE_URL"] = "sqlite:///" + str(db_path).replace("\\", "/")
     env["ALP_BOOTSTRAP_ADMIN_USERNAME"] = "admin"

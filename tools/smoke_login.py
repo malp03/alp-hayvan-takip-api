@@ -10,6 +10,12 @@ from smoke_api import free_port, request, wait_for_health
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LIVE_ENV_KEYS = ("ALP_API_URL", "DATABASE_URL", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ALP_PHOTO_BUCKET")
+
+
+def clear_live_env(env):
+    for key in LIVE_ENV_KEYS:
+        env.pop(key, None)
 
 
 def walk_widgets(widget):
@@ -30,6 +36,7 @@ def start_api():
     base_url = f"http://127.0.0.1:{port}"
 
     env = os.environ.copy()
+    clear_live_env(env)
     env["APPDATA"] = tmp
     env["DATABASE_URL"] = "sqlite:///" + str(db_path).replace("\\", "/")
     env["ALP_BOOTSTRAP_ADMIN_USERNAME"] = "admin"
@@ -62,7 +69,7 @@ def start_api():
 
 def prepare_appdata(base_url):
     tmp = tempfile.mkdtemp(prefix="alp_login_ui_")
-    os.environ.pop("ALP_API_URL", None)
+    clear_live_env(os.environ)
     os.environ["APPDATA"] = tmp
     cfg_dir = Path(tmp) / "ALP Ziraat" / "HayvanTakip"
     cfg_dir.mkdir(parents=True, exist_ok=True)
