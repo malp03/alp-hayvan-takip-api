@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.21"
+APP_VERSION = "1.9.22"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -4364,6 +4364,28 @@ class HayvanTakipSistemi:
         deger = str(deger).strip()
         return deger or None
 
+    def turkce_metin_onar(self, deger):
+        if deger is None:
+            return ""
+        metin_degeri = str(deger).strip()
+        onarimlar = {
+            "Sa?mal ?nek": "Sa\u011fmal \u0130nek",
+            "Sagmal Inek": "Sa\u011fmal \u0130nek",
+            "sagmal": "Sa\u011fmal \u0130nek",
+            "D?ve": "D\u00fcve",
+            "Duve": "D\u00fcve",
+            "duve": "D\u00fcve",
+            "Kuru ?nek": "Kuru \u0130nek",
+            "Kuru Inek": "Kuru \u0130nek",
+            "Di?i Buza??": "Di\u015fi Buza\u011f\u0131",
+            "Disi Buzagi": "Di\u015fi Buza\u011f\u0131",
+            "Erkek Buza??": "Erkek Buza\u011f\u0131",
+            "Erkek Buzagi": "Erkek Buza\u011f\u0131",
+            "Sat?ld?": "Sat\u0131ld\u0131",
+            "Ar?ivli": "Ar\u015fivli",
+        }
+        return onarimlar.get(metin_degeri, metin_degeri)
+
     def hayvan_yas_gun_hesapla(self, veri):
         try:
             dogum_tarihi = veri.get('dogum_tarihi')
@@ -4386,10 +4408,10 @@ class HayvanTakipSistemi:
         veri['ciftlik_kupe_no'] = ciftlik
         veri['kupe_no'] = ciftlik or resmi or eski_kupe or str(h_id)
         veri['dogum_tarihi'] = veri.get('dogum_tarihi') or ""
-        veri['cins'] = veri.get('cins') or "Bilinmiyor"
-        veri.setdefault('irk', "")
+        veri['cins'] = self.turkce_metin_onar(veri.get('cins')) or "Bilinmiyor"
+        veri['irk'] = self.turkce_metin_onar(veri.get('irk'))
         veri['yas_gun'] = self.hayvan_yas_gun_hesapla(veri)
-        veri['durum'] = veri.get('durum') or self.durum_hesapla(veri.get('cins'), veri.get('yas_gun', 0))
+        veri['durum'] = self.turkce_metin_onar(veri.get('durum')) or self.durum_hesapla(veri.get('cins'), veri.get('yas_gun', 0))
         veri['tohumlamalar'] = list(veri.get('tohumlamalar') or [])
         veri['dogumlar'] = list(veri.get('dogumlar') or [])
         veri['asi_prosedurler'] = list(veri.get('asi_prosedurler') or [])
