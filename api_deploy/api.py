@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import base64
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
@@ -16,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image, ImageOps
 from sqlalchemy import or_, text as sql_text
 from sqlalchemy.orm import Session
 import uvicorn
@@ -99,6 +101,11 @@ ALP_PHOTO_BUCKET = os.getenv("ALP_PHOTO_BUCKET", "animal-photos").strip() or "an
 ALP_DB_QUOTA_MB = float(os.getenv("ALP_DB_QUOTA_MB", "500"))
 ALP_STORAGE_QUOTA_MB = float(os.getenv("ALP_STORAGE_QUOTA_MB", "1024"))
 ALP_MAX_PHOTOS_PER_ANIMAL = 3
+ALP_PHOTO_MAX_SOURCE_MB = float(os.getenv("ALP_PHOTO_MAX_SOURCE_MB", "12"))
+ALP_PHOTO_MAX_SOURCE_BYTES = int(ALP_PHOTO_MAX_SOURCE_MB * 1024 * 1024)
+ALP_PHOTO_MAX_OUTPUT_BYTES = int(float(os.getenv("ALP_PHOTO_MAX_OUTPUT_MB", "3")) * 1024 * 1024)
+ALP_PHOTO_COMPRESS_MAX_EDGE = int(os.getenv("ALP_PHOTO_COMPRESS_MAX_EDGE", "900"))
+ALP_PHOTO_COMPRESS_QUALITY = int(os.getenv("ALP_PHOTO_COMPRESS_QUALITY", "82"))
 ALP_PHOTO_BUCKET_PUBLIC = os.getenv("ALP_PHOTO_BUCKET_PUBLIC", "false").strip().lower() in {
     "1",
     "true",
@@ -107,6 +114,8 @@ ALP_PHOTO_BUCKET_PUBLIC = os.getenv("ALP_PHOTO_BUCKET_PUBLIC", "false").strip().
     "on",
 }
 ALP_PHOTO_SIGNED_URL_TTL_SECONDS = int(os.getenv("ALP_PHOTO_SIGNED_URL_TTL_SECONDS", str(7 * 24 * 60 * 60)))
+ALP_PHOTO_SIGNED_URL_TIMEOUT_SECONDS = float(os.getenv("ALP_PHOTO_SIGNED_URL_TIMEOUT_SECONDS", "5"))
+STORAGE_SIGNED_URL_CACHE: Dict[str, tuple[str, float]] = {}
 
 
 def simdi() -> str:
@@ -337,6 +346,29 @@ def metin(deger: Any, *, upper: bool = False) -> str:
     return sonuc.upper() if upper else sonuc
 
 
+TURKCE_METIN_ONARIMLARI = {
+    "Sa?mal ?nek": "Sa\u011fmal \u0130nek",
+    "Sagmal Inek": "Sa\u011fmal \u0130nek",
+    "sagmal": "Sa\u011fmal \u0130nek",
+    "D?ve": "D\u00fcve",
+    "Duve": "D\u00fcve",
+    "duve": "D\u00fcve",
+    "Kuru ?nek": "Kuru \u0130nek",
+    "Kuru Inek": "Kuru \u0130nek",
+    "Di?i Buza??": "Di\u015fi Buza\u011f\u0131",
+    "Disi Buzagi": "Di\u015fi Buza\u011f\u0131",
+    "Erkek Buza??": "Erkek Buza\u011f\u0131",
+    "Erkek Buzagi": "Erkek Buza\u011f\u0131",
+    "Sat?ld?": "Sat\u0131ld\u0131",
+    "Ar?ivli": "Ar\u015fivli",
+}
+
+
+def turkce_metin_onar(deger: Any) -> str:
+    sonuc = metin(deger)
+    return TURKCE_METIN_ONARIMLARI.get(sonuc, sonuc)
+
+
 def kupe_arama_temizle(deger: Any) -> str:
     return re.sub(r"[^A-Z0-9]", "", metin(deger, upper=True))
 
@@ -419,6 +451,46 @@ def foto_data_ayristir(foto: str) -> tuple[str, bytes]:
         raise HTTPException(status_code=400, detail="Fotoğraf verisi okunamadı.") from hata
 
 
+def fotograf_sikistir(mime: str, data: bytes) -> tuple[str, bytes]:
+    if not data:
+        raise HTTPException(status_code=400, detail="Boş fotoğraf yüklenemez.")
+    if len(data) > ALP_PHOTO_MAX_SOURCE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Fotoğraf çok büyük. Lütfen {ALP_PHOTO_MAX_SOURCE_MB:g} MB altında fotoğraf seçin.",
+        )
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img = ImageOps.exif_transpose(img)
+            if img.mode in {"RGBA", "LA"} or (img.mode == "P" and "transparency" in img.info):
+                rgba = img.convert("RGBA")
+                arka_plan = Image.new("RGB", rgba.size, (255, 255, 255))
+                arka_plan.paste(rgba, mask=rgba.split()[-1])
+                img = arka_plan
+            else:
+                img = img.convert("RGB")
+            max_edge = max(320, ALP_PHOTO_COMPRESS_MAX_EDGE)
+            img.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+            kalite = max(45, min(95, ALP_PHOTO_COMPRESS_QUALITY))
+            son_data = b""
+            for deneme_kalite in (kalite, 76, 68, 60):
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG", quality=deneme_kalite, optimize=True, progressive=True)
+                son_data = buffer.getvalue()
+                if len(son_data) <= ALP_PHOTO_MAX_OUTPUT_BYTES:
+                    break
+            if len(son_data) > ALP_PHOTO_MAX_OUTPUT_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Fotoğraf sıkıştırıldıktan sonra da çok büyük kaldı.",
+                )
+            return "image/jpeg", son_data
+    except HTTPException:
+        raise
+    except Exception as hata:
+        raise HTTPException(status_code=400, detail="Fotoğraf işlenemedi. Lütfen JPEG/PNG/WebP bir görsel seçin.") from hata
+
+
 def storage_public_url(path: str, version_hash: str = "") -> str:
     bucket = urllib.parse.quote(ALP_PHOTO_BUCKET, safe="")
     quoted_path = urllib.parse.quote(path, safe="/")
@@ -429,6 +501,10 @@ def storage_public_url(path: str, version_hash: str = "") -> str:
 def storage_signed_url(path: str) -> Optional[str]:
     if not storage_aktif_mi():
         return None
+    simdi_ts = time.time()
+    cached = STORAGE_SIGNED_URL_CACHE.get(path)
+    if cached and cached[1] > simdi_ts + 30:
+        return cached[0]
     bucket = urllib.parse.quote(ALP_PHOTO_BUCKET, safe="")
     quoted_path = urllib.parse.quote(path, safe="/")
     sign_url = f"{SUPABASE_URL}/storage/v1/object/sign/{bucket}/{quoted_path}"
@@ -442,7 +518,7 @@ def storage_signed_url(path: str) -> Optional[str]:
             "Content-Type": "application/json",
         },
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
+    with urllib.request.urlopen(request, timeout=ALP_PHOTO_SIGNED_URL_TIMEOUT_SECONDS) as response:
         payload = json.loads(response.read().decode("utf-8") or "{}")
     signed = payload.get("signedURL") or payload.get("signedUrl") or payload.get("signed_url")
     if not signed:
@@ -451,8 +527,14 @@ def storage_signed_url(path: str) -> Optional[str]:
     if signed.startswith("http://") or signed.startswith("https://"):
         return signed
     if signed.startswith("/storage/v1"):
-        return f"{SUPABASE_URL}{signed}"
-    return f"{SUPABASE_URL}/storage/v1/{signed.lstrip('/')}"
+        signed = f"{SUPABASE_URL}{signed}"
+    elif not (signed.startswith("http://") or signed.startswith("https://")):
+        signed = f"{SUPABASE_URL}/storage/v1/{signed.lstrip('/')}"
+    STORAGE_SIGNED_URL_CACHE[path] = (
+        signed,
+        simdi_ts + max(60, ALP_PHOTO_SIGNED_URL_TTL_SECONDS - 60),
+    )
+    return signed
 
 
 def storage_goruntuleme_url(path: str) -> Optional[str]:
@@ -563,14 +645,15 @@ def foto_alanlarini_normalize_et(veri: Dict[str, Any]) -> Dict[str, Any]:
     return veri
 
 
-def foto_goruntuleme_url_ekle(veri: Dict[str, Any]) -> Dict[str, Any]:
+def foto_goruntuleme_url_ekle(veri: Dict[str, Any], *, include_photo_urls: bool = True) -> Dict[str, Any]:
     sonuc = dict(veri or {})
     paths, urls, datas = foto_referanslarini_topla(sonuc)
     goruntuleme_urls: List[str] = []
-    for path in paths:
-        url = storage_goruntuleme_url(path)
-        if url and url not in goruntuleme_urls:
-            goruntuleme_urls.append(url)
+    if include_photo_urls:
+        for path in paths:
+            url = storage_goruntuleme_url(path)
+            if url and url not in goruntuleme_urls:
+                goruntuleme_urls.append(url)
     sonuc["foto_paths"] = paths
     sonuc["foto_path"] = paths[0] if paths else None
     sonuc["foto_urls"] = (goruntuleme_urls + urls)[:ALP_MAX_PHOTOS_PER_ANIMAL]
@@ -683,6 +766,8 @@ def storage_foto_yukle(veri: Dict[str, Any], foto: str, index: int) -> str:
         raise HTTPException(status_code=400, detail="Boş fotoğraf yüklenemez.")
     if len(data) > 3 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Fotoğraf çok büyük. Lütfen daha küçük bir fotoğraf seçin.")
+
+    mime, data = fotograf_sikistir(mime, data)
 
     uzanti = "jpg"
     if "png" in mime:
@@ -946,15 +1031,15 @@ def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -
     if sonuc["dogum_tarihi"]:
         parse_tarih(sonuc["dogum_tarihi"], "Doğum tarihi")
 
-    sonuc["cins"] = metin(sonuc.get("cins")) or "Bilinmiyor"
-    sonuc["irk"] = metin(sonuc.get("irk"))
+    sonuc["cins"] = turkce_metin_onar(sonuc.get("cins")) or "Bilinmiyor"
+    sonuc["irk"] = turkce_metin_onar(sonuc.get("irk"))
     sonuc["ad"] = bos_yoksa_none(sonuc.get("ad"))
     sonuc["anne_kupe"] = metin(sonuc.get("anne_kupe"), upper=True)
     sonuc["kayit_tarihi"] = metin(sonuc.get("kayit_tarihi")) or simdi()
     sonuc["yas_gun"] = yas_gun_hesapla(sonuc)
     sonuc["yas_yil"] = sonuc["yas_gun"] // 365
     sonuc["yas_ay"] = (sonuc["yas_gun"] % 365) // 30
-    sonuc["durum"] = metin(sonuc.get("durum") or sonuc.get("durum_notu")) or "Bilinmiyor"
+    sonuc["durum"] = turkce_metin_onar(sonuc.get("durum") or sonuc.get("durum_notu")) or "Bilinmiyor"
     sonuc["durum_notu"] = sonuc["durum"]
     sonuc["ek_notlar"] = bos_yoksa_none(sonuc.get("ek_notlar"))
     sonuc["gebe_mi"] = bool(sonuc.get("gebe_mi", False))
@@ -1030,7 +1115,7 @@ def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -
     return sonuc
 
 
-def db_hayvandan_payload(h: models.Hayvan) -> Dict[str, Any]:
+def db_hayvandan_payload(h: models.Hayvan, *, include_photo_urls: bool = True) -> Dict[str, Any]:
     if h.veri_json:
         try:
             veri = json.loads(h.veri_json)
@@ -1038,7 +1123,10 @@ def db_hayvandan_payload(h: models.Hayvan) -> Dict[str, Any]:
                 veri["ciftlik_id"] = h.ciftlik_id or veri.get("ciftlik_id")
                 if h.ciftlik:
                     veri["ciftlik_ad"] = h.ciftlik.ad
-                return foto_goruntuleme_url_ekle(normalize_hayvan(veri, hayvan_id=h.id))
+                return foto_goruntuleme_url_ekle(
+                    normalize_hayvan(veri, hayvan_id=h.id),
+                    include_photo_urls=include_photo_urls,
+                )
         except json.JSONDecodeError:
             pass
 
@@ -1103,7 +1191,7 @@ def db_hayvandan_payload(h: models.Hayvan) -> Dict[str, Any]:
             "asi_prosedurler": asi_prosedurler,
         },
         hayvan_id=h.id,
-    ))
+    ), include_photo_urls=include_photo_urls)
 
 
 def db_hayvana_yaz(db: Session, db_hayvan: models.Hayvan, veri: Dict[str, Any]) -> models.Hayvan:
@@ -1306,12 +1394,13 @@ def response_kaydet(
     veri: Dict[str, Any],
     *,
     son_guncelleme: Optional[str] = None,
+    include_photo_urls: bool = True,
 ) -> Dict[str, Any]:
     veri["son_guncelleme"] = son_guncelleme or simdi()
     db_hayvana_yaz(db, db_hayvan, veri)
     db.commit()
     db.refresh(db_hayvan)
-    return db_hayvandan_payload(db_hayvan)
+    return db_hayvandan_payload(db_hayvan, include_photo_urls=include_photo_urls)
 
 
 def dogum_uyarilari(veri: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
@@ -1554,7 +1643,7 @@ def delete_ciftlik(
     silinen_ad = db_ciftlik.ad
     silinecek_fotograflar: List[str] = []
     for hayvan in db.query(models.Hayvan).filter(models.Hayvan.ciftlik_id == ciftlik_id).all():
-        paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(hayvan))
+        paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(hayvan, include_photo_urls=False))
         silinecek_fotograflar.extend(paths)
     hayvan_idleri = [
         satir[0]
@@ -1773,7 +1862,7 @@ def get_hayvanlar(
         hayvanlar = eslesenler[skip: skip + limit]
     else:
         hayvanlar = sorgu.offset(skip).limit(limit).all()
-    return [db_hayvandan_payload(h) for h in hayvanlar]
+    return [db_hayvandan_payload(h, include_photo_urls=False) for h in hayvanlar]
 
 
 @app.get("/api/hayvanlar/bul", response_model=schemas.HayvanAramaResponse)
@@ -1800,7 +1889,7 @@ def hayvan_ref_ara(
         "kaynak": kaynak,
         "eslesme_sayisi": len(eslesenler),
         "tekil": len(eslesenler) == 1,
-        "hayvanlar": [db_hayvandan_payload(h) for h in eslesenler[:limit]],
+        "hayvanlar": [db_hayvandan_payload(h, include_photo_urls=False) for h in eslesenler[:limit]],
     }
 
 
@@ -1849,7 +1938,7 @@ def create_hayvan(
     )
     db.commit()
     db.refresh(db_hayvan)
-    return db_hayvandan_payload(db_hayvan)
+    return db_hayvandan_payload(db_hayvan, include_photo_urls=False)
 
 
 @app.put("/api/hayvanlar/{hayvan_ref}", response_model=schemas.HayvanResponse)
@@ -1861,7 +1950,7 @@ def update_hayvan(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    mevcut = db_hayvandan_payload(db_hayvan)
+    mevcut = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     onceki_foto_paths, _, _ = foto_referanslarini_topla(mevcut)
     guncelleme = model_verisi(hayvan, exclude_unset=True)
     guncelleme.pop("id", None)
@@ -1887,7 +1976,7 @@ def update_hayvan(
         hedef_tipi="hayvan",
         hedef_id=db_hayvan.id,
     )
-    sonuc = response_kaydet(db, db_hayvan, veri, son_guncelleme=gelen_son_guncelleme or simdi())
+    sonuc = response_kaydet(db, db_hayvan, veri, son_guncelleme=gelen_son_guncelleme or simdi(), include_photo_urls=False)
     yeni_foto_paths, _, _ = foto_referanslarini_topla(sonuc)
     yeni_paths = set(yeni_foto_paths)
     silinecek_paths = [path for path in onceki_foto_paths if path not in yeni_paths]
@@ -1915,7 +2004,7 @@ def delete_hayvan(
         silinen_kupe = db_hayvan.ciftlik_kupe_no or db_hayvan.resmi_kupe_no or db_hayvan.id
         silinen_ciftlik_id = db_hayvan.ciftlik_id
         silinecek_refs: List[str] = []
-        for kaynak in (db_hayvandan_payload(db_hayvan),):
+        for kaynak in (db_hayvandan_payload(db_hayvan, include_photo_urls=False),):
             paths, urls, _ = foto_referanslarini_topla(kaynak)
             silinecek_refs.extend(paths)
             silinecek_refs.extend(urls)
@@ -1942,7 +2031,7 @@ def delete_hayvan(
         storage_fotograflari_sil(silinecek_foto_paths)
         return {"status": "ok", "message": "Hayvan kalıcı olarak silindi.", "id": silinen_id}
 
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     veri["arsivli"] = True
     veri["arsiv_tarihi"] = bugun()
     audit_kaydi(
@@ -1954,7 +2043,7 @@ def delete_hayvan(
         hedef_tipi="hayvan",
         hedef_id=db_hayvan.id,
     )
-    response_kaydet(db, db_hayvan, veri)
+    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     return {"status": "ok", "message": "Hayvan arşive alındı.", "id": db_hayvan.id}
 
 
@@ -1967,7 +2056,7 @@ async def upload_hayvan_fotograflari(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     onceki_paths, _, _ = foto_referanslarini_topla(veri)
     mevcut_paths, mevcut_urls, mevcut_datas = foto_referanslarini_topla(veri)
     mevcut_fotograflar = [] if replace else mevcut_paths + mevcut_urls + mevcut_datas
@@ -1984,8 +2073,12 @@ async def upload_hayvan_fotograflari(
         data = await dosya.read()
         if not data:
             continue
-        if len(data) > 3 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Fotoğraf çok büyük. Lütfen 3 MB altında fotoğraf seçin.")
+        if len(data) > ALP_PHOTO_MAX_SOURCE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Fotoğraf çok büyük. Lütfen {ALP_PHOTO_MAX_SOURCE_MB:g} MB altında fotoğraf seçin.",
+            )
+        mime, data = fotograf_sikistir(mime, data)
         encoded = base64.b64encode(data).decode("ascii")
         yeni_fotograflar.append(f"data:{mime};base64,{encoded}")
     if not yeni_fotograflar:
@@ -2009,7 +2102,7 @@ async def upload_hayvan_fotograflari(
         hedef_tipi="hayvan",
         hedef_id=db_hayvan.id,
     )
-    sonuc = response_kaydet(db, db_hayvan, veri)
+    sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     if replace:
         yeni_paths, _, _ = foto_referanslarini_topla(sonuc)
         yeni_path_set = set(yeni_paths)
@@ -2026,7 +2119,7 @@ def delete_hayvan_fotografi(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     paths, urls, datas = foto_referanslarini_topla(veri)
     fotograflar = paths + urls + datas
     if foto_index < 1 or foto_index > len(fotograflar):
@@ -2050,7 +2143,7 @@ def delete_hayvan_fotografi(
         hedef_tipi="hayvan",
         hedef_id=db_hayvan.id,
     )
-    sonuc = response_kaydet(db, db_hayvan, veri)
+    sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     storage_fotograflari_sil([silinen])
     return sonuc
 
@@ -2067,12 +2160,12 @@ def create_tohumlama(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     yeni = normalize_tohumlama(model_verisi(tohumlama), yeni=True)
     tohumlama_kurallarini_kontrol(veri, yeni)
     tohumlama_sonucunu_isle(veri, yeni)
     veri.setdefault("tohumlamalar", []).append(yeni)
-    response_kaydet(db, db_hayvan, veri)
+    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     return {**yeni, "hayvan_id": db_hayvan.id}
 
 
@@ -2092,7 +2185,7 @@ def update_tohumlama(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     kayit = nested_kayit_bul(veri.setdefault("tohumlamalar", []), tohumlama_ref, "Tohumlama")
     kayit.update(model_verisi(tohumlama, exclude_unset=True))
     kayit = normalize_tohumlama(kayit)
@@ -2101,7 +2194,7 @@ def update_tohumlama(
             veri["tohumlamalar"][index] = kayit
             break
     tohumlama_sonucunu_isle(veri, kayit)
-    response_kaydet(db, db_hayvan, veri)
+    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     return {**kayit, "hayvan_id": db_hayvan.id}
 
 
@@ -2113,13 +2206,13 @@ def delete_tohumlama(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     silinen = nested_kayit_sil(veri.setdefault("tohumlamalar", []), tohumlama_ref, "Tohumlama")
     if veri.get("aktif_tohumlama_id") == silinen.get("id"):
         veri["gebe_mi"] = False
         veri["gebelik_tarihi"] = None
         veri["aktif_tohumlama_id"] = None
-    response_kaydet(db, db_hayvan, veri)
+    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     return {"status": "ok", "message": "Tohumlama kaydı silindi.", "id": silinen.get("id")}
 
 
@@ -2135,10 +2228,10 @@ def create_asi(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     yeni = normalize_asi(model_verisi(asi), yeni=True)
     veri.setdefault("asi_prosedurler", []).append(yeni)
-    response_kaydet(db, db_hayvan, veri)
+    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     return {**yeni, "hayvan_id": db_hayvan.id}
 
 
@@ -2158,7 +2251,7 @@ def update_asi(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     kayit = nested_kayit_bul(veri.setdefault("asi_prosedurler", []), asi_ref, "Aşı/prosedür")
     kayit.update(model_verisi(asi, exclude_unset=True))
     kayit = normalize_asi(kayit)
@@ -2166,7 +2259,7 @@ def update_asi(
         if mevcut.get("id") == kayit.get("id"):
             veri["asi_prosedurler"][index] = kayit
             break
-    response_kaydet(db, db_hayvan, veri)
+    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     return {**kayit, "hayvan_id": db_hayvan.id}
 
 
@@ -2178,9 +2271,9 @@ def delete_asi(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     silinen = nested_kayit_sil(veri.setdefault("asi_prosedurler", []), asi_ref, "Aşı/prosedür")
-    response_kaydet(db, db_hayvan, veri)
+    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     return {"status": "ok", "message": "Aşı/prosedür kaydı silindi.", "id": silinen.get("id")}
 
 
@@ -2196,7 +2289,7 @@ def create_dogum(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    anne = db_hayvandan_payload(db_hayvan)
+    anne = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     yeni = normalize_dogum(model_verisi(dogum), yeni=True)
     dogum_tarihi = parse_tarih(yeni.get("tarih"), "Doğum tarihi", zorunlu=True)
     anne_dogum_tarihi = parse_tarih(anne.get("dogum_tarihi"), "Anne doğum tarihi")
@@ -2278,7 +2371,7 @@ def create_dogum(
         anne["cins"] = "Sağmal İnek"
         anne["durum"] = "Sağmal İnek"
         anne["durum_notu"] = "Sağmal İnek"
-    response_kaydet(db, db_hayvan, anne)
+    response_kaydet(db, db_hayvan, anne, include_photo_urls=False)
     return yeni
 
 
@@ -2292,7 +2385,7 @@ def update_dogum(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     kayit = nested_kayit_bul(veri.setdefault("dogumlar", []), dogum_ref, "Doğum")
     kayit.update(model_verisi(dogum, exclude_unset=True))
     kayit = normalize_dogum(kayit)
@@ -2300,7 +2393,7 @@ def update_dogum(
         if mevcut is kayit or mevcut.get("id") == kayit.get("id"):
             veri["dogumlar"][index] = kayit
             break
-    response_kaydet(db, db_hayvan, veri)
+    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     return kayit
 
 
@@ -2312,9 +2405,9 @@ def delete_dogum(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     silinen = nested_kayit_sil(veri.setdefault("dogumlar", []), dogum_ref, "Doğum")
-    response_kaydet(db, db_hayvan, veri)
+    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     return {"status": "ok", "message": "Doğum/laktasyon kaydı silindi.", "id": silinen.get("id")}
 
 
@@ -2324,7 +2417,7 @@ def get_uyarilar(
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
-    hayvanlar = [db_hayvandan_payload(h) for h in hayvan_sorgusu_scope(db, kullanici, ciftlik_id).all()]
+    hayvanlar = [db_hayvandan_payload(h, include_photo_urls=False) for h in hayvan_sorgusu_scope(db, kullanici, ciftlik_id).all()]
     return uyarilari_hesapla(hayvanlar)
 
 
@@ -2334,7 +2427,7 @@ def get_rapor_ozet(
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
-    hayvanlar = [db_hayvandan_payload(h) for h in hayvan_sorgusu_scope(db, kullanici, ciftlik_id).all()]
+    hayvanlar = [db_hayvandan_payload(h, include_photo_urls=False) for h in hayvan_sorgusu_scope(db, kullanici, ciftlik_id).all()]
     cins_dagilimi: Dict[str, int] = {}
     for h in hayvanlar:
         cins = h.get("cins") or "Bilinmiyor"
@@ -2413,6 +2506,285 @@ def get_sistem_durumu(
     }
 
 
+def veri_sagligi_raporu(db: Session) -> Dict[str, Any]:
+    ciftlikler = db.query(models.Ciftlik).all()
+    kullanicilar = db.query(models.Kullanici).all()
+    hayvanlar = db.query(models.Hayvan).all()
+    ciftlik_adlari = {c.id: c.ad for c in ciftlikler}
+    hayvan_idleri = {h.id for h in hayvanlar}
+    kontroller: List[Dict[str, Any]] = []
+
+    def ekle(seviye: str, baslik: str, mesaj: str, adet: int, ornekler: Iterable[Any] = (), onerilen_islem: Optional[str] = None) -> None:
+        if adet <= 0 and seviye != "bilgi":
+            return
+        kontroller.append(
+            {
+                "seviye": seviye,
+                "baslik": baslik,
+                "mesaj": mesaj,
+                "adet": int(adet),
+                "ornekler": [metin(ornek) for ornek in list(ornekler)[:12]],
+                "onerilen_islem": onerilen_islem,
+            }
+        )
+
+    def hayvan_etiketi(h: models.Hayvan) -> str:
+        kupe = h.ciftlik_kupe_no or h.resmi_kupe_no or h.id
+        ciftlik = ciftlik_adlari.get(h.ciftlik_id or "", h.ciftlik_id or "ciftlik yok")
+        return f"{kupe} / {ciftlik}"
+
+    def veri_json_oku(h: models.Hayvan) -> Dict[str, Any]:
+        if not h.veri_json:
+            return {}
+        try:
+            veri = json.loads(h.veri_json)
+            return veri if isinstance(veri, dict) else {}
+        except Exception:
+            return {}
+
+    legacy_ciftlikler = [
+        c for c in ciftlikler if c.id == LEGACY_DEFAULT_CIFTLIK_ID or c.ad == LEGACY_DEFAULT_CIFTLIK_ADI
+    ]
+    ekle(
+        "uyari",
+        "Varsayilan ciftlik kalintisi",
+        "Eski/test doneminden kalan Varsayilan Ciftlik kaydi bulundu.",
+        len(legacy_ciftlikler),
+        [f"{c.ad} ({c.id})" for c in legacy_ciftlikler],
+        "Canli veri degilse admin temizlik islemiyle kaldirilabilir.",
+    )
+
+    sahipsiz_hayvanlar = [h for h in hayvanlar if not h.ciftlik_id or h.ciftlik_id not in ciftlik_adlari]
+    ekle(
+        "kritik",
+        "Ciftliksiz hayvan",
+        "Bir hayvan kaydinin hangi ciftlige ait oldugu net degil.",
+        len(sahipsiz_hayvanlar),
+        [hayvan_etiketi(h) for h in sahipsiz_hayvanlar],
+        "Hayvan kaydina dogru ciftlik atanmalidir.",
+    )
+
+    sorunlu_kullanicilar = [
+        k
+        for k in kullanicilar
+        if k.rol != "admin" and (not k.ciftlik_id or k.ciftlik_id not in ciftlik_adlari)
+    ]
+    ekle(
+        "kritik",
+        "Ciftliksiz kullanici",
+        "Normal kullanici hesabi bir ciftlige bagli degil veya bagli oldugu ciftlik yok.",
+        len(sorunlu_kullanicilar),
+        [f"{k.kullanici_adi} ({k.ciftlik_id or 'ciftlik yok'})" for k in sorunlu_kullanicilar],
+        "Kullanici yonetiminden dogru ciftlik atanmalidir.",
+    )
+
+    def tekrarli_kupe_kontrol(alan: str, baslik: str) -> None:
+        gruplar: Dict[tuple, List[str]] = {}
+        for h in hayvanlar:
+            deger = metin(getattr(h, alan, None), upper=True)
+            if not deger:
+                continue
+            key = (h.ciftlik_id or "-", deger)
+            gruplar.setdefault(key, []).append(hayvan_etiketi(h))
+        tekrarlar = [f"{deger}: {len(ornekler)} kayit" for (_, deger), ornekler in gruplar.items() if len(ornekler) > 1]
+        ekle(
+            "kritik",
+            baslik,
+            "Ayni ciftlikte ayni kupe numarasi birden fazla hayvanda gorunuyor.",
+            len(tekrarlar),
+            tekrarlar,
+            "Cakisan kupe numaralari hayvan listesinden duzeltilmelidir.",
+        )
+
+    tekrarli_kupe_kontrol("resmi_kupe_no", "Tekrarli resmi kupe")
+    tekrarli_kupe_kontrol("ciftlik_kupe_no", "Tekrarli ciftlik kupesi")
+
+    bozuk_markerlar = tuple(TURKCE_METIN_ONARIMLARI.keys()) + ("Ä", "Å", "Ã")
+    bozuk_turkce_ornekleri = []
+    bozuk_turkce_adet = 0
+    for h in hayvanlar:
+        raw = " ".join(
+            metin(parca)
+            for parca in (h.cins, h.cinsiyet, h.durum_notu, h.dogum_tarihi, h.ek_notlar, h.veri_json)
+            if parca is not None
+        )
+        if any(marker in raw for marker in bozuk_markerlar):
+            bozuk_turkce_adet += 1
+            bozuk_turkce_ornekleri.append(hayvan_etiketi(h))
+    ekle(
+        "uyari",
+        "Bozuk Turkce metin",
+        "Kayitlarda karakter bozulmasi olabilecek metinler bulundu.",
+        bozuk_turkce_adet,
+        bozuk_turkce_ornekleri,
+        "Gerekirse bu kayitlar yeniden kaydedilerek normalize edilebilir.",
+    )
+
+    gecersiz_tarih_ornekleri = []
+    gelecek_tarih_ornekleri = []
+    tarih_alanlari = ("dogum_tarihi", "gebelik_tarihi", "olum_tarihi", "satis_tarihi", "arsiv_tarihi")
+    for h in hayvanlar:
+        veri = veri_json_oku(h)
+        if h.dogum_tarihi and not veri.get("dogum_tarihi"):
+            veri["dogum_tarihi"] = h.dogum_tarihi
+        for alan in tarih_alanlari:
+            deger = metin(veri.get(alan))
+            if not deger or deger == "Bilinmiyor":
+                continue
+            tarih = parse_tarih_sessiz(deger)
+            if not tarih:
+                gecersiz_tarih_ornekleri.append(f"{hayvan_etiketi(h)} - {alan}: {deger}")
+            elif tarih.date() > bugun_tarih():
+                gelecek_tarih_ornekleri.append(f"{hayvan_etiketi(h)} - {alan}: {deger}")
+        for liste_adi, tarih_anahtarlari in (
+            ("tohumlamalar", ("tarih", "kontrol_tarihi")),
+            ("dogumlar", ("tarih", "laktasyon_bitis_tarihi")),
+            ("asi_prosedurler", ("tarih", "sonraki_tarih")),
+        ):
+            for kayit in veri.get(liste_adi) or []:
+                if not isinstance(kayit, dict):
+                    continue
+                for alan in tarih_anahtarlari:
+                    deger = metin(kayit.get(alan))
+                    if deger and deger != "Bilinmiyor" and not parse_tarih_sessiz(deger):
+                        gecersiz_tarih_ornekleri.append(f"{hayvan_etiketi(h)} - {liste_adi}.{alan}: {deger}")
+    ekle(
+        "uyari",
+        "Gecersiz tarih",
+        "GG/AA/YYYY formatina uymayan tarih degerleri bulundu.",
+        len(gecersiz_tarih_ornekleri),
+        gecersiz_tarih_ornekleri,
+        "Ilgili hayvan profilinden tarih degerleri duzeltilmelidir.",
+    )
+    ekle(
+        "uyari",
+        "Gelecek tarih",
+        "Gecmiste olmasi beklenen bazi tarih alanlari gelecekte gorunuyor.",
+        len(gelecek_tarih_ornekleri),
+        gelecek_tarih_ornekleri,
+        "Tarihlerin bilerek girildigi kontrol edilmelidir.",
+    )
+
+    yetim_tohumlama = [t.hayvan_id for t in db.query(models.Tohumlama).all() if t.hayvan_id not in hayvan_idleri]
+    yetim_asi = [a.hayvan_id for a in db.query(models.AsiProsedur).all() if a.hayvan_id not in hayvan_idleri]
+    yetim_uyari = [u.hayvan_id for u in db.query(models.Uyari).all() if u.hayvan_id and u.hayvan_id not in hayvan_idleri]
+    ekle(
+        "uyari",
+        "Sahipsiz alt kayit",
+        "Hayvani bulunmayan tohumlama, asi/prosedur veya uyari kayitlari var.",
+        len(yetim_tohumlama) + len(yetim_asi) + len(yetim_uyari),
+        [f"tohumlama:{x}" for x in yetim_tohumlama] + [f"asi:{x}" for x in yetim_asi] + [f"uyari:{x}" for x in yetim_uyari],
+        "Bu durum genellikle eski test silmelerinden kalir; temizlik araci ile kaldirilabilir.",
+    )
+
+    durum_celiski_ornekleri = []
+    kullanilan_foto_pathleri: set[str] = set()
+    for h in hayvanlar:
+        veri = veri_json_oku(h)
+        paths, _, _ = foto_referanslarini_topla(veri)
+        kullanilan_foto_pathleri.update(paths)
+        pasif = bool(veri.get("arsivli") or veri.get("olu") or veri.get("kesildi") or veri.get("satildi"))
+        if pasif and bool(veri.get("gebe_mi")):
+            durum_celiski_ornekleri.append(f"{hayvan_etiketi(h)} - pasif ama gebe isaretli")
+        if veri.get("satildi") and metin(veri.get("durum")) != "Satıldı":
+            durum_celiski_ornekleri.append(f"{hayvan_etiketi(h)} - satildi/durum uyumsuz")
+    ekle(
+        "uyari",
+        "Durum celiskisi",
+        "Hayvan durum bayraklari ile profil bilgileri uyusmuyor.",
+        len(durum_celiski_ornekleri),
+        durum_celiski_ornekleri,
+        "Hayvan profilinde durum bilgisi yeniden kaydedilmelidir.",
+    )
+
+    foto_istatistik = veri_json_fotograf_istatistikleri(db)
+    ekle(
+        "uyari",
+        "Veritabaninda gomulu fotograf",
+        "Bazi fotograflar storage yerine veritabaninda base64 olarak duruyor.",
+        int(foto_istatistik.get("database_base64_adet") or 0),
+        [],
+        "Fotograflar tekrar kaydedildikce storage'a tasinir; buyuk veriler icin temizlik planlanabilir.",
+    )
+
+    storage_durumu = "pasif"
+    eksik_storage_ornekleri: List[str] = []
+    sahipsiz_storage_ornekleri: List[str] = []
+    if kullanilan_foto_pathleri and not storage_aktif_mi():
+        ekle(
+            "kritik",
+            "Storage pasif",
+            "Hayvan kayitlarinda storage referansi var ama storage ayarlari aktif degil.",
+            len(kullanilan_foto_pathleri),
+            list(kullanilan_foto_pathleri),
+            "Render environment variables icindeki Supabase storage ayarlari kontrol edilmelidir.",
+        )
+    elif storage_aktif_mi():
+        try:
+            storage_dosyalari = set(storage_dosyalari_listele())
+            storage_durumu = "aktif"
+            eksik_storage_ornekleri = sorted(kullanilan_foto_pathleri - storage_dosyalari)[:12]
+            sahipsiz_storage_ornekleri = sorted(storage_dosyalari - kullanilan_foto_pathleri)[:12]
+        except Exception as hata:
+            storage_durumu = "listeleme hatasi"
+            ekle(
+                "uyari",
+                "Storage listelenemedi",
+                f"Storage dosyalari kontrol edilirken hata alindi: {hata}",
+                1,
+                [],
+                "Supabase service role key ve bucket yetkileri kontrol edilmeli.",
+            )
+    ekle(
+        "kritik",
+        "Eksik fotograf dosyasi",
+        "Hayvan kaydinda fotograf yolu var ama storage dosyasi bulunamadi.",
+        len(eksik_storage_ornekleri),
+        eksik_storage_ornekleri,
+        "Ilgili hayvana fotograf yeniden yuklenmelidir.",
+    )
+    ekle(
+        "uyari",
+        "Sahipsiz storage dosyasi",
+        "Storage'da hicbir hayvan kaydinin kullanmadigi fotograf dosyalari var.",
+        len(sahipsiz_storage_ornekleri),
+        sahipsiz_storage_ornekleri,
+        "Canli kayitla iliskisi yoksa storage temizligi yapilabilir.",
+    )
+
+    if not kontroller:
+        ekle("bilgi", "Sorun bulunmadi", "Temel veri sagligi kontrollerinde sorun gorunmuyor.", 0)
+
+    ozet = {
+        "kritik": sum(1 for k in kontroller if k["seviye"] == "kritik"),
+        "uyari": sum(1 for k in kontroller if k["seviye"] == "uyari"),
+        "bilgi": sum(1 for k in kontroller if k["seviye"] == "bilgi"),
+        "kontrol": len(kontroller),
+    }
+    genel_durum = "kritik" if ozet["kritik"] else ("uyari" if ozet["uyari"] else "saglikli")
+    return {
+        "olusturma_zamani": simdi(),
+        "genel_durum": genel_durum,
+        "ozet": ozet,
+        "sayilar": {
+            "ciftlik": len(ciftlikler),
+            "kullanici": len(kullanicilar),
+            "hayvan": len(hayvanlar),
+            "storage_durumu": storage_durumu,
+            "kullanilan_foto_path": len(kullanilan_foto_pathleri),
+        },
+        "kontroller": kontroller,
+    }
+
+
+@app.get("/api/admin/veri-sagligi", response_model=schemas.VeriSagligiResponse)
+def get_veri_sagligi(
+    db: Session = Depends(get_db),
+    _: models.Kullanici = Depends(require_admin),
+):
+    return veri_sagligi_raporu(db)
+
+
 @app.post("/api/admin/test-verilerini-sifirla", response_model=schemas.IslemSonucResponse)
 def test_verilerini_sifirla(
     db: Session = Depends(get_db),
@@ -2420,7 +2792,7 @@ def test_verilerini_sifirla(
 ):
     silinecek_fotograflar: List[str] = []
     for hayvan in db.query(models.Hayvan).all():
-        paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(hayvan))
+        paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(hayvan, include_photo_urls=False))
         silinecek_fotograflar.extend(paths)
 
     sayilar = {
@@ -2491,7 +2863,7 @@ def canli_temizlik(
         for ciftlik in legacy_ciftlikler:
             ciftlik_id = ciftlik.id
             for hayvan in db.query(models.Hayvan).filter(models.Hayvan.ciftlik_id == ciftlik_id).all():
-                paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(hayvan))
+                paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(hayvan, include_photo_urls=False))
                 silinecek_fotograflar.extend(paths)
             hayvan_idleri = [
                 satir[0]
@@ -2601,7 +2973,7 @@ def get_yedek(
         for c in db.query(models.Ciftlik).order_by(models.Ciftlik.ad).all()
     ]
     kullanicilar = [kullanici_payload(k) for k in db.query(models.Kullanici).order_by(models.Kullanici.kullanici_adi).all()]
-    hayvanlar = [db_hayvandan_payload(h) for h in db.query(models.Hayvan).order_by(models.Hayvan.id).all()]
+    hayvanlar = [db_hayvandan_payload(h, include_photo_urls=False) for h in db.query(models.Hayvan).order_by(models.Hayvan.id).all()]
     gecmis = db.query(models.IslemGecmisi).order_by(models.IslemGecmisi.zaman.desc()).limit(500).all()
     audit_kaydi(
         db,
