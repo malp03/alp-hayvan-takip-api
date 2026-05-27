@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.22"
+APP_VERSION = "1.9.24"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -3119,6 +3119,214 @@ class HayvanTakipSistemi:
         self.pencere_ortala(pencere, parent)
         pencere.lift(parent)
 
+    def admin_veri_sagligi_penceresi(self, parent=None):
+        parent = parent or self.root
+        if not self.admin_mi():
+            return messagebox.showerror("Veri Sağlığı", "Bu işlem için admin yetkisi gerekir.", parent=parent)
+        if not self.online_islem_gerekli("Veri sağlığı", parent):
+            return
+
+        pencere = tk.Toplevel(parent)
+        pencere.title("Veri Sağlığı")
+        pencere.geometry("980x680")
+        pencere.minsize(760, 520)
+        pencere.configure(bg=self.renkler["arkaplan"])
+        pencere.transient(parent)
+        self.uygula_pencere_ikonu(pencere)
+
+        ana = tk.Frame(pencere, bg=self.renkler["arkaplan"], padx=18, pady=16)
+        ana.pack(fill="both", expand=True)
+
+        ust = tk.Frame(ana, bg=self.renkler["arkaplan"])
+        ust.pack(fill="x", pady=(0, 12))
+        tk.Label(
+            ust,
+            text="Veri Sağlığı",
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 20, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            ust,
+            text="Çiftlik, kullanıcı, küpe, tarih ve fotoğraf kayıtlarını canlı veri üzerinde denetler. Bu ekran veri silmez.",
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 10),
+            wraplength=860,
+            justify="left",
+        ).pack(anchor="w", pady=(2, 0))
+
+        ozet_frame = tk.Frame(
+            ana,
+            bg=self.renkler["kart_arkaplan"],
+            padx=14,
+            pady=12,
+            highlightthickness=1,
+            highlightbackground=self.renkler["kenarlik"],
+        )
+        ozet_frame.pack(fill="x", pady=(0, 12))
+
+        durum_label = tk.Label(
+            ozet_frame,
+            text="Kontrol bekleniyor.",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 11, "bold"),
+            anchor="w",
+        )
+        durum_label.pack(fill="x", pady=(0, 8))
+
+        rozet_satiri = tk.Frame(ozet_frame, bg=self.renkler["kart_arkaplan"])
+        rozet_satiri.pack(fill="x")
+        rozetler = {}
+
+        def rozet(anahtar, baslik, renk):
+            kutu = tk.Frame(rozet_satiri, bg=self.renkler["kart_ikincil"], padx=12, pady=8, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+            kutu.pack(side="left", padx=(0, 8), fill="x", expand=True)
+            tk.Label(kutu, text=baslik, bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+            lbl = tk.Label(kutu, text="0", bg=self.renkler["kart_ikincil"], fg=renk, font=("Segoe UI", 16, "bold"))
+            lbl.pack(anchor="w")
+            rozetler[anahtar] = lbl
+
+        rozet("kritik", "Kritik", self.renkler["ana_kirmizi"])
+        rozet("uyari", "Uyarı", self.renkler["uyari"])
+        rozet("bilgi", "Bilgi", self.renkler["muted"])
+        rozet("hayvan", "Hayvan", self.renkler["button_primary_bg"])
+
+        orta = tk.Frame(ana, bg=self.renkler["arkaplan"])
+        orta.pack(fill="both", expand=True)
+        orta.rowconfigure(0, weight=1)
+        orta.columnconfigure(0, weight=1)
+
+        tree_frame = tk.Frame(orta, bg=self.renkler["kart_arkaplan"], highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+        tree_frame.grid(row=0, column=0, sticky="nsew")
+        kolonlar = ("seviye", "baslik", "adet", "mesaj")
+        tree = ttk.Treeview(tree_frame, columns=kolonlar, show="headings", style="Modern.Treeview")
+        v_scroll = tk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=v_scroll.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        v_scroll.grid(row=0, column=1, sticky="ns")
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
+        for col, baslik, genislik in [
+            ("seviye", "Seviye", 90),
+            ("baslik", "Kontrol", 220),
+            ("adet", "Adet", 70),
+            ("mesaj", "Mesaj", 520),
+        ]:
+            tree.heading(col, text=baslik)
+            tree.column(col, width=genislik, anchor="w" if col != "adet" else "center", stretch=(col == "mesaj"))
+        tree.tag_configure("kritik", foreground=self.renkler["ana_kirmizi"])
+        tree.tag_configure("uyari", foreground=self.renkler["uyari"])
+        tree.tag_configure("bilgi", foreground=self.renkler["muted"])
+
+        detay_frame = tk.Frame(ana, bg=self.renkler["kart_arkaplan"], padx=12, pady=10, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+        detay_frame.pack(fill="x", pady=(12, 0))
+        tk.Label(detay_frame, text="Seçili kontrol detayı", bg=self.renkler["kart_arkaplan"], fg=self.renkler["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        detay_text = tk.Text(
+            detay_frame,
+            height=6,
+            bg=self.renkler["input_bg"],
+            fg=self.renkler["yazi_rengi"],
+            relief="flat",
+            wrap="word",
+            font=("Segoe UI", 9),
+        )
+        detay_text.pack(fill="x", pady=(4, 0))
+        detay_text.configure(state="disabled")
+
+        son_kontroller = []
+
+        def detay_yaz(metin):
+            detay_text.configure(state="normal")
+            detay_text.delete("1.0", tk.END)
+            detay_text.insert("1.0", metin)
+            detay_text.configure(state="disabled")
+
+        def secili_detay(event=None):
+            secim = tree.selection()
+            if not secim:
+                detay_yaz("")
+                return
+            index = int(secim[0])
+            if index < 0 or index >= len(son_kontroller):
+                detay_yaz("")
+                return
+            kayit = son_kontroller[index]
+            satirlar = [
+                f"Seviye: {kayit.get('seviye', '-')}",
+                f"Kontrol: {kayit.get('baslik', '-')}",
+                f"Adet: {kayit.get('adet', 0)}",
+                "",
+                kayit.get("mesaj") or "",
+            ]
+            if kayit.get("onerilen_islem"):
+                satirlar.extend(["", f"Önerilen işlem: {kayit.get('onerilen_islem')}"])
+            ornekler = kayit.get("ornekler") or []
+            if ornekler:
+                satirlar.extend(["", "Örnekler:"])
+                satirlar.extend(f"- {ornek}" for ornek in ornekler)
+            detay_yaz("\n".join(satirlar))
+
+        tree.bind("<<TreeviewSelect>>", secili_detay)
+
+        def liste_yenile():
+            nonlocal son_kontroller
+            durum_label.config(text="Veri sağlığı kontrol ediliyor...", fg=self.renkler["muted"])
+            pencere.update_idletasks()
+            try:
+                rapor = self.api_istek("GET", "/api/admin/veri-sagligi", timeout=60)
+            except ApiHatasi as e:
+                durum_label.config(text="Veri sağlığı alınamadı.", fg=self.renkler["ana_kirmizi"])
+                return messagebox.showerror("Veri Sağlığı", f"Kontrol çalıştırılamadı:\n{e}", parent=pencere)
+
+            son_kontroller = rapor.get("kontroller") or []
+            for item in tree.get_children():
+                tree.delete(item)
+            for idx, kayit in enumerate(son_kontroller):
+                seviye = kayit.get("seviye") or "bilgi"
+                tree.insert(
+                    "",
+                    "end",
+                    iid=str(idx),
+                    values=(
+                        seviye.upper(),
+                        kayit.get("baslik") or "-",
+                        kayit.get("adet", 0),
+                        kayit.get("mesaj") or "",
+                    ),
+                    tags=(seviye,),
+                )
+
+            ozet = rapor.get("ozet") or {}
+            sayilar = rapor.get("sayilar") or {}
+            for anahtar in ("kritik", "uyari", "bilgi"):
+                rozetler[anahtar].config(text=str(ozet.get(anahtar, 0)))
+            rozetler["hayvan"].config(text=str(sayilar.get("hayvan", 0)))
+
+            genel = rapor.get("genel_durum") or "bilinmiyor"
+            renk = self.renkler["yesil"] if genel == "saglikli" else (self.renkler["ana_kirmizi"] if genel == "kritik" else self.renkler["uyari"])
+            durum_label.config(
+                text=f"Genel durum: {genel.upper()}  |  Oluşturma: {rapor.get('olusturma_zamani', '-')}",
+                fg=renk,
+            )
+            if son_kontroller:
+                tree.selection_set("0")
+                tree.focus("0")
+                secili_detay()
+            else:
+                detay_yaz("Kontrol sonucu bulunamadı.")
+
+        alt = tk.Frame(ana, bg=self.renkler["arkaplan"])
+        alt.pack(fill="x", pady=(12, 0))
+        self.modern_buton(alt, "Yenile", liste_yenile, purpose="primary", small=True).pack(side="left")
+        self.modern_buton(alt, "Sistem Durumu", lambda: self.admin_sistem_durumu_penceresi(pencere), purpose="default", small=True).pack(side="left", padx=8)
+        self.modern_buton(alt, "Kapat", pencere.destroy, purpose="default", small=True).pack(side="right")
+
+        self.pencere_ortala(pencere, parent)
+        pencere.lift(parent)
+        liste_yenile()
+
     def sifre_degistir_penceresi(self, parent=None):
         parent = parent or self.root
         if not self.online_islem_gerekli("Sifre degistirme", parent):
@@ -3634,6 +3842,7 @@ class HayvanTakipSistemi:
         admin_buton(sag, "Yeni kullanıcı oluştur", lambda: kullanicilari_yonet(True), self.renkler["button_success_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Son işlemleri gör", self.admin_islem_gecmisi_penceresi).pack(fill="x", pady=5)
         admin_buton(sag, "Sistem durumu", lambda: self.admin_sistem_durumu_penceresi(self.root), self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
+        admin_buton(sag, "Veri Sağlığı", lambda: self.admin_veri_sagligi_penceresi(self.root), self.renkler["button_warning_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Online yedek indir", lambda: self.admin_online_yedek_indir(self.root), self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "API ayarları", admin_api_ayarlari, self.renkler["button_primary_bg"]).pack(fill="x", pady=5)
         admin_buton(sag, "Şifremi değiştir", lambda: self.sifre_degistir_penceresi(self.root)).pack(fill="x", pady=5)
@@ -4254,6 +4463,29 @@ class HayvanTakipSistemi:
         self._api_son_hata = None
         return hayvanlar_dict
 
+    def api_hayvan_detayini_yukle(self, h_id):
+        if not getattr(self, "api_modu", False) or self.offline_modda_mi():
+            return str(h_id)
+        h_id = str(h_id)
+        try:
+            kayit = self.api_istek("GET", f"/api/hayvanlar/{self.api_ref(h_id)}", timeout=20)
+            if not isinstance(kayit, dict):
+                return h_id
+            kayit_id = str(kayit.get("id") or h_id)
+            tamamlanmis = self.hayvan_kayit_tamamla(kayit_id, kayit)
+            if kayit_id != h_id:
+                self.hayvanlar.pop(h_id, None)
+            self.hayvanlar[kayit_id] = tamamlanmis
+            onceki_idler = set(getattr(self, "_api_son_idler", set()))
+            onceki_idler.discard(h_id)
+            onceki_idler.add(kayit_id)
+            self._api_son_idler = onceki_idler
+            self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
+            return kayit_id
+        except ApiHatasi as e:
+            self._api_son_hata = str(e)
+            return h_id
+
     def api_hayvanlari_kaydet(self):
         if self.offline_modda_mi():
             raise ApiHatasi("API offline modda; kayitlar yerel senkron kuyruguna alinacak.")
@@ -4770,6 +5002,31 @@ class HayvanTakipSistemi:
 
         return self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "Veri Kayıt Hatası")
 
+    def veri_kaydet_coklu(self, kupe_nolari, hata_mesaji_goster=True, ui_guncelle=True):
+        if not getattr(self, "api_modu", False):
+            return self.veri_kaydet(hata_mesaji_goster=hata_mesaji_goster, ui_guncelle=ui_guncelle)
+
+        temiz_idler = []
+        for kupe_no in kupe_nolari or []:
+            if kupe_no is None:
+                continue
+            kupe_no = str(kupe_no)
+            if kupe_no and kupe_no not in temiz_idler:
+                temiz_idler.append(kupe_no)
+        if not temiz_idler:
+            return self.veri_kaydet(hata_mesaji_goster=hata_mesaji_goster, ui_guncelle=ui_guncelle)
+
+        basarili = True
+        for kupe_no in temiz_idler:
+            if not self.veri_kaydet(kupe_no=kupe_no, hata_mesaji_goster=hata_mesaji_goster, ui_guncelle=False):
+                basarili = False
+        if ui_guncelle:
+            try:
+                self.api_durum_guncelle()
+            except Exception:
+                pass
+        return basarili
+
     def okunan_uyarilar_yukle(self):
         return self.json_dosyasi_yukle(self.uyari_file, {}, "okunan_uyarilar")
 
@@ -4787,15 +5044,17 @@ class HayvanTakipSistemi:
         except:
             return []
 
-    def islem_kaydi_baslat(self, aciklama):
+    def islem_kaydi_baslat(self, aciklama, geri_alinabilir=True, geri_alinamaz_neden=None):
         if hasattr(self, "hayvanlar"):
             try:
                 self.geri_al_yigini.append({
                     "zaman": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                     "aciklama": aciklama,
+                    "geri_alinabilir": bool(geri_alinabilir),
+                    "geri_alinamaz_neden": geri_alinamaz_neden or "",
                     "hayvanlar": copy.deepcopy(self.hayvanlar),
                 })
-                if len(self.geri_al_yigini) > 30:
+                if len(self.geri_al_yigini) > 10:
                     self.geri_al_yigini.pop(0)
             except Exception:
                 pass
@@ -4815,25 +5074,224 @@ class HayvanTakipSistemi:
         except:
             pass
 
+    def geri_al_islemi_uygun_mu(self, kayit):
+        if not kayit:
+            return False, "İşlem kaydı okunamadı."
+        if kayit.get("geri_alinabilir") is False:
+            return False, kayit.get("geri_alinamaz_neden") or "Bu işlem geri alınamaz."
+        aciklama = str(kayit.get("aciklama") or "").casefold()
+        kontrol = aciklama.replace("ı", "i").replace("İ", "i")
+        if ("kalici" in kontrol or "kal?c" in kontrol) and "sil" in kontrol:
+            return False, "Kalıcı silinen hayvan geri getirilemez."
+        return True, ""
+
+    def geri_al_farki_hesapla(self, onceki, sonraki):
+        onceki = onceki or {}
+        sonraki = sonraki or {}
+        onceki_idler = {str(k) for k in onceki.keys()}
+        sonraki_idler = {str(k) for k in sonraki.keys()}
+        geri_yuklenecek = {}
+        for h_id in sorted(onceki_idler):
+            if h_id not in sonraki_idler or onceki.get(h_id) != sonraki.get(h_id):
+                geri_yuklenecek[h_id] = copy.deepcopy(onceki.get(h_id))
+        silinecek = sorted(sonraki_idler - onceki_idler)
+        return {
+            "geri_yuklenecek": geri_yuklenecek,
+            "silinecek": silinecek,
+            "toplam": len(geri_yuklenecek) + len(silinecek),
+        }
+
+    def geri_al_sonraki_durum(self, index):
+        if index + 1 < len(self.geri_al_yigini):
+            return self.geri_al_yigini[index + 1].get("hayvanlar", {})
+        return getattr(self, "hayvanlar", {}) or {}
+
+    def geri_al_api_sil(self, h_id):
+        h_id = str(h_id)
+        if not getattr(self, "api_modu", False):
+            return True
+        if self.offline_modda_mi():
+            self.bekleyen_senkron_delete(h_id)
+            self.bekleyen_senkron_kaydet()
+            return True
+        try:
+            self.api_istek("DELETE", f"/api/hayvanlar/{self.api_ref(h_id)}?kalici=true", timeout=30)
+            onceki_idler = set(getattr(self, "_api_son_idler", set()))
+            onceki_idler.discard(h_id)
+            self._api_son_idler = onceki_idler
+            return True
+        except ApiHatasi as e:
+            if getattr(e, "status", None) == 404:
+                return True
+            self.api_cevrimdisi = True
+            self._api_son_hata = str(e)
+            self.bekleyen_senkron_delete(h_id)
+            self.bekleyen_senkron_kaydet()
+            return False
+
+    def geri_al_kaydi_uygula(self, index, parent=None):
+        if not (0 <= index < len(getattr(self, "geri_al_yigini", []))):
+            messagebox.showerror("Geri Al", "Seçilen işlem bulunamadı.", parent=parent or self.root)
+            return
+
+        kayit = self.geri_al_yigini[index]
+        uygun, neden = self.geri_al_islemi_uygun_mu(kayit)
+        if not uygun:
+            messagebox.showwarning("Geri Al", neden, parent=parent or self.root)
+            return
+
+        fark = self.geri_al_farki_hesapla(kayit.get("hayvanlar", {}), self.geri_al_sonraki_durum(index))
+        if fark["toplam"] == 0:
+            messagebox.showinfo("Geri Al", "Bu işlem için geri alınacak kayıt farkı bulunamadı.", parent=parent or self.root)
+            return
+
+        aciklama = kayit.get("aciklama", "-")
+        mesaj = (
+            f"Seçili işlem geri alınacak:\n\n{aciklama}\n\n"
+            f"Geri yüklenecek/düzeltilecek kayıt: {len(fark['geri_yuklenecek'])}\n"
+            f"Silinecek yeni kayıt: {len(fark['silinecek'])}\n\n"
+            "Bu işlemden daha yeni geri alma kayıtları güvenlik için temizlenecek.\n"
+            "Devam edilsin mi?"
+        )
+        if not messagebox.askyesno("Geri Al", mesaj, parent=parent or self.root):
+            return
+
+        hedef = parent or self.root
+        try:
+            hedef.config(cursor="watch")
+            hedef.update_idletasks()
+        except Exception:
+            pass
+
+        basarili = True
+        try:
+            for h_id in fark["silinecek"]:
+                self.hayvanlar.pop(h_id, None)
+                if not self.geri_al_api_sil(h_id):
+                    basarili = False
+
+            for h_id, veri in fark["geri_yuklenecek"].items():
+                if veri is not None:
+                    self.hayvanlar[h_id] = copy.deepcopy(veri)
+
+            if getattr(self, "api_modu", False):
+                self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
+                if fark["geri_yuklenecek"]:
+                    basarili = self.veri_kaydet_coklu(fark["geri_yuklenecek"].keys(), ui_guncelle=False) and basarili
+                else:
+                    self.api_durum_guncelle()
+            else:
+                basarili = self.veri_kaydet(ui_guncelle=False) and basarili
+
+            if basarili:
+                del self.geri_al_yigini[index:]
+                zaman_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                self.islem_gecmisi.insert(0, {"zaman": zaman_str, "aciklama": f"Geri alındı: {aciklama}"})
+                if len(self.islem_gecmisi) > 500:
+                    self.islem_gecmisi.pop()
+                self.ekranlari_guncelle()
+                self.header_ozet_guncelle()
+                self.api_durum_guncelle()
+                messagebox.showinfo("Geri Al", "Seçili işlem geri alındı.", parent=parent or self.root)
+                try:
+                    if parent is not None and parent.winfo_exists():
+                        parent.destroy()
+                except Exception:
+                    pass
+            else:
+                self.ekranlari_guncelle()
+                self.header_ozet_guncelle()
+                self.api_durum_guncelle()
+                messagebox.showwarning(
+                    "Geri Al",
+                    "Geri alma yerel olarak uygulandı; API bağlantısı sorunlu olduğu için bazı değişiklikler senkron kuyruğuna alındı.",
+                    parent=parent or self.root,
+                )
+        finally:
+            try:
+                hedef.config(cursor="")
+            except Exception:
+                pass
+
     def son_islemi_geri_al(self):
         if not getattr(self, "geri_al_yigini", None):
             messagebox.showinfo("Geri Al", "Geri alınabilecek işlem yok.", parent=self.root)
             return
-        son = self.geri_al_yigini.pop()
-        if not messagebox.askyesno(
-            "Geri Al",
-            f"Son işlem geri alınacak:\n\n{son.get('aciklama', '-')}\n\nDevam edilsin mi?",
-            parent=self.root,
-        ):
-            self.geri_al_yigini.append(son)
-            return
-        self.hayvanlar = copy.deepcopy(son.get("hayvanlar", {}))
-        if self.veri_kaydet():
-            self.ekranlari_guncelle()
-            self.header_ozet_guncelle()
-            messagebox.showinfo("Geri Al", "Son işlem geri alındı.", parent=self.root)
-        else:
-            messagebox.showerror("Geri Al", "Geri alma kaydedilemedi.", parent=self.root)
+        pencere = tk.Toplevel(self.root)
+        pencere.title("Geri Al")
+        pencere.geometry("980x520")
+        pencere.minsize(780, 420)
+        pencere.configure(bg=self.renkler["arkaplan"])
+        pencere.transient(self.root)
+
+        baslik = tk.Frame(pencere, bg=self.renkler["arkaplan"])
+        baslik.pack(fill="x", padx=20, pady=(18, 8))
+        tk.Label(
+            baslik,
+            text="Geri Al",
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 18, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            baslik,
+            text="Son 10 işlemden birini seçin. Kalıcı silme işlemleri güvenlik nedeniyle geri alınamaz.",
+            bg=self.renkler["arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 10),
+        ).pack(anchor="w", pady=(4, 0))
+
+        tablo_frame = tk.Frame(pencere, bg=self.renkler["arkaplan"])
+        tablo_frame.pack(fill="both", expand=True, padx=20, pady=8)
+        kolonlar = ("zaman", "islem", "durum", "etki")
+        tree = ttk.Treeview(tablo_frame, columns=kolonlar, show="headings", style="Modern.Treeview", height=10)
+        tree.heading("zaman", text="Zaman")
+        tree.heading("islem", text="İşlem")
+        tree.heading("durum", text="Durum")
+        tree.heading("etki", text="Etkilenen")
+        tree.column("zaman", width=155, anchor="center", stretch=False)
+        tree.column("islem", width=500, anchor="w")
+        tree.column("durum", width=150, anchor="center", stretch=False)
+        tree.column("etki", width=120, anchor="center", stretch=False)
+        scroll = ttk.Scrollbar(tablo_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        tree.tag_configure("pasif", foreground=self.renkler["muted"])
+        tree.tag_configure("uygun", foreground=self.renkler["yazi_rengi"])
+
+        baslangic = max(0, len(self.geri_al_yigini) - 10)
+        for index in range(len(self.geri_al_yigini) - 1, baslangic - 1, -1):
+            kayit = self.geri_al_yigini[index]
+            uygun, neden = self.geri_al_islemi_uygun_mu(kayit)
+            fark = self.geri_al_farki_hesapla(kayit.get("hayvanlar", {}), self.geri_al_sonraki_durum(index))
+            durum = "Geri alınabilir" if uygun else f"Geri alınamaz: {neden}"
+            tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(kayit.get("zaman", "-"), kayit.get("aciklama", "-"), durum, fark["toplam"]),
+                tags=("uygun" if uygun else "pasif",),
+            )
+
+        alt = tk.Frame(pencere, bg=self.renkler["arkaplan"])
+        alt.pack(fill="x", padx=20, pady=(8, 18))
+
+        def secili_geri_al():
+            secim = tree.selection()
+            if not secim:
+                messagebox.showwarning("Geri Al", "Lütfen geri alınacak işlemi seçin.", parent=pencere)
+                return
+            self.geri_al_kaydi_uygula(int(secim[0]), parent=pencere)
+
+        tree.bind("<Double-1>", lambda event: secili_geri_al())
+        self.modern_buton(alt, "Seçili İşlemi Geri Al", secili_geri_al, purpose="warning", small=True).pack(side="left")
+        self.modern_buton(alt, "Kapat", pencere.destroy, purpose="default", small=True).pack(side="right")
+
+        ilk = tree.get_children()
+        if ilk:
+            tree.selection_set(ilk[0])
+            tree.focus(ilk[0])
 
     def islem_gecmisi_penceresi(self):
         if getattr(self, "api_modu", False):
@@ -4854,7 +5312,7 @@ class HayvanTakipSistemi:
         for kayit in self.islem_gecmisi:
             tree.insert('', 'end', values=(kayit.get('zaman', '-'), kayit.get('aciklama', '-')))
 
-        self.modern_buton(pencere, "SON İŞLEMİ GERİ AL", self.son_islemi_geri_al, purpose='warning').pack(pady=(0, 15))
+        self.modern_buton(pencere, "GERİ AL PENCERESİ", self.son_islemi_geri_al, purpose='warning').pack(pady=(0, 15))
 
     def gorunen_hayvan_satirlari(self):
         columns = list(self.hayvan_tree["columns"])
@@ -6881,7 +7339,7 @@ class HayvanTakipSistemi:
             veri['kayit_tarihi'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             hayvan['asi_prosedurler'].append(veri)
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
             temizle()
             yenile()
             self.ekranlari_guncelle()
@@ -6899,7 +7357,7 @@ class HayvanTakipSistemi:
             veri['kayit_tarihi'] = eski.get('kayit_tarihi', datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
             hayvan['asi_prosedurler'][idx] = veri
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
             yenile()
             self.ekranlari_guncelle()
 
@@ -6912,7 +7370,7 @@ class HayvanTakipSistemi:
             self.islem_kaydi_baslat(f"Aşı/prosedür silindi: {kupe_no}")
             hayvan['asi_prosedurler'].pop(idx)
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
             temizle()
             yenile()
             self.ekranlari_guncelle()
@@ -7500,7 +7958,7 @@ class HayvanTakipSistemi:
         if hayvan.get('durum') not in ['Sağmal İnek', 'Kuru İnek']:
             hayvan['durum'] = 'Gebe'
 
-        self.veri_kaydet()
+        self.veri_kaydet(kupe_no=kupe_no)
         messagebox.showinfo("Başarılı", f"{gorunen} numaralı hayvan gebe olarak işaretlendi!")
         self.hayvan_listesini_guncelle()
         self.uyarilari_guncelle()
@@ -7530,7 +7988,7 @@ class HayvanTakipSistemi:
         yeni_durum = self.durum_hesapla(hayvan.get('cins'), hayvan.get('yas_gun'))
         hayvan.update({'gebe_mi': False, 'gebelik_tarihi': None, 'aktif_tohumlama_id': None, 'durum': yeni_durum})
         
-        self.veri_kaydet()
+        self.veri_kaydet(kupe_no=kupe_no)
         messagebox.showinfo("Başarılı", f"{gorunen} numaralı hayvan boş olarak işaretlendi!")
         self.hayvan_listesini_guncelle()
         self.raporlari_guncelle()
@@ -7710,8 +8168,10 @@ class HayvanTakipSistemi:
 
                 self.islem_kaydi_baslat(f"Doğum kaydı oluşturuldu: {anne_kupe}")
                 kaydedilen_yavrular_bilgi = []
+                degisen_hayvan_idleri = [anne_kupe]
                 for i, yavru_data in enumerate(yavrular_data):
                     yeni_yavru_id = uuid.uuid4().hex
+                    degisen_hayvan_idleri.append(yeni_yavru_id)
                     yavru_resmi = str(yavru_data.get('resmi_kupe_no') or "").strip().upper()
                     yavru_ciftlik = str(yavru_data.get('ciftlik_kupe_no') or "").strip().upper()
                     yavru_gorunen = yavru_ciftlik or yavru_resmi
@@ -7750,7 +8210,7 @@ class HayvanTakipSistemi:
                         'durum': 'Sağmal İnek',
                     })
                 
-                self.veri_kaydet()
+                self.veri_kaydet_coklu(degisen_hayvan_idleri)
                 kaydedilen_kupeler = [y['kupe'] for y in kaydedilen_yavrular_bilgi]
                 messagebox.showinfo("Başarılı", f"Doğum kaydı başarılı!\nKaydedilen Yavrular: {', '.join(kaydedilen_kupeler)}")
                 dogum_window.destroy()
@@ -7779,7 +8239,7 @@ class HayvanTakipSistemi:
             'durum': 'Kuru İnek', 'cins': 'Kuru İnek',
         })
         
-        self.veri_kaydet()
+        self.veri_kaydet(kupe_no=kupe_no)
         messagebox.showinfo("Başarılı", f"{kupe_no} numaralı hayvan kuruya ayrıldı!")
         pencere.destroy()
         self.hayvan_listesini_guncelle()
@@ -7793,7 +8253,7 @@ class HayvanTakipSistemi:
                 'gebelik_tarihi': None, 'aktif_tohumlama_id': None,
                 'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             })
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
             messagebox.showinfo("Başarılı", f"{kupe_no} numaralı hayvan öldü olarak işaretlendi.")
             pencere.destroy()
             self.hayvan_listesini_guncelle()
@@ -7825,7 +8285,7 @@ class HayvanTakipSistemi:
                 'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             })
 
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
             messagebox.showinfo("Başarılı", f"{kupe_no} küpeli hayvan kesildi olarak kaydedildi.")
             pencere.destroy()
             self.hayvan_listesini_guncelle()
@@ -7862,7 +8322,7 @@ class HayvanTakipSistemi:
             'aktif_tohumlama_id': None,
             'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         })
-        self.veri_kaydet()
+        self.veri_kaydet(kupe_no=kupe_no)
         messagebox.showinfo("Satıldı", f"{gorunen} satıldı olarak kaydedildi.", parent=pencere)
         pencere.destroy()
         self.hayvan_listesini_guncelle()
@@ -7881,7 +8341,7 @@ class HayvanTakipSistemi:
                 'aktif_tohumlama_id': None,
                 'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             })
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
             messagebox.showinfo("Başarılı", f"{kupe_no} numaralı hayvan arşive alındı.")
             pencere.destroy()
             self.hayvan_listesini_guncelle()
@@ -7907,7 +8367,7 @@ class HayvanTakipSistemi:
         if not hayvan.get('olu') and not hayvan.get('kesildi'):
             hayvan['durum'] = self.durum_hesapla(hayvan.get('cins'), hayvan.get('yas_gun', 0))
             self.hayvan_gebelik_durumunu_senkronla(kupe_no)
-        self.veri_kaydet()
+        self.veri_kaydet(kupe_no=kupe_no)
         messagebox.showinfo("Arşivden Çıkar", f"{gorunen} aktif sürü listesine alındı.", parent=pencere or self.root)
         if pencere is not None and pencere is not self.root:
             try:
@@ -7943,7 +8403,7 @@ class HayvanTakipSistemi:
             self.hayvan_fotograflari_ata(hayvan, mevcut_fotograflar + yeni_fotograflar)
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             self.islem_kaydi_baslat(f"Hayvan fotoğrafı eklendi: {gorunen} ({len(yeni_fotograflar)} adet)")
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
             self.ekranlari_guncelle()
             if pencere is not None and pencere is not self.root:
                 try:
@@ -7971,7 +8431,7 @@ class HayvanTakipSistemi:
         self.hayvan_fotograflari_ata(hayvan, fotograflar)
         hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         self.islem_kaydi_baslat(f"Hayvan fotoğrafı silindi: {gorunen}")
-        self.veri_kaydet()
+        self.veri_kaydet(kupe_no=kupe_no)
         self.ekranlari_guncelle()
         if pencere is not None and pencere is not self.root:
             try:
@@ -7983,10 +8443,14 @@ class HayvanTakipSistemi:
     def hayvan_kalici_sil(self, kupe_no, pencere):
         if kupe_no not in self.hayvanlar:
             return
-        uyari = f"DİKKAT!\n\n{kupe_no} küpeli arşivli hayvan kalıcı olarak silinecek.\n\nBu işlem geri alma geçmişine alınır ama aktif kayıttan tamamen kaldırılır."
+        uyari = f"DİKKAT!\n\n{kupe_no} küpeli arşivli hayvan kalıcı olarak silinecek.\n\nBu işlem geri alınamaz."
         if not messagebox.askyesno("Kalıcı Silme Onayı", uyari, parent=pencere):
             return
-        self.islem_kaydi_baslat(f"Arşivli hayvan kalıcı silindi: {kupe_no}")
+        self.islem_kaydi_baslat(
+            f"Arşivli hayvan kalıcı silindi: {kupe_no}",
+            geri_alinabilir=False,
+            geri_alinamaz_neden="Kalıcı silinen hayvan geri getirilemez.",
+        )
         api_modu = getattr(self, "api_modu", False)
         if api_modu:
             if self.offline_modda_mi():
@@ -8007,7 +8471,7 @@ class HayvanTakipSistemi:
             self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
             self.api_durum_guncelle()
         else:
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
         messagebox.showinfo("Başarılı", f"{kupe_no} kalıcı olarak silindi.", parent=pencere)
         pencere.destroy()
         self.ekranlari_guncelle()
@@ -8165,7 +8629,7 @@ class HayvanTakipSistemi:
                 hayvan['aktif_tohumlama_id'] = None
             self.hayvan_gebelik_durumunu_senkronla(kupe_no)
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
             self.ekranlari_guncelle()
             messagebox.showinfo("Başarılı", "Genel bilgiler güncellendi.", parent=pencere)
 
@@ -8254,7 +8718,7 @@ class HayvanTakipSistemi:
                 kayit['id'] = kayit.get('id') or uuid.uuid4().hex[:12]
                 self.hayvan_gebelik_durumunu_senkronla(kupe_no)
                 hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                self.veri_kaydet()
+                self.veri_kaydet(kupe_no=kupe_no)
                 tohumlama_tree_yenile()
                 self.ekranlari_guncelle()
                 dialog.destroy()
@@ -8270,7 +8734,7 @@ class HayvanTakipSistemi:
             self.islem_kaydi_baslat(f"Tohumlama kaydı silindi: {kupe_no}")
             hayvan['tohumlamalar'].pop(idx)
             self.hayvan_gebelik_durumunu_senkronla(kupe_no)
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
             tohumlama_tree_yenile()
             self.ekranlari_guncelle()
 
@@ -8340,7 +8804,7 @@ class HayvanTakipSistemi:
                 kayit['tarih'] = tarih
                 kayit['laktasyon_bitis_tarihi'] = bitis or None
                 hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                self.veri_kaydet()
+                self.veri_kaydet(kupe_no=kupe_no)
                 dogum_tree_yenile()
                 self.ekranlari_guncelle()
                 dialog.destroy()
@@ -8355,7 +8819,7 @@ class HayvanTakipSistemi:
                 return
             self.islem_kaydi_baslat(f"Doğum kaydı silindi: {kupe_no}")
             hayvan['dogumlar'].pop(idx)
-            self.veri_kaydet()
+            self.veri_kaydet(kupe_no=kupe_no)
             dogum_tree_yenile()
             self.ekranlari_guncelle()
 
@@ -8557,6 +9021,17 @@ class HayvanTakipSistemi:
         hayvan_id = self.hayvan_id_bul(kupe_no) or kupe_no
         if hayvan_id not in self.hayvanlar:
             return
+        mevcut = self.hayvanlar.get(hayvan_id, {})
+        if (
+            getattr(self, "api_modu", False)
+            and mevcut.get("foto_paths")
+            and not mevcut.get("foto_urls")
+            and not mevcut.get("foto_datas")
+            and not mevcut.get("foto_data")
+        ):
+            hayvan_id = self.api_hayvan_detayini_yukle(hayvan_id)
+            if hayvan_id not in self.hayvanlar:
+                return
         hayvan = self.hayvanlar[hayvan_id]
         cins = hayvan.get("cins", "")
         is_male = cins in ["Erkek Buzağı", "Dana"]
@@ -9061,6 +9536,7 @@ class HayvanTakipSistemi:
 
     def tum_hayvanlari_guncelle(self):
         is_changed = False
+        degisen_idler = set()
         for kupe_no, hayvan in list(self.hayvanlar.items()):
             if hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('arsivli', False) or hayvan.get('satildi', False): continue
             
@@ -9068,7 +9544,7 @@ class HayvanTakipSistemi:
                 dogum_tarihi = datetime.strptime(hayvan['dogum_tarihi'], "%d/%m/%Y")
                 yeni_yas_gun = (datetime.now() - dogum_tarihi).days
                 if hayvan.get('yas_gun') != yeni_yas_gun:
-                    hayvan['yas_gun'] = yeni_yas_gun; is_changed = True
+                    hayvan['yas_gun'] = yeni_yas_gun; is_changed = True; degisen_idler.add(str(kupe_no))
                 
                 if not hayvan.get('gebe_mi', False) and hayvan.get('durum') not in ['Sağmal İnek', 'Kuru İnek']:
                     yeni_cins = self.otomatik_cins_guncelle(hayvan['cins'], yeni_yas_gun)
@@ -9076,11 +9552,13 @@ class HayvanTakipSistemi:
                         hayvan['cins'] = yeni_cins
                         hayvan['durum'] = self.durum_hesapla(yeni_cins, yeni_yas_gun)
                         is_changed = True
+                        degisen_idler.add(str(kupe_no))
             
             except Exception as e:
                 print(f"Hayvan güncellenirken hata ({kupe_no}): {e}")
                 continue
-        if is_changed: self.veri_kaydet()
+        if is_changed:
+            self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "Veri Kayit Hatası")
 
     def uyarilari_guncelle(self):
         uyarilar, uyari_metni = [], ""
