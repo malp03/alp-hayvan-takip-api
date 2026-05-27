@@ -287,6 +287,23 @@ class SistemDurumuResponse(AlpModel):
     limitler: Dict[str, Any] = Field(default_factory=dict)
 
 
+class VeriSagligiKontrol(AlpModel):
+    seviye: str
+    baslik: str
+    mesaj: str
+    adet: int = 0
+    ornekler: List[str] = Field(default_factory=list)
+    onerilen_islem: Optional[str] = None
+
+
+class VeriSagligiResponse(AlpModel):
+    olusturma_zamani: str
+    genel_durum: str
+    ozet: Dict[str, Any] = Field(default_factory=dict)
+    sayilar: Dict[str, Any] = Field(default_factory=dict)
+    kontroller: List[VeriSagligiKontrol] = Field(default_factory=list)
+
+
 class UyariResponse(AlpModel):
     hayvan_id: str
     kupe_no: str
