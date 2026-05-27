@@ -5526,7 +5526,7 @@ class HayvanTakipSistemi:
             self.baslik_frame,
             bg=self.renkler["kart_ikincil"],
             padx=12,
-            pady=7,
+            pady=5,
             highlightthickness=1,
             highlightbackground=self.renkler.get("kenarlik", self.renkler["gri"]),
             bd=0
@@ -5542,6 +5542,15 @@ class HayvanTakipSistemi:
         )
         self.api_status_label.pack()
         self.themed_widgets.append((self.api_status_label, 'muted_label'))
+        self.api_version_label = tk.Label(
+            self.api_status_pill,
+            text=f"v{APP_VERSION}",
+            bg=self.renkler["kart_ikincil"],
+            fg=self.renkler["muted"],
+            font=('Segoe UI', 8, 'bold')
+        )
+        self.api_version_label.pack(pady=(1, 0))
+        self.themed_widgets.append((self.api_version_label, 'muted_label'))
         self.api_durum_guncelle()
 
         # Dikey ayırıcı
@@ -5744,6 +5753,8 @@ class HayvanTakipSistemi:
         if ciftlik_ad:
             metin = f"{ciftlik_ad} - {metin}"
         self.api_status_label.config(text=metin, fg=renk, bg=self.api_status_pill.cget("bg"))
+        if hasattr(self, "api_version_label"):
+            self.api_version_label.config(text=f"v{APP_VERSION}", bg=self.api_status_pill.cget("bg"))
 
     def api_ayar_penceresi(self):
         if getattr(self, "api_kullanici", None) and not self.admin_mi():
