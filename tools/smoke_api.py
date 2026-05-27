@@ -9,7 +9,10 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
+
+from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -233,17 +236,19 @@ def main():
         _, animal = request(base_url, "POST", "/api/hayvanlar", animal_payload, token=farm_token, expected=201)
         assert animal["foto_data"] == animal_payload["foto_data"]
         assert animal["irk"] == "Simental", animal
-        tiny_png = (
-            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-            b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04"
-            b"\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
-        )
+        def png_bytes(color):
+            buffer = BytesIO()
+            Image.new("RGB", (12, 12), color).save(buffer, format="PNG")
+            return buffer.getvalue()
+
+        tiny_png = png_bytes((255, 0, 0))
+        tiny_png_2 = png_bytes((0, 80, 255))
         _, photo_upload = multipart_request(
             base_url,
             "/api/hayvanlar/api-smoke-h1/fotograflar",
             [
                 ("fotograflar", "smoke-1.png", "image/png", tiny_png),
-                ("fotograflar", "smoke-2.png", "image/png", tiny_png + b"2"),
+                ("fotograflar", "smoke-2.png", "image/png", tiny_png_2),
             ],
             token=farm_token,
             expected=200,
@@ -315,6 +320,9 @@ def main():
         assert system_status["kayit_sayilari"]["hayvan"] >= 2, system_status
         assert system_status["storage"]["aktif"] is False, system_status
         assert system_status["fotograflar"]["database_base64_adet"] >= 1, system_status
+        _, data_health = request(base_url, "GET", "/api/admin/veri-sagligi", token=admin_token, expected=200)
+        assert data_health["genel_durum"] in {"saglikli", "uyari", "kritik"}, data_health
+        assert isinstance(data_health.get("kontroller"), list), data_health
 
         request(base_url, "DELETE", f"/api/ciftlikler/{farm_id}", token=admin_token, expected=200)
         expect_http_error(
