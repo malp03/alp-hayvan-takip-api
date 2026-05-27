@@ -188,13 +188,13 @@ Minimum yerel tablolar:
 1. Login ekrani
 2. Token'i guvenli saklama (Android KeyStore)
 3. Kullanici rolune gore yonlendirme:
-   - `admin` → ciftlik sec / yonetim ekrani
-   - `ciftlik` → direkt suru listesi
+   - `admin` -> ciftlik sec / yonetim ekrani
+   - `ciftlik` -> direkt suru listesi
 4. Hayvan listesi ekraninda **Tara butonu** (ust kisim)
 5. Tara basilinca tam ekran kamera preview acilir
-6. Kupe okunur → kullanici onaylar/duzeltir → Ara
-7. Kupe bulunursa → Hayvan Profil Ekrani
-8. Kupe bulunamazsa → Yeni Hayvan Kayit Ekrani (kupe dolu)
+6. Kupe okunur -> kullanici onaylar/duzeltir -> Ara
+7. Kupe bulunursa -> Hayvan Profil Ekrani
+8. Kupe bulunamazsa -> Yeni Hayvan Kayit Ekrani (kupe dolu)
 9. Hayvan ekle / duzenle / tohumla / asi / dogum akislari
 10. Offline kuyruk ve otomatik baglanti kontrolu
 11. Internet gelince otomatik senkron ve manuel Senkronize butonu
@@ -206,7 +206,7 @@ Ek not: Tara akisinda arama icin `/api/hayvanlar/bul?ref={metin}&kaynak=kamera` 
 Desktop profiliyle esdeger, sekme tabanli:
 
 1. **Kimlik & Durum:** resmi/ciftlik kupe, cins, irk, yas, durum rozeti
-2. **Ozet:** gebe mi, son tohumlama, yaklasan doğum
+2. **Ozet:** gebe mi, son tohumlama, yaklasan dogum
 3. **Tohumlama Gecmisi:** liste + yeni tohumlama ekle
 4. **Dogum & Yavru Gecmisi:** liste + yeni dogum kaydi
 5. **Asi / Prosedur:** liste + yeni asi ekle
