@@ -199,6 +199,9 @@ class HayvanBase(AlpModel):
     kesildi: bool = False
     kesim_tarihi: Optional[str] = None
     kesim_bilgisi: Optional[KesimBilgisi] = None
+    satildi: bool = False
+    satis_tarihi: Optional[str] = None
+    satis_bilgisi: Optional[Dict[str, Any]] = None
     arsivli: bool = False
     arsiv_tarihi: Optional[str] = None
     foto_data: Optional[str] = None
@@ -243,6 +246,9 @@ class HayvanUpdate(AlpModel):
     kesildi: Optional[bool] = None
     kesim_tarihi: Optional[str] = None
     kesim_bilgisi: Optional[KesimBilgisi] = None
+    satildi: Optional[bool] = None
+    satis_tarihi: Optional[str] = None
+    satis_bilgisi: Optional[Dict[str, Any]] = None
     arsivli: Optional[bool] = None
     arsiv_tarihi: Optional[str] = None
     foto_data: Optional[str] = None
@@ -279,6 +285,23 @@ class SistemDurumuResponse(AlpModel):
     kayit_sayilari: Dict[str, Any] = Field(default_factory=dict)
     fotograflar: Dict[str, Any] = Field(default_factory=dict)
     limitler: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VeriSagligiKontrol(AlpModel):
+    seviye: str
+    baslik: str
+    mesaj: str
+    adet: int = 0
+    ornekler: List[str] = Field(default_factory=list)
+    onerilen_islem: Optional[str] = None
+
+
+class VeriSagligiResponse(AlpModel):
+    olusturma_zamani: str
+    genel_durum: str
+    ozet: Dict[str, Any] = Field(default_factory=dict)
+    sayilar: Dict[str, Any] = Field(default_factory=dict)
+    kontroller: List[VeriSagligiKontrol] = Field(default_factory=list)
 
 
 class UyariResponse(AlpModel):
