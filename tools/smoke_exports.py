@@ -1,4 +1,5 @@
 import tempfile
+import zipfile
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -53,6 +54,15 @@ def main():
     assert any(sheet.cell(row=9, column=col).value == "Irk" for col in range(1, sheet.max_column + 1))
     assert "Kayıt sayısı" in [sheet.cell(row=i, column=1).value for i in range(1, 8)]
     assert sheet.max_row >= 8
+    with zipfile.ZipFile(xlsx_path) as archive:
+        names = archive.namelist()
+        assert not any(name.startswith("xl/tables/") for name in names), names
+        worksheet_xml = [
+            archive.read(name).decode("utf-8", errors="ignore")
+            for name in names
+            if name.startswith("xl/worksheets/")
+        ]
+        assert not any("tableParts" in xml for xml in worksheet_xml)
 
     print(f"Export smoke OK: {tmp}")
     return 0
