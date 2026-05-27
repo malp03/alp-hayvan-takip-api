@@ -355,6 +355,10 @@ Desktop profil ile ayni sekmeleri icermeli:
 
 - 27 Mayis 2026: `Geri Al` butonu tek tusla son snapshot'i yukleyip tum suruyu API'ye gondermek yerine secilebilir pencereye cevrildi. Pencere son 10 islemi gosterir; kullanici secili islemi geri alir. Kalici silme islemleri listede gorunse de `geri_alinabilir=False` olarak isaretlenir ve geri getirilemez. Geri alma sadece etkilenen kayitlari upsert/delete eder, bu yuzden buyuk surulerde donma riski azaltildi. Desktop `APP_VERSION` `1.9.24` yapildi; release tag'i `v1.9.24` olmalidir. `python tools\run_smoke_tests.py` gecti.
 
+- 27 Mayis 2026: API tarafina sunucu tarafi fotograf sikistirma eklendi. Multipart veya base64 gelen fotograflar Storage/DB'ye yazilmadan once Pillow ile EXIF yonu duzeltilir, 900px maksimum kenara indirilir ve JPEG quality 82 ile kaydedilir. Varsayilan kaynak limit `ALP_PHOTO_MAX_SOURCE_MB=12`, cikti limit `ALP_PHOTO_MAX_OUTPUT_MB=3`; `requirements-api.txt` ve `api_deploy/requirements-api.txt` icine `Pillow>=10.0` eklendi. `tools/smoke_api.py` yeni sikistirma davranisina uygun guncellendi. `python tools\run_smoke_tests.py` gecti.
+
+- 27 Mayis 2026: Excel ciktilarinda babanin gordugu `Excel okunamayan icerigi onardi / xl/tables/table1.xml` uyarisi icin export sistemi duzeltildi. `alp_ziraat_export.py` artik Excel structured table XML'i uretmez; ayni gorunumu hucre stilleri ve standart worksheet AutoFilter ile verir. `tools/smoke_exports.py` bundan sonra xlsx icinde `xl/tables/` ve `tableParts` olusmadigini kontrol eder. `python tools\run_smoke_tests.py` gecti.
+
 ## 22 Mayis 2026 v1.9.1 Release Notu
 
 - GitHub latest release zaten `v1.9.0` oldugu icin updater'in tetiklenmesi adina desktop `APP_VERSION` `1.9.1` yapildi.

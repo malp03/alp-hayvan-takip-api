@@ -7,7 +7,6 @@ try:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
-    from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
@@ -153,20 +152,6 @@ def export_rows_to_excel(file_path, title, columns, rows, subtitle=None, metadat
             cell.fill = fill
             cell.border = border
             cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-
-    if rows:
-        table_ref = f"A{header_row}:{last_col}{data_end}"
-        table = ExcelTable(displayName=_safe_table_name(title), ref=table_ref)
-        table.tableStyleInfo = TableStyleInfo(
-            name="TableStyleMedium2",
-            showFirstColumn=False,
-            showLastColumn=False,
-            showRowStripes=True,
-            showColumnStripes=False,
-        )
-        sheet.add_table(table)
-    else:
-        sheet.auto_filter.ref = f"A{header_row}:{last_col}{header_row}"
 
     sample_rows = rows[:200]
     for column_index, column_title in enumerate(columns, 1):
