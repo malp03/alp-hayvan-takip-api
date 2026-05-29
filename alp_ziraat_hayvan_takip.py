@@ -2978,18 +2978,15 @@ class HayvanTakipSistemi:
         return kayitlar if isinstance(kayitlar, list) else []
 
     def admin_online_yedek_indir(self, parent=None):
+        parent = parent or self.root
         if not self.admin_mi():
-            return messagebox.showerror("Yedek", "Bu islem icin admin yetkisi gerekir.", parent=parent or self.root)
-        if not self.online_islem_gerekli("Online yedek alma", parent or self.root):
+            return messagebox.showerror("Yedek", "Bu islem icin admin yetkisi gerekir.", parent=parent)
+        if not self.online_islem_gerekli("Online yedek alma", parent):
             return
-        try:
-            yedek = self.api_istek("GET", "/api/yedek", timeout=45)
-        except ApiHatasi as e:
-            return messagebox.showerror("Yedek", f"Online yedek alinamadi:\n{e}", parent=parent or self.root)
         zaman = datetime.now().strftime("%Y%m%d_%H%M%S")
         varsayilan_ad = f"alp_online_yedek_{zaman}.json"
         dosya = filedialog.asksaveasfilename(
-            parent=parent or self.root,
+            parent=parent,
             title="Online Yedek Kaydet",
             defaultextension=".json",
             initialfile=varsayilan_ad,
@@ -2997,12 +2994,87 @@ class HayvanTakipSistemi:
         )
         if not dosya:
             return
-        try:
-            with open(dosya, "w", encoding="utf-8") as f:
-                json.dump(yedek, f, ensure_ascii=False, indent=2)
-            messagebox.showinfo("Yedek", f"Online yedek kaydedildi:\n{dosya}", parent=parent or self.root)
-        except Exception as e:
-            messagebox.showerror("Yedek", f"Yedek dosyasi yazilamadi:\n{e}", parent=parent or self.root)
+
+        pencere = tk.Toplevel(parent)
+        pencere.title("Online Yedek İndiriliyor")
+        pencere.configure(bg=self.renkler["kart_arkaplan"])
+        pencere.resizable(False, False)
+        pencere.transient(parent)
+        pencere.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        govde = tk.Frame(pencere, bg=self.renkler["kart_arkaplan"], padx=22, pady=18)
+        govde.pack(fill="both", expand=True)
+        tk.Label(
+            govde,
+            text="Online yedek hazırlanıyor...",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w")
+        durum_label = tk.Label(
+            govde,
+            text="Render servisi uyanıyorsa bu işlem 1-2 dakika sürebilir.",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=("Segoe UI", 9),
+            wraplength=360,
+            justify="left",
+        )
+        durum_label.pack(anchor="w", pady=(6, 12))
+        progress = ttk.Progressbar(govde, mode="indeterminate", length=360)
+        progress.pack(fill="x")
+        progress.start(12)
+        self.pencere_ortala(pencere, parent)
+        pencere.grab_set()
+
+        sonuc_kuyrugu = queue.Queue()
+
+        def worker():
+            try:
+                try:
+                    self.api_istek("GET", "/api/health", timeout=20, auth=False)
+                except Exception:
+                    pass
+                yedek = None
+                son_hata = None
+                for deneme in range(2):
+                    try:
+                        yedek = self.api_istek("GET", "/api/yedek", timeout=180)
+                        break
+                    except ApiHatasi as e:
+                        son_hata = e
+                        if deneme == 0:
+                            continue
+                if yedek is None:
+                    raise son_hata or ApiHatasi("Online yedek cevabı boş geldi.")
+                with open(dosya, "w", encoding="utf-8") as f:
+                    json.dump(yedek, f, ensure_ascii=False, indent=2)
+                sonuc_kuyrugu.put(("ok", dosya))
+            except Exception as e:
+                sonuc_kuyrugu.put(("hata", str(e)))
+
+        def poll():
+            try:
+                durum, veri = sonuc_kuyrugu.get_nowait()
+            except queue.Empty:
+                if pencere.winfo_exists():
+                    self._track_after(pencere, 150, poll)
+                return
+
+            try:
+                progress.stop()
+                pencere.grab_release()
+                pencere.destroy()
+            except tk.TclError:
+                pass
+
+            if durum == "ok":
+                messagebox.showinfo("Yedek", f"Online yedek kaydedildi:\n{veri}", parent=parent)
+            else:
+                messagebox.showerror("Yedek", f"Online yedek alınamadı:\n{veri}", parent=parent)
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._track_after(pencere, 150, poll)
 
     def admin_sistem_durumu_penceresi(self, parent=None):
         parent = parent or self.root
