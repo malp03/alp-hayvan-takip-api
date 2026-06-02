@@ -1311,6 +1311,79 @@ def kupe_cakismasi_kontrol(
             raise HTTPException(status_code=400, detail=f"{kupe} küpe numarası bu çiftlikte zaten kayıtlı.")
 
 
+def kupe_eslesme_anahtari(deger: Any) -> str:
+    return re.sub(r"\s+", "", metin(deger, upper=True))
+
+
+def hayvan_kupe_anahtarlari(veri: Dict[str, Any]) -> set[str]:
+    return {
+        anahtar
+        for anahtar in (
+            kupe_eslesme_anahtari(veri.get("resmi_kupe_no")),
+            kupe_eslesme_anahtari(veri.get("ciftlik_kupe_no")),
+            kupe_eslesme_anahtari(veri.get("kupe_no")),
+        )
+        if anahtar
+    }
+
+
+def annenin_dogum_kaydina_yavru_ekle(
+    db: Session,
+    cocuk_db: models.Hayvan,
+    cocuk_veri: Dict[str, Any],
+) -> bool:
+    anne_kupe = kupe_eslesme_anahtari(cocuk_veri.get("anne_kupe"))
+    ciftlik_id = cocuk_veri.get("ciftlik_id")
+    if not anne_kupe or not ciftlik_id:
+        return False
+
+    olasi_anneler = db.query(models.Hayvan).filter(models.Hayvan.ciftlik_id == ciftlik_id).all()
+    anne_db = None
+    for aday in olasi_anneler:
+        if aday.id == cocuk_db.id:
+            continue
+        aday_veri = db_hayvandan_payload(aday, include_photo_urls=False)
+        if anne_kupe in hayvan_kupe_anahtarlari(aday_veri):
+            anne_db = aday
+            break
+    if not anne_db:
+        return False
+
+    anne_veri = db_hayvandan_payload(anne_db, include_photo_urls=False)
+    cocuk_anahtarlari = hayvan_kupe_anahtarlari(cocuk_veri) | {kupe_eslesme_anahtari(cocuk_db.id)}
+    for dogum in anne_veri.get("dogumlar") or []:
+        for yavru in dogum.get("yavrular") or []:
+            yavru_anahtarlari = {
+                kupe_eslesme_anahtari(yavru.get("kupe")),
+                kupe_eslesme_anahtari(yavru.get("resmi_kupe_no")),
+                kupe_eslesme_anahtari(yavru.get("ciftlik_kupe_no")),
+            }
+            if cocuk_anahtarlari.intersection({anahtar for anahtar in yavru_anahtarlari if anahtar}):
+                return False
+
+    dogum_tarihi = cocuk_veri.get("dogum_tarihi") or ""
+    if not parse_tarih_sessiz(dogum_tarihi):
+        dogum_tarihi = simdi_dt().strftime(TARIH_FORMATI)
+    dogum_kaydi = normalize_dogum(
+        {
+            "tarih": dogum_tarihi,
+            "yavrular": [
+                {
+                    "kupe": cocuk_veri.get("kupe_no") or cocuk_db.id,
+                    "resmi_kupe_no": cocuk_veri.get("resmi_kupe_no") or "",
+                    "ciftlik_kupe_no": cocuk_veri.get("ciftlik_kupe_no") or "",
+                    "cins": cocuk_veri.get("cins") or "Bilinmiyor",
+                }
+            ],
+            "not": "Yeni hayvan kaydindaki anne kupesi eslesmesiyle otomatik olusturuldu.",
+        },
+        yeni=True,
+    )
+    anne_veri.setdefault("dogumlar", []).append(dogum_kaydi)
+    db_hayvana_yaz(db, anne_db, anne_veri)
+    return True
+
+
 def auth_baslangic_verisini_hazirla():
     db = next(get_db())
     try:
@@ -1927,6 +2000,7 @@ def create_hayvan(
     db_hayvan = models.Hayvan(id=veri["id"])
     db.add(db_hayvan)
     db_hayvana_yaz(db, db_hayvan, veri)
+    anne_baglanti_eklendi = annenin_dogum_kaydina_yavru_ekle(db, db_hayvan, veri)
     audit_kaydi(
         db,
         kullanici,
@@ -1936,6 +2010,16 @@ def create_hayvan(
         hedef_tipi="hayvan",
         hedef_id=db_hayvan.id,
     )
+    if anne_baglanti_eklendi:
+        audit_kaydi(
+            db,
+            kullanici,
+            "dogum_otomatik_yavru",
+            f"Anne kupesi eslesmesiyle yavru dogum gecmisine baglandi: {veri.get('kupe_no') or db_hayvan.id}",
+            ciftlik_id=db_hayvan.ciftlik_id,
+            hedef_tipi="hayvan",
+            hedef_id=db_hayvan.id,
+        )
     db.commit()
     db.refresh(db_hayvan)
     return db_hayvandan_payload(db_hayvan, include_photo_urls=False)
@@ -1967,6 +2051,7 @@ def update_hayvan(
         ciftlik_bul(db, mevcut["ciftlik_id"])
     veri = normalize_hayvan(mevcut, hayvan_id=db_hayvan.id)
     kupe_cakismasi_kontrol(db, veri, haric_id=db_hayvan.id, ciftlik_id=veri.get("ciftlik_id"))
+    annenin_dogum_kaydina_yavru_ekle(db, db_hayvan, veri)
     audit_kaydi(
         db,
         kullanici,
@@ -2955,6 +3040,25 @@ def get_islem_gecmisi(
         kayitlar = filtreli
     kayitlar = kayitlar[:limit]
     return [islem_payload(kayit) for kayit in kayitlar]
+
+
+@app.delete("/api/islem-gecmisi", response_model=schemas.IslemSonucResponse)
+def clear_islem_gecmisi(
+    ciftlik_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: models.Kullanici = Depends(require_admin),
+):
+    sorgu = db.query(models.IslemGecmisi)
+    if ciftlik_id:
+        sorgu = sorgu.filter(models.IslemGecmisi.ciftlik_id == ciftlik_id)
+    silinen = sorgu.delete(synchronize_session=False)
+    db.commit()
+    return {
+        "status": "ok",
+        "message": f"Islem gecmisi temizlendi. Silinen kayit: {silinen}",
+        "id": "islem-gecmisi-temizle",
+        "detay": {"silinen": silinen, "ciftlik_id": ciftlik_id},
+    }
 
 
 @app.get("/api/yedek", response_model=schemas.YedekResponse)
