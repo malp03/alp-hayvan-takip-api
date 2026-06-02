@@ -6551,8 +6551,15 @@ class HayvanTakipSistemi:
         self.themed_widgets.append((btn_frame, 'kart'))
 
         self.modern_buton(btn_frame, "TOHUMLAMA KAYDET", self.tohumlama_kaydet, purpose='primary', width=22).pack(side='left', padx=(0, 10))
-        self.modern_buton(btn_frame, "GEBELİK POZİTİF", self.gebelik_pozitif, purpose='success', width=20).pack(side='left', padx=10)
-        self.modern_buton(btn_frame, "GEBELİK NEGATİF", self.gebelik_negatif, purpose='danger', width=20).pack(side='left', padx=(10, 0))
+        sonuc_notu = tk.Label(
+            btn_frame,
+            text="Gebelik sonucu hayvan profilindeki 'Tohumlamayı Sonuçla' butonundan işlenir.",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=('Segoe UI', 9, 'italic'),
+        )
+        sonuc_notu.pack(side='left', padx=(10, 0))
+        self.themed_widgets.append((sonuc_notu, 'muted_label'))
 
 
     def hayvan_listesi_sekmesi(self):
@@ -7526,7 +7533,7 @@ class HayvanTakipSistemi:
             return
         eslesenler = []
         for h_id, hayvan in self.hayvanlar.items():
-            if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('satildi', False):
+            if not self.hayvan_tohumlanabilir_mi(hayvan):
                 continue
             if self.hayvan_arama_eslesir(h_id, hayvan, text):
                 gorunen = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or h_id
@@ -7538,7 +7545,7 @@ class HayvanTakipSistemi:
     def aktif_hayvan_secim_degerleri(self):
         degerler = []
         for h_id, hayvan in self.hayvanlar.items():
-            if hayvan.get('arsivli', False) or hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('satildi', False):
+            if not self.hayvan_tohumlanabilir_mi(hayvan):
                 continue
             gorunen = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or h_id
             if gorunen:
@@ -7574,12 +7581,33 @@ class HayvanTakipSistemi:
             return False
         if hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi') or hayvan.get('satildi'):
             return False
+        if self.hayvan_bekleyen_tohumlama(hayvan):
+            return False
         if hayvan.get('gebe_mi', False):
             return False
         cins = str(hayvan.get('cins') or "")
         if cins == "Dana" or cins.startswith("Erkek"):
             return False
         return True
+
+    def hayvan_bekleyen_tohumlama(self, hayvan):
+        if not hayvan:
+            return None
+        tohumlamalar = hayvan.get('tohumlamalar') or []
+        if not tohumlamalar:
+            return None
+        son_tohumlama = tohumlamalar[-1]
+        return son_tohumlama if son_tohumlama.get('gebe_mi') is None else None
+
+    def hayvan_tohumlama_sonuclanabilir_mi(self, hayvan):
+        if not hayvan:
+            return False
+        if hayvan.get('arsivli') or hayvan.get('olu') or hayvan.get('kesildi') or hayvan.get('satildi'):
+            return False
+        cins = str(hayvan.get('cins') or "")
+        if cins == "Dana" or cins.startswith("Erkek"):
+            return False
+        return self.hayvan_bekleyen_tohumlama(hayvan) is not None
 
     def tohumlama_ekranina_hayvanla_git(self, kupe_no, kaynak_pencere=None):
         hayvan_id = self.hayvan_referans_coz(kupe_no, aktif_olsun=True) or kupe_no
@@ -8012,69 +8040,160 @@ class HayvanTakipSistemi:
         self.tohumlama_sekli_combo.set('')
         self.hayvan_listesini_guncelle()
 
+    def gebelik_sonucu_kaydet(self, kupe_no, sonuc, parent=None):
+        kupe_no = self.hayvan_referans_coz(kupe_no, aktif_olsun=True) or kupe_no
+        if not kupe_no or kupe_no not in self.hayvanlar:
+            messagebox.showerror("Hata", "Geçerli bir hayvan bulunamadı.", parent=parent or self.root)
+            return False
+
+        hayvan = self.hayvanlar[kupe_no]
+        son_tohumlama = self.hayvan_bekleyen_tohumlama(hayvan)
+        gorunen = self.hayvan_gorunen_kupe(kupe_no, hayvan)
+        if son_tohumlama is None:
+            messagebox.showerror(
+                "Hata",
+                "Bu hayvan için bekleyen bir tohumlama sonucu bulunmamaktadır.",
+                parent=parent or self.root,
+            )
+            return False
+
+        sonuc_metin = "pozitif" if sonuc else "negatif"
+        self.islem_kaydi_baslat(f"Gebelik {sonuc_metin} işlendi: {gorunen}")
+        son_tohumlama.update({
+            'gebe_mi': bool(sonuc),
+            'kontrol_tarihi': datetime.now().strftime("%d/%m/%Y"),
+        })
+
+        if sonuc:
+            hayvan.update({
+                'gebe_mi': True,
+                'gebelik_tarihi': son_tohumlama.get('tarih'),
+                'aktif_tohumlama_id': son_tohumlama.get('id'),
+            })
+            if hayvan.get('durum') not in ['Sağmal İnek', 'Kuru İnek']:
+                hayvan['durum'] = 'Gebe'
+        else:
+            yeni_durum = self.durum_hesapla(hayvan.get('cins'), hayvan.get('yas_gun'))
+            hayvan.update({
+                'gebe_mi': False,
+                'gebelik_tarihi': None,
+                'aktif_tohumlama_id': None,
+                'durum': yeni_durum,
+            })
+
+        hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        if not self.veri_kaydet(kupe_no=kupe_no):
+            return False
+
+        messagebox.showinfo(
+            "Başarılı",
+            f"{gorunen} gebelik sonucu {sonuc_metin} olarak işlendi.",
+            parent=parent or self.root,
+        )
+        self.hayvan_listesini_guncelle()
+        self.uyarilari_guncelle()
+        self.raporlari_guncelle()
+        self.header_ozet_guncelle()
+        return True
+
+    def tohumlama_sonuc_penceresi(self, kupe_no, kaynak_pencere=None):
+        hayvan_id = self.hayvan_referans_coz(kupe_no, aktif_olsun=True) or kupe_no
+        if hayvan_id not in self.hayvanlar:
+            return messagebox.showerror("Hata", f"Hayvan bulunamadı: {kupe_no}", parent=kaynak_pencere or self.root)
+
+        hayvan = self.hayvanlar[hayvan_id]
+        bekleyen = self.hayvan_bekleyen_tohumlama(hayvan)
+        gorunen = self.hayvan_gorunen_kupe(hayvan_id, hayvan)
+        if bekleyen is None:
+            return messagebox.showinfo("Tohumlama Sonucu", f"{gorunen} için bekleyen tohumlama sonucu yok.", parent=kaynak_pencere or self.root)
+
+        if kaynak_pencere is not None:
+            try:
+                kaynak_pencere.grab_release()
+                kaynak_pencere.destroy()
+            except tk.TclError:
+                pass
+
+        pencere = tk.Toplevel(self.root)
+        pencere.title(f"Tohumlamayı Sonuçla - {gorunen}")
+        pencere.geometry("620x420")
+        pencere.minsize(560, 380)
+        pencere.configure(bg=self.renkler["arkaplan"])
+        pencere.transient(self.root)
+        pencere.grab_set()
+
+        kart = self.modern_kart(pencere, accent=self.renkler["button_primary_bg"])
+        kart.pack(fill='both', expand=True, padx=22, pady=22)
+
+        body = tk.Frame(kart, bg=self.renkler["kart_arkaplan"], padx=24, pady=22)
+        body.pack(fill='both', expand=True)
+        self.themed_widgets.append((body, 'kart'))
+
+        tk.Label(
+            body,
+            text="Tohumlama Sonucu",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["yazi_rengi"],
+            font=('Segoe UI', 20, 'bold'),
+        ).pack(anchor='w')
+        tk.Label(
+            body,
+            text=f"{gorunen} için bekleyen tohumlama sonucunu işaretleyin.",
+            bg=self.renkler["kart_arkaplan"],
+            fg=self.renkler["muted"],
+            font=('Segoe UI', 10),
+        ).pack(anchor='w', pady=(6, 18))
+
+        bilgi = tk.Frame(body, bg=self.renkler["kart_ikincil"], padx=14, pady=12, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+        bilgi.pack(fill='x', pady=(0, 18))
+        self.themed_widgets.append((bilgi, 'soft_panel'))
+        satirlar = [
+            ("Hayvan", gorunen),
+            ("Tohumlama Tarihi", bekleyen.get('tarih') or "-"),
+            ("Şekil", bekleyen.get('sekil') or "-"),
+            ("Boğa/Sperma", bekleyen.get('suni_isim') or "-"),
+        ]
+        for idx, (etiket, deger) in enumerate(satirlar):
+            tk.Label(bilgi, text=etiket, bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=('Segoe UI', 9, 'bold')).grid(row=idx, column=0, sticky='w', pady=4, padx=(0, 16))
+            tk.Label(bilgi, text=str(deger), bg=self.renkler["kart_ikincil"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 10, 'bold')).grid(row=idx, column=1, sticky='w', pady=4)
+        bilgi.columnconfigure(1, weight=1)
+
+        btn_frame = tk.Frame(body, bg=self.renkler["kart_arkaplan"])
+        btn_frame.pack(side='bottom', fill='x', pady=(18, 0))
+        self.themed_widgets.append((btn_frame, 'kart'))
+
+        def sonuc_sec(sonuc):
+            if self.gebelik_sonucu_kaydet(hayvan_id, sonuc, parent=pencere):
+                try:
+                    pencere.destroy()
+                except tk.TclError:
+                    pass
+                self._track_after(self.root, 80, lambda: self.hayvan_detay_penceresi(hayvan_id))
+
+        def kapat_sonuc_penceresi():
+            try:
+                pencere.destroy()
+            except tk.TclError:
+                pass
+            if kaynak_pencere is not None:
+                self._track_after(self.root, 80, lambda: self.hayvan_detay_penceresi(hayvan_id))
+
+        pencere.protocol("WM_DELETE_WINDOW", kapat_sonuc_penceresi)
+        self.modern_buton(btn_frame, "GEBELİK POZİTİF", lambda: sonuc_sec(True), purpose='success', width=20).pack(side='left', padx=(0, 10))
+        self.modern_buton(btn_frame, "GEBELİK NEGATİF", lambda: sonuc_sec(False), purpose='danger', width=20).pack(side='left', padx=10)
+        self.modern_buton(btn_frame, "İPTAL", kapat_sonuc_penceresi, purpose='default', width=14).pack(side='right')
+
     def gebelik_pozitif(self):
         kupe_girdi = self.tohumlama_hayvan_combo.get().strip().upper()
         if not kupe_girdi:
             return messagebox.showerror("Hata", "Geçerli bir hayvan seçin veya tohumlama kaydı oluşturun!")
-        
-        kupe_no = self.hayvan_referans_coz(kupe_girdi, aktif_olsun=True)
-        
-        if not kupe_no or not self.hayvanlar[kupe_no].get('tohumlamalar'):
-            return messagebox.showerror("Hata", "Geçerli bir hayvan seçin veya tohumlama kaydı oluşturun!")
-        
-        hayvan = self.hayvanlar[kupe_no]
-        son_tohumlama = hayvan['tohumlamalar'][-1]
-        gorunen = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or kupe_no
-        
-        if son_tohumlama.get('gebe_mi') is not None:
-            messagebox.showerror("Hata", "Bu hayvan için bekleyen yeni bir tohumlama kaydı bulunmamaktadır.\nLütfen önce 'Tohumlama Kaydet' ile yeni bir tohumlama işlemi girin.")
-            return
-
-        self.islem_kaydi_baslat(f"Gebelik pozitif işlendi: {gorunen}")
-        son_tohumlama.update({'gebe_mi': True, 'kontrol_tarihi': datetime.now().strftime("%d/%m/%Y")})
-        
-        hayvan.update({
-            'gebe_mi': True, 
-            'gebelik_tarihi': son_tohumlama['tarih'],
-            'aktif_tohumlama_id': son_tohumlama.get('id')
-        })
-        if hayvan.get('durum') not in ['Sağmal İnek', 'Kuru İnek']:
-            hayvan['durum'] = 'Gebe'
-
-        self.veri_kaydet(kupe_no=kupe_no)
-        messagebox.showinfo("Başarılı", f"{gorunen} numaralı hayvan gebe olarak işaretlendi!")
-        self.hayvan_listesini_guncelle()
-        self.uyarilari_guncelle()
-        self.raporlari_guncelle()
+        self.gebelik_sonucu_kaydet(kupe_girdi, True)
 
     def gebelik_negatif(self):
         kupe_girdi = self.tohumlama_hayvan_combo.get().strip().upper()
         if not kupe_girdi:
             return messagebox.showerror("Hata", "Geçerli bir hayvan seçin veya tohumlama kaydı oluşturun!")
-        
-        kupe_no = self.hayvan_referans_coz(kupe_girdi, aktif_olsun=True)
-        
-        if not kupe_no or not self.hayvanlar[kupe_no].get('tohumlamalar'):
-            return messagebox.showerror("Hata", "Geçerli bir hayvan seçin veya tohumlama kaydı oluşturun!")
-        
-        hayvan = self.hayvanlar[kupe_no]
-        son_tohumlama = hayvan['tohumlamalar'][-1]
-        gorunen = hayvan.get('ciftlik_kupe_no') or hayvan.get('resmi_kupe_no') or kupe_no
-        
-        if son_tohumlama.get('gebe_mi') is not None:
-            messagebox.showerror("Hata", "Bu hayvan için bekleyen yeni bir tohumlama kaydı bulunmamaktadır.\nLütfen önce 'Tohumlama Kaydet' ile yeni bir tohumlama işlemi girin.")
-            return
-
-        self.islem_kaydi_baslat(f"Gebelik negatif işlendi: {gorunen}")
-        son_tohumlama.update({'gebe_mi': False, 'kontrol_tarihi': datetime.now().strftime("%d/%m/%Y")})
-        
-        yeni_durum = self.durum_hesapla(hayvan.get('cins'), hayvan.get('yas_gun'))
-        hayvan.update({'gebe_mi': False, 'gebelik_tarihi': None, 'aktif_tohumlama_id': None, 'durum': yeni_durum})
-        
-        self.veri_kaydet(kupe_no=kupe_no)
-        messagebox.showinfo("Başarılı", f"{gorunen} numaralı hayvan boş olarak işaretlendi!")
-        self.hayvan_listesini_guncelle()
-        self.raporlari_guncelle()
+        self.gebelik_sonucu_kaydet(kupe_girdi, False)
 
     def _ask_calf_details(self, parent, calf_number):
         dialog, kart = self.modern_popup(f"{calf_number}. Yavru Bilgileri", 520, 430, parent=parent)
@@ -9182,7 +9301,9 @@ class HayvanTakipSistemi:
             ("Düzenle", lambda: self.hayvan_duzenle_penceresi(hayvan_id, detay_window), "default"),
             ("Aşı/Prosedür", lambda: self.asi_prosedur_penceresi(hayvan_id, detay_window), "success"),
         ]
-        if self.hayvan_tohumlanabilir_mi(hayvan):
+        if self.hayvan_tohumlama_sonuclanabilir_mi(hayvan):
+            aksiyonlar.append(("Tohumlamayı Sonuçla", lambda: self.tohumlama_sonuc_penceresi(hayvan_id, detay_window), "warning"))
+        elif self.hayvan_tohumlanabilir_mi(hayvan):
             aksiyonlar.append(("Tohumla", lambda: self.tohumlama_ekranina_hayvanla_git(hayvan_id, detay_window), "primary"))
         if not hayvan.get("olu") and not hayvan.get("kesildi") and not hayvan.get("arsivli") and not hayvan.get("satildi"):
             if not is_male and hayvan.get("gebe_mi"):
