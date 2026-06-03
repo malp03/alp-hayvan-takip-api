@@ -441,6 +441,12 @@ Desktop profil ile ayni sekmeleri icermeli:
 - API `DELETE /api/hayvanlar/{ref}?kalici=true` ayni temizligi online veritabaninda da yapar. `api_deploy/api.py` kopyasi da guncellendi.
 - Desktop `APP_VERSION` `1.9.32` yapildi; release tag'i `v1.9.32` olmalidir.
 
+## 3 Haziran 2026 Desktop v1.9.33 Notu
+
+- Hayvan profili `Duzenle > Genel Bilgiler` penceresi kaydirmali hale getirildi; laktasyon ve fotograf alanlari uzasa bile `GENEL BILGILERI KAYDET` butonu pencerenin altinda sabit gorunur.
+- Pencereye minimum boyut verildi, kucuk ekranlarda kaydet butonunun alta kacmasi engellendi.
+- Desktop `APP_VERSION` `1.9.33` yapildi; release tag'i `v1.9.33` olmalidir.
+
 ## Hata Ararken Ilk Bakilacak Yerler
 
 - Login donuyorsa: `api_giris_penceresi`, `api_giris_yap`, `taninan_bilgisayar_giris_dene`, `tools/smoke_login_responsive.py`

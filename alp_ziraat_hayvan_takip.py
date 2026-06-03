@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.32"
+APP_VERSION = "1.9.33"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -1128,6 +1128,19 @@ class HayvanTakipSistemi:
             if hayvan_id:
                 return hayvan_id
         return None
+
+    def dogum_gorunur_yavrular(self, dogum):
+        gorunur = []
+        for yavru in (dogum or {}).get('yavrular') or []:
+            if self.yavru_hayvan_id_bul(yavru):
+                gorunur.append(yavru)
+        return gorunur
+
+    def dogum_gecmisi_gosterilmeli_mi(self, dogum):
+        yavrular = (dogum or {}).get('yavrular') or []
+        if yavrular and not self.dogum_gorunur_yavrular(dogum) and self.dogum_kaydi_otomatik_yavru_baglantisi_mi(dogum):
+            return False
+        return True
 
     def hayvan_referans_anahtarlari(self, h_id, hayvan):
         anahtarlar = {self.kupe_arama_temizle(h_id)}
@@ -8837,6 +8850,7 @@ class HayvanTakipSistemi:
         pencere = tk.Toplevel(self.root)
         pencere.title(f"Kayıt Düzenle - {gorunen_kupe}")
         pencere.geometry("950x700")
+        pencere.minsize(820, 560)
         pencere.configure(bg=self.renkler["arkaplan"])
         pencere.transient(self.root)
         pencere.grab_set()
@@ -8849,8 +8863,36 @@ class HayvanTakipSistemi:
         genel_kart = self.modern_kart(genel_frame)
         genel_kart.pack(fill='both', expand=True, padx=15, pady=15)
 
-        form = tk.Frame(genel_kart, bg=self.renkler["kart_arkaplan"], padx=30, pady=30)
-        form.pack(fill='both', expand=True)
+        kaydet_footer = tk.Frame(genel_kart, bg=self.renkler["kart_arkaplan"], padx=30, pady=14)
+        kaydet_footer.pack(side='bottom', fill='x')
+        self.themed_widgets.append((kaydet_footer, 'kart'))
+
+        genel_scroll_alan = tk.Frame(genel_kart, bg=self.renkler["kart_arkaplan"])
+        genel_scroll_alan.pack(side='top', fill='both', expand=True)
+        self.themed_widgets.append((genel_scroll_alan, 'kart'))
+
+        genel_canvas = tk.Canvas(genel_scroll_alan, bg=self.renkler["kart_arkaplan"], highlightthickness=0)
+        genel_scrollbar = ttk.Scrollbar(genel_scroll_alan, orient='vertical', command=genel_canvas.yview)
+        genel_canvas.configure(yscrollcommand=genel_scrollbar.set)
+        genel_scrollbar.pack(side='right', fill='y')
+        genel_canvas.pack(side='left', fill='both', expand=True)
+
+        form = tk.Frame(genel_canvas, bg=self.renkler["kart_arkaplan"], padx=30, pady=24)
+        form_window = genel_canvas.create_window((0, 0), window=form, anchor='nw')
+
+        def genel_form_scroll_guncelle(event=None):
+            genel_canvas.configure(scrollregion=genel_canvas.bbox("all"))
+
+        def genel_canvas_genislik_guncelle(event):
+            genel_canvas.itemconfigure(form_window, width=event.width)
+
+        def genel_form_mousewheel(event):
+            genel_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        form.bind("<Configure>", genel_form_scroll_guncelle)
+        genel_canvas.bind("<Configure>", genel_canvas_genislik_guncelle)
+        genel_canvas.bind("<MouseWheel>", genel_form_mousewheel)
+        form.bind("<MouseWheel>", genel_form_mousewheel)
         form.columnconfigure(1, weight=1)
 
         resmi_kupe_entry = ttk.Entry(form, width=25, font=('Segoe UI', 11), style='TEntry')
@@ -9024,7 +9066,7 @@ class HayvanTakipSistemi:
             self.ekranlari_guncelle()
             messagebox.showinfo("Başarılı", "Genel bilgiler güncellendi.", parent=pencere)
 
-        self.modern_buton(form, "GENEL BİLGİLERİ KAYDET", genel_kaydet, purpose='success').grid(row=8, column=0, columnspan=2, pady=(34, 0))
+        self.modern_buton(kaydet_footer, "GENEL BİLGİLERİ KAYDET", genel_kaydet, purpose='success').pack(side='right')
 
         tohumlama_frame = ttk.Frame(notebook, style='TFrame')
         notebook.add(tohumlama_frame, text="Tohumlama Geçmişi")
@@ -9150,7 +9192,9 @@ class HayvanTakipSistemi:
             for item in dogum_tree.get_children():
                 dogum_tree.delete(item)
             for idx, dogum in enumerate(hayvan.get('dogumlar', [])):
-                yavrular = ", ".join([self.yavru_gorunen_kupe(y) for y in dogum.get('yavrular', [])]) or "-"
+                if not self.dogum_gecmisi_gosterilmeli_mi(dogum):
+                    continue
+                yavrular = ", ".join([self.yavru_gorunen_kupe(y) for y in self.dogum_gorunur_yavrular(dogum)]) or "-"
                 dogum_tree.insert('', 'end', iid=str(idx), values=(idx + 1, dogum.get('tarih', ''), yavrular, dogum.get('laktasyon_bitis_tarihi') or "Devam ediyor"))
 
         def secili_dogum_index():
@@ -9813,10 +9857,14 @@ class HayvanTakipSistemi:
         dogum_yavrular_by_row = {}
         if dogumlar:
             for i, dogum in enumerate(dogumlar, 1):
-                yavrular = dogum.get("yavrular") or []
+                if not self.dogum_gecmisi_gosterilmeli_mi(dogum):
+                    continue
+                yavrular = self.dogum_gorunur_yavrular(dogum)
                 yavru_metin = ", ".join([f"{y.get('cins', '-')}: {self.yavru_gorunen_kupe(y)}" for y in yavrular]) or "Yavru bilgisi yok"
                 row_id = dog_tree.insert("", "end", values=(i, dogum.get("tarih", "-"), yavru_metin, dogum.get("not", "")))
                 dogum_yavrular_by_row[row_id] = yavrular
+            if not dogum_yavrular_by_row:
+                dog_tree.insert("", "end", values=("-", "-", "Kayıt yok", ""))
         else:
             dog_tree.insert("", "end", values=("-", "-", "Kayıt yok", ""))
 
