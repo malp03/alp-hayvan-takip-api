@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.29"
+APP_VERSION = "1.9.32"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -1128,6 +1128,70 @@ class HayvanTakipSistemi:
             if hayvan_id:
                 return hayvan_id
         return None
+
+    def hayvan_referans_anahtarlari(self, h_id, hayvan):
+        anahtarlar = {self.kupe_arama_temizle(h_id)}
+        for alan in ('id', 'kupe_no', 'resmi_kupe_no', 'ciftlik_kupe_no'):
+            anahtar = self.kupe_arama_temizle((hayvan or {}).get(alan))
+            if anahtar:
+                anahtarlar.add(anahtar)
+        anahtarlar.discard("")
+        return anahtarlar
+
+    def yavru_referans_anahtarlari(self, yavru):
+        anahtarlar = set()
+        for alan in ('hayvan_id', 'id', 'kupe', 'resmi_kupe_no', 'ciftlik_kupe_no'):
+            anahtar = self.kupe_arama_temizle((yavru or {}).get(alan))
+            if anahtar:
+                anahtarlar.add(anahtar)
+        return anahtarlar
+
+    def dogum_kaydi_otomatik_yavru_baglantisi_mi(self, dogum):
+        not_metni = str((dogum or {}).get('not') or '').lower()
+        return "anne" in not_metni and "otomatik" in not_metni
+
+    def silinen_hayvan_dogum_referanslarini_temizle(self, silinen_id, silinen_hayvan):
+        silinen_anahtarlar = self.hayvan_referans_anahtarlari(silinen_id, silinen_hayvan)
+        if not silinen_anahtarlar:
+            return [], 0
+
+        degisen_idler = []
+        temizlenen_yavru = 0
+        for anne_id, anne in list(self.hayvanlar.items()):
+            if str(anne_id) == str(silinen_id):
+                continue
+            dogumlar = anne.get('dogumlar') or []
+            if not dogumlar:
+                continue
+
+            degisti = False
+            yeni_dogumlar = []
+            for dogum in dogumlar:
+                dogum_kopya = dict(dogum or {})
+                yavrular = dogum_kopya.get('yavrular') or []
+                if not yavrular:
+                    yeni_dogumlar.append(dogum_kopya)
+                    continue
+
+                kalan_yavrular = []
+                for yavru in yavrular:
+                    if silinen_anahtarlar.intersection(self.yavru_referans_anahtarlari(yavru)):
+                        temizlenen_yavru += 1
+                        degisti = True
+                        continue
+                    kalan_yavrular.append(yavru)
+
+                dogum_kopya['yavrular'] = kalan_yavrular
+                if not kalan_yavrular and self.dogum_kaydi_otomatik_yavru_baglantisi_mi(dogum_kopya):
+                    continue
+                yeni_dogumlar.append(dogum_kopya)
+
+            if degisti:
+                anne['dogumlar'] = yeni_dogumlar
+                anne['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                degisen_idler.append(str(anne_id))
+
+        return degisen_idler, temizlenen_yavru
 
     #  ANİMASYON METODLARı 
     def _puls_zamanlayici_iptal_et(self):
@@ -8699,15 +8763,19 @@ class HayvanTakipSistemi:
         uyari = f"DİKKAT!\n\n{kupe_no} küpeli arşivli hayvan kalıcı olarak silinecek.\n\nBu işlem geri alınamaz."
         if not messagebox.askyesno("Kalıcı Silme Onayı", uyari, parent=pencere):
             return
+        silinen_hayvan = copy.deepcopy(self.hayvanlar.get(kupe_no) or {})
+        degisen_anne_idleri, temizlenen_yavru_sayisi = self.silinen_hayvan_dogum_referanslarini_temizle(kupe_no, silinen_hayvan)
         self.islem_kaydi_baslat(
             f"Arşivli hayvan kalıcı silindi: {kupe_no}",
             geri_alinabilir=False,
             geri_alinamaz_neden="Kalıcı silinen hayvan geri getirilemez.",
         )
         api_modu = getattr(self, "api_modu", False)
+        offline_senkron_gerekiyor = False
         if api_modu:
             if self.offline_modda_mi():
                 self.bekleyen_senkron_delete(kupe_no)
+                offline_senkron_gerekiyor = True
             else:
                 try:
                     self.api_istek("DELETE", f"/api/hayvanlar/{self.api_ref(kupe_no)}?kalici=true", timeout=30)
@@ -8719,13 +8787,20 @@ class HayvanTakipSistemi:
                         self.api_cevrimdisi = True
                         self._api_son_hata = str(e)
                         self.bekleyen_senkron_delete(kupe_no)
+                        offline_senkron_gerekiyor = True
         del self.hayvanlar[kupe_no]
         if api_modu:
+            if offline_senkron_gerekiyor:
+                for anne_id in degisen_anne_idleri:
+                    if anne_id in self.hayvanlar:
+                        self.bekleyen_senkron_upsert(anne_id, self.hayvanlar[anne_id])
+                self.bekleyen_senkron_kaydet()
             self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
             self.api_durum_guncelle()
         else:
             self.veri_kaydet(kupe_no=kupe_no)
-        messagebox.showinfo("Başarılı", f"{kupe_no} kalıcı olarak silindi.", parent=pencere)
+        ek = f"\nAnne doğum geçmişinden {temizlenen_yavru_sayisi} yavru bağlantısı temizlendi." if temizlenen_yavru_sayisi else ""
+        messagebox.showinfo("Başarılı", f"{kupe_no} kalıcı olarak silindi.{ek}", parent=pencere)
         pencere.destroy()
         self.ekranlari_guncelle()
 
@@ -8792,6 +8867,21 @@ class HayvanTakipSistemi:
         anne_entry = ttk.Entry(form, width=25, font=('Segoe UI', 11), style='TEntry')
         anne_entry.insert(0, hayvan.get('anne_kupe', ''))
 
+        def edit_sagmal_mi(cins_degeri=None):
+            deger = (cins_degeri if cins_degeri is not None else cins_combo.get()).strip()
+            return deger in ["Sağmal İnek", "Kuru İnek"]
+
+        def mevcut_laktasyon_bilgisi():
+            dogumlar = hayvan.get('dogumlar') or []
+            laktasyon_no = str(len(dogumlar)) if dogumlar else ""
+            son_dogum = ""
+            for dogum in reversed(dogumlar):
+                tarih = (dogum.get('tarih') or '').strip()
+                if tarih and tarih != "Bilinmiyor":
+                    son_dogum = tarih
+                    break
+            return laktasyon_no, son_dogum
+
         for row, (label_text, widget) in enumerate([
             ("Resmi Küpe No", resmi_kupe_entry),
             ("Çiftlik Küpe No", ciftlik_kupe_entry),
@@ -8804,8 +8894,38 @@ class HayvanTakipSistemi:
             label.grid(row=row, column=0, sticky='w', pady=12, padx=(0, 20))
             widget.grid(row=row, column=1, sticky='ew', pady=12)
 
+        laktasyon_frame = tk.Frame(form, bg=self.renkler["kart_ikincil"], padx=14, pady=12, highlightthickness=1, highlightbackground=self.renkler["kenarlik"])
+        laktasyon_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(8, 10))
+        laktasyon_frame.columnconfigure(1, weight=1)
+        laktasyon_frame.columnconfigure(3, weight=1)
+        self.themed_widgets.append((laktasyon_frame, 'kart2'))
+        tk.Label(laktasyon_frame, text="Eksik sağmal bilgisi", bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=('Segoe UI', 10, 'bold')).grid(row=0, column=0, columnspan=5, sticky='w', pady=(0, 8))
+
+        mevcut_laktasyon_no, mevcut_son_dogum = mevcut_laktasyon_bilgisi()
+        laktasyon_no_edit_entry = ttk.Entry(laktasyon_frame, width=12, font=('Segoe UI', 11), style='TEntry')
+        laktasyon_no_edit_entry.insert(0, mevcut_laktasyon_no)
+        son_dogum_edit_entry = ttk.Entry(laktasyon_frame, width=16, font=('Segoe UI', 11), style='TEntry')
+        son_dogum_edit_entry.insert(0, mevcut_son_dogum)
+        son_dogum_edit_entry.bind('<KeyRelease>', self.tarih_formatlama)
+
+        tk.Label(laktasyon_frame, text="Laktasyon Numarası", bg=self.renkler["kart_ikincil"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 10, 'bold')).grid(row=1, column=0, sticky='w', padx=(0, 10))
+        laktasyon_no_edit_entry.grid(row=1, column=1, sticky='ew', padx=(0, 18))
+        tk.Label(laktasyon_frame, text="Son Doğum Tarihi", bg=self.renkler["kart_ikincil"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 10, 'bold')).grid(row=1, column=2, sticky='w', padx=(0, 10))
+        son_dogum_edit_entry.grid(row=1, column=3, sticky='ew')
+        self.modern_buton(laktasyon_frame, "Takvim", lambda: self.tarih_secici_ac(son_dogum_edit_entry), purpose='default', small=True).grid(row=1, column=4, sticky='e', padx=(10, 0))
+
+        def laktasyon_panel_guncelle(event=None):
+            if edit_sagmal_mi():
+                laktasyon_frame.grid()
+            else:
+                laktasyon_frame.grid_remove()
+
+        cins_combo.bind("<<ComboboxSelected>>", laktasyon_panel_guncelle, add="+")
+        cins_combo.bind("<KeyRelease>", laktasyon_panel_guncelle, add="+")
+        laktasyon_panel_guncelle()
+
         foto_frame = tk.Frame(form, bg=self.renkler["kart_arkaplan"])
-        foto_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        foto_frame.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         foto_frame.columnconfigure(1, weight=1)
         self.themed_widgets.append((foto_frame, 'kart'))
         tk.Label(foto_frame, text="Fotoğraf", bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 12, 'bold')).grid(row=0, column=0, sticky="nw", padx=(0, 20))
@@ -8868,6 +8988,22 @@ class HayvanTakipSistemi:
             if dogum_dt is None:
                 return
 
+            yeni_dogumlar = None
+            if yeni_cins in ["Sağmal İnek", "Kuru İnek"]:
+                laktasyon_no_str = laktasyon_no_edit_entry.get().strip()
+                son_dogum_tarihi = son_dogum_edit_entry.get().strip()
+                if laktasyon_no_str or son_dogum_tarihi:
+                    yeni_dogumlar = self.laktasyon_dogumlari_olustur(
+                        yeni_cins,
+                        laktasyon_no_str,
+                        son_dogum_tarihi,
+                        dogum_dt,
+                        parent=pencere,
+                        bos_birakilabilir=False
+                    )
+                    if yeni_dogumlar is None:
+                        return
+
             self.islem_kaydi_baslat(f"Genel bilgiler düzenlendi: {kupe_no}")
             hayvan['resmi_kupe_no'] = yeni_resmi
             hayvan['ciftlik_kupe_no'] = yeni_ciftlik
@@ -8875,6 +9011,8 @@ class HayvanTakipSistemi:
             hayvan['cins'] = yeni_cins
             hayvan['irk'] = yeni_irk
             hayvan['anne_kupe'] = anne_kupe
+            if yeni_dogumlar is not None:
+                hayvan['dogumlar'] = yeni_dogumlar
             hayvan['yas_gun'] = (datetime.now() - dogum_dt).days
             if yeni_cins in ["Erkek Buzağı", "Dana"]:
                 hayvan['gebe_mi'] = False
@@ -8886,7 +9024,7 @@ class HayvanTakipSistemi:
             self.ekranlari_guncelle()
             messagebox.showinfo("Başarılı", "Genel bilgiler güncellendi.", parent=pencere)
 
-        self.modern_buton(form, "GENEL BİLGİLERİ KAYDET", genel_kaydet, purpose='success').grid(row=7, column=0, columnspan=2, pady=(34, 0))
+        self.modern_buton(form, "GENEL BİLGİLERİ KAYDET", genel_kaydet, purpose='success').grid(row=8, column=0, columnspan=2, pady=(34, 0))
 
         tohumlama_frame = ttk.Frame(notebook, style='TFrame')
         notebook.add(tohumlama_frame, text="Tohumlama Geçmişi")

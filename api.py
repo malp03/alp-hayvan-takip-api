@@ -1327,6 +1327,79 @@ def hayvan_kupe_anahtarlari(veri: Dict[str, Any]) -> set[str]:
     }
 
 
+def yavru_kupe_anahtarlari(yavru: Dict[str, Any]) -> set[str]:
+    return {
+        anahtar
+        for anahtar in (
+            kupe_eslesme_anahtari(yavru.get("hayvan_id")),
+            kupe_eslesme_anahtari(yavru.get("id")),
+            kupe_eslesme_anahtari(yavru.get("kupe")),
+            kupe_eslesme_anahtari(yavru.get("resmi_kupe_no")),
+            kupe_eslesme_anahtari(yavru.get("ciftlik_kupe_no")),
+        )
+        if anahtar
+    }
+
+
+def dogum_kaydi_otomatik_yavru_baglantisi_mi(dogum: Dict[str, Any]) -> bool:
+    not_metni = metin(dogum.get("not")).lower()
+    return "anne" in not_metni and "otomatik" in not_metni
+
+
+def silinen_hayvan_dogum_referanslarini_temizle(
+    db: Session,
+    silinen_id: str,
+    silinen_veri: Dict[str, Any],
+    ciftlik_id: Optional[str],
+) -> int:
+    if not ciftlik_id:
+        return 0
+    silinen_anahtarlar = hayvan_kupe_anahtarlari(silinen_veri) | {kupe_eslesme_anahtari(silinen_id)}
+    silinen_anahtarlar = {anahtar for anahtar in silinen_anahtarlar if anahtar}
+    if not silinen_anahtarlar:
+        return 0
+
+    temizlenen_yavru = 0
+    adaylar = db.query(models.Hayvan).filter(
+        models.Hayvan.ciftlik_id == ciftlik_id,
+        models.Hayvan.id != silinen_id,
+    ).all()
+    for anne_db in adaylar:
+        anne_veri = db_hayvandan_payload(anne_db, include_photo_urls=False)
+        dogumlar = anne_veri.get("dogumlar") or []
+        if not dogumlar:
+            continue
+
+        degisti = False
+        yeni_dogumlar = []
+        for dogum in dogumlar:
+            dogum_kopya = dict(dogum or {})
+            yavrular = dogum_kopya.get("yavrular") or []
+            if not yavrular:
+                yeni_dogumlar.append(dogum_kopya)
+                continue
+
+            kalan_yavrular = []
+            for yavru in yavrular:
+                if silinen_anahtarlar.intersection(yavru_kupe_anahtarlari(yavru)):
+                    temizlenen_yavru += 1
+                    degisti = True
+                    continue
+                kalan_yavrular.append(yavru)
+
+            dogum_kopya["yavrular"] = kalan_yavrular
+            if not kalan_yavrular and dogum_kaydi_otomatik_yavru_baglantisi_mi(dogum_kopya):
+                continue
+            yeni_dogumlar.append(dogum_kopya)
+
+        if degisti:
+            anne_veri["dogumlar"] = yeni_dogumlar
+            anne_veri["son_guncelleme"] = simdi()
+            db_hayvana_yaz(db, anne_db, anne_veri)
+
+    return temizlenen_yavru
+
+
 def annenin_dogum_kaydina_yavru_ekle(
     db: Session,
     cocuk_db: models.Hayvan,
@@ -2089,7 +2162,8 @@ def delete_hayvan(
         silinen_kupe = db_hayvan.ciftlik_kupe_no or db_hayvan.resmi_kupe_no or db_hayvan.id
         silinen_ciftlik_id = db_hayvan.ciftlik_id
         silinecek_refs: List[str] = []
-        for kaynak in (db_hayvandan_payload(db_hayvan, include_photo_urls=False),):
+        silinen_payload = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
+        for kaynak in (silinen_payload,):
             paths, urls, _ = foto_referanslarini_topla(kaynak)
             silinecek_refs.extend(paths)
             silinecek_refs.extend(urls)
@@ -2102,6 +2176,12 @@ def delete_hayvan(
         except (TypeError, json.JSONDecodeError):
             pass
         silinecek_foto_paths = storage_pathlari(silinecek_refs)
+        temizlenen_yavru_sayisi = silinen_hayvan_dogum_referanslarini_temizle(
+            db,
+            silinen_id,
+            silinen_payload,
+            silinen_ciftlik_id,
+        )
         db.delete(db_hayvan)
         audit_kaydi(
             db,
@@ -2114,7 +2194,15 @@ def delete_hayvan(
         )
         db.commit()
         storage_fotograflari_sil(silinecek_foto_paths)
-        return {"status": "ok", "message": "Hayvan kalıcı olarak silindi.", "id": silinen_id}
+        mesaj = "Hayvan kalıcı olarak silindi."
+        if temizlenen_yavru_sayisi:
+            mesaj += f" Anne doğum geçmişinden {temizlenen_yavru_sayisi} yavru bağlantısı temizlendi."
+        return {
+            "status": "ok",
+            "message": mesaj,
+            "id": silinen_id,
+            "detay": {"temizlenen_yavru_baglantisi": temizlenen_yavru_sayisi},
+        }
 
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     veri["arsivli"] = True

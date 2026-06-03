@@ -422,6 +422,25 @@ Desktop profil ile ayni sekmeleri icermeli:
 - Dogrulama: `python -m py_compile alp_ziraat_hayvan_takip.py api.py schemas.py api_deploy\api.py api_deploy\schemas.py` gecti. Canli API'de health ve yedek indirme test edildi; yedek 1 ciftlik, 2 kullanici, 103 hayvan ve 500 islem gecmisi ile basarili dondu.
 - Yeni dagitim dosyalari uretildi: `dist\ALP_Ziraat_Suru_Takip.exe`, `dist\ALP_Ziraat_Suru_Takip_Setup.exe`, `dist\ALP_Ziraat_Suru_Takip_Kurulum.zip`.
 
+## 3 Haziran 2026 Desktop v1.9.30 Notu
+
+- Desktop `APP_VERSION` `1.9.30` yapildi. Yeni GitHub release tag'i `v1.9.30` olmali; updater'in kurulumdan sonra surumu dogru algilamasi icin EXE/Setup bu koddan yeniden uretilmelidir.
+- Sagmal/Kuru inek kaydinda laktasyon numarasi ve son dogum tarihi artik bos birakilabilir; bilgi eksikse hayvan listesinde ve profilde eksik veri uyarisi gorunur.
+- Hayvan duzenleme penceresindeki `Dogum/Laktasyon` sekmesine eksik laktasyon bilgisini sonradan tamamlama akisi eklendi.
+
+## 3 Haziran 2026 Desktop v1.9.31 Notu
+
+- Hayvan profili `Duzenle` penceresinin `Genel Bilgiler` sekmesine sagmal/kuru ineklerde dogrudan gorunen `Laktasyon Numarasi` ve `Son Dogum Tarihi` alanlari eklendi.
+- Eksik laktasyon/son dogum uyarisi olan sagmal inekler artik genel duzenleme ekranindan tamamlanabilir; bilgiler kaydedildiginde `dogumlar` kaydi olusturulur ve eksik veri uyarisi kalkar.
+- Desktop `APP_VERSION` `1.9.31` yapildi; release tag'i `v1.9.31` olmalidir.
+
+## 3 Haziran 2026 Desktop/API v1.9.32 Notu
+
+- Arsivli hayvan kalici silindiginde, silinen hayvana ait yavru referanslari annenin `dogumlar/yavrular` gecmisinden temizlenir.
+- Hayvan sadece arsivdeyse anne dogum gecmisindeki baglanti korunur; temizlik yalnizca kalici silmede calisir.
+- API `DELETE /api/hayvanlar/{ref}?kalici=true` ayni temizligi online veritabaninda da yapar. `api_deploy/api.py` kopyasi da guncellendi.
+- Desktop `APP_VERSION` `1.9.32` yapildi; release tag'i `v1.9.32` olmalidir.
+
 ## Hata Ararken Ilk Bakilacak Yerler
 
 - Login donuyorsa: `api_giris_penceresi`, `api_giris_yap`, `taninan_bilgisayar_giris_dene`, `tools/smoke_login_responsive.py`
