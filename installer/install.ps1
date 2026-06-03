@@ -12,6 +12,45 @@ $iconName = "alp_ziraat_pdf_dark.ico"
 $sourceExe = Join-Path $PSScriptRoot $exeName
 $sourceIcon = Join-Path $PSScriptRoot $iconName
 
+function Stop-RunningApp {
+    try {
+        & taskkill /IM $exeName /T /F 2>$null | Out-Null
+        Start-Sleep -Milliseconds 800
+    } catch {
+    }
+}
+
+function Copy-WithRetry {
+    param(
+        [string]$Source,
+        [string]$Destination,
+        [int]$TimeoutSeconds = 90
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $tempDestination = "$Destination.new.$PID"
+    $stoppedProcess = $false
+
+    while ($true) {
+        try {
+            Copy-Item -LiteralPath $Source -Destination $tempDestination -Force
+            Move-Item -LiteralPath $tempDestination -Destination $Destination -Force
+            return
+        } catch {
+            Remove-Item -LiteralPath $tempDestination -Force -ErrorAction SilentlyContinue
+            if ((Get-Date) -lt $deadline) {
+                if (-not $stoppedProcess) {
+                    Stop-RunningApp
+                    $stoppedProcess = $true
+                }
+                Start-Sleep -Seconds 1
+                continue
+            }
+            throw
+        }
+    }
+}
+
 if (!(Test-Path $sourceExe)) {
     throw "Kurulum dosyasi bulunamadi: $sourceExe"
 }
@@ -28,14 +67,15 @@ foreach ($oldDir in $legacyInstallDirs) {
 }
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-Copy-Item -Path $sourceExe -Destination (Join-Path $InstallDir $exeName) -Force
+Stop-RunningApp
+Copy-WithRetry -Source $sourceExe -Destination (Join-Path $InstallDir $exeName)
 if (Test-Path $sourceIcon) {
-    Copy-Item -Path $sourceIcon -Destination (Join-Path $InstallDir $iconName) -Force
+    Copy-WithRetry -Source $sourceIcon -Destination (Join-Path $InstallDir $iconName)
 }
 
 $uninstallSource = Join-Path $PSScriptRoot "uninstall.ps1"
 if (Test-Path $uninstallSource) {
-    Copy-Item -Path $uninstallSource -Destination (Join-Path $InstallDir "uninstall.ps1") -Force
+    Copy-WithRetry -Source $uninstallSource -Destination (Join-Path $InstallDir "uninstall.ps1")
 }
 
 $shell = New-Object -ComObject WScript.Shell
