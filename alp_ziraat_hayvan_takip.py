@@ -1119,6 +1119,16 @@ class HayvanTakipSistemi:
     def yavru_gorunen_kupe(self, yavru):
         return (yavru or {}).get('ciftlik_kupe_no') or (yavru or {}).get('resmi_kupe_no') or (yavru or {}).get('kupe') or "-"
 
+    def yavru_hayvan_id_bul(self, yavru, aktif_olsun=False):
+        for alan in ('hayvan_id', 'id', 'ciftlik_kupe_no', 'resmi_kupe_no', 'kupe'):
+            ref = str((yavru or {}).get(alan) or '').strip()
+            if not ref or ref == "-":
+                continue
+            hayvan_id = self.hayvan_referans_coz(ref, aktif_olsun=aktif_olsun)
+            if hayvan_id:
+                return hayvan_id
+        return None
+
     #  ANİMASYON METODLARı 
     def _puls_zamanlayici_iptal_et(self):
         after_id = getattr(self, "_puls_after_id", None)
@@ -9543,13 +9553,72 @@ class HayvanTakipSistemi:
         dogum_kart.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(0, 16))
         dog_tree = self.profil_tablo_olustur(dogum_body, ("#", "Tarih", "Yavrular", "Not"), {"#": 45, "Tarih": 120, "Yavrular": 320, "Not": 520}, height=6)
         dogumlar = hayvan.get("dogumlar") or []
+        dogum_yavrular_by_row = {}
         if dogumlar:
             for i, dogum in enumerate(dogumlar, 1):
                 yavrular = dogum.get("yavrular") or []
                 yavru_metin = ", ".join([f"{y.get('cins', '-')}: {self.yavru_gorunen_kupe(y)}" for y in yavrular]) or "Yavru bilgisi yok"
-                dog_tree.insert("", "end", values=(i, dogum.get("tarih", "-"), yavru_metin, dogum.get("not", "")))
+                row_id = dog_tree.insert("", "end", values=(i, dogum.get("tarih", "-"), yavru_metin, dogum.get("not", "")))
+                dogum_yavrular_by_row[row_id] = yavrular
         else:
             dog_tree.insert("", "end", values=("-", "-", "Kayıt yok", ""))
+
+        def dogum_yavru_profili_ac(event=None):
+            row_id = dog_tree.identify_row(event.y) if event is not None else ""
+            if not row_id:
+                secim = dog_tree.selection()
+                row_id = secim[0] if secim else ""
+            yavrular = dogum_yavrular_by_row.get(row_id) or []
+            adaylar = []
+            for yavru in yavrular:
+                yavru_id = self.yavru_hayvan_id_bul(yavru)
+                if not yavru_id or any(mevcut_id == yavru_id for mevcut_id, _ in adaylar):
+                    continue
+                etiket = f"{yavru.get('cins', '-')}: {self.yavru_gorunen_kupe(yavru)}"
+                adaylar.append((yavru_id, etiket))
+
+            if not adaylar:
+                messagebox.showinfo(
+                    "Yavru",
+                    "Bu dogum kaydinda acilabilecek yavru hayvan kaydi bulunamadi.",
+                    parent=detay_window,
+                )
+                return
+
+            def yavruyu_ac(yavru_id):
+                try:
+                    detay_window.grab_release()
+                except tk.TclError:
+                    pass
+                try:
+                    detay_window.destroy()
+                except tk.TclError:
+                    pass
+                self._track_after(self.root, 80, lambda h_id=yavru_id: self.hayvan_detay_penceresi(h_id))
+
+            if len(adaylar) == 1:
+                yavruyu_ac(adaylar[0][0])
+                return
+
+            menu = tk.Menu(
+                detay_window,
+                tearoff=0,
+                bg=self.renkler["kart_ikincil"],
+                fg=self.renkler["yazi_rengi"],
+                activebackground=self.renkler["button_primary_bg"],
+                activeforeground=self.renkler["button_primary_fg"],
+            )
+            for yavru_id, etiket in adaylar:
+                menu.add_command(label=etiket, command=lambda h_id=yavru_id: yavruyu_ac(h_id))
+            try:
+                if event is not None:
+                    menu.tk_popup(event.x_root, event.y_root)
+                else:
+                    menu.tk_popup(detay_window.winfo_pointerx(), detay_window.winfo_pointery())
+            finally:
+                menu.grab_release()
+
+        dog_tree.bind("<Double-Button-1>", dogum_yavru_profili_ac)
 
         asi_kart, asi_body = self.profil_kart_olustur(alt, "Aşı ve Prosedürler", accent=self.renkler["uyari"])
         asi_kart.grid(row=2, column=0, sticky="nsew", padx=(0, 8))
