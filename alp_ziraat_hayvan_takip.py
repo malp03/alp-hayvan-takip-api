@@ -7803,6 +7803,69 @@ class HayvanTakipSistemi:
                 self.hayvan_detay_penceresi(hayvan_id)
             self.uyarilari_guncelle()
 
+    def sagmal_laktasyon_eksik_mi(self, hayvan):
+        if hayvan.get('cins') != 'Sağmal İnek' and hayvan.get('durum') != 'Sağmal İnek':
+            return False
+        dogumlar = hayvan.get('dogumlar') or []
+        if not dogumlar:
+            return True
+        aktif_dogum = None
+        for dogum in reversed(dogumlar):
+            if dogum.get('laktasyon_bitis_tarihi') is None:
+                aktif_dogum = dogum
+                break
+        son_dogum = aktif_dogum or dogumlar[-1]
+        tarih = (son_dogum.get('tarih') or '').strip()
+        if not tarih or tarih == 'Bilinmiyor':
+            return True
+        try:
+            datetime.strptime(tarih, "%d/%m/%Y")
+            return False
+        except (ValueError, TypeError):
+            return True
+
+    def laktasyon_dogumlari_olustur(self, cins, laktasyon_no_str, son_dogum_tarihi, hayvan_dogum_dt, parent=None, bos_birakilabilir=True):
+        laktasyon_no_str = (laktasyon_no_str or '').strip()
+        son_dogum_tarihi = (son_dogum_tarihi or '').strip()
+        if not laktasyon_no_str and not son_dogum_tarihi and bos_birakilabilir:
+            return []
+        if not laktasyon_no_str or not son_dogum_tarihi:
+            messagebox.showerror("Hata", "Laktasyon numarası ve son doğum tarihi birlikte doldurulmalı ya da ikisi de boş bırakılmalı.", parent=parent)
+            return None
+        try:
+            laktasyon_no = int(laktasyon_no_str)
+            if laktasyon_no <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Hata", "Geçersiz laktasyon numarası. Lütfen pozitif bir sayı girin.", parent=parent)
+            return None
+
+        son_dogum_dt = self.tarih_coz(son_dogum_tarihi, "Son doğum tarihi", parent=parent)
+        if son_dogum_dt is None:
+            return None
+        if hayvan_dogum_dt and son_dogum_dt < hayvan_dogum_dt:
+            messagebox.showerror("Hata", "Son doğum tarihi, hayvanın doğum tarihinden önce olamaz.", parent=parent)
+            return None
+
+        dogumlar_listesi = []
+        for _ in range(max(laktasyon_no - 1, 0)):
+            dogumlar_listesi.append({
+                'tarih': 'Bilinmiyor',
+                'yavrular': [],
+                'laktasyon_bitis_tarihi': 'Bilinmiyor',
+                'not': 'Geçmiş kayıt, süre bilinmiyor'
+            })
+        aktif_dogum = {
+            'tarih': son_dogum_tarihi,
+            'yavrular': [],
+            'laktasyon_bitis_tarihi': None,
+            'not': 'Sisteme giriş yapılan laktasyon'
+        }
+        if cins == "Kuru İnek":
+            aktif_dogum['laktasyon_bitis_tarihi'] = datetime.now().strftime("%d/%m/%Y")
+        dogumlar_listesi.append(aktif_dogum)
+        return dogumlar_listesi
+
     # --- Ana Veri İşleme Fonksiyonları ---
     # #################################################################
     # ### GÜNCELLENMİŞ FONKSİYON: hayvan_kaydet
@@ -7838,35 +7901,13 @@ class HayvanTakipSistemi:
         gercek_cins = cins
         dogumlar_listesi = []
 
-        # --- YENİ LAKTASYON MANTIĞI ---
+        # Sağmal/Kuru ineklerde laktasyon bilgisi sonradan tamamlanabilir.
         if cins in ["Sağmal İnek", "Kuru İnek"]:
             laktasyon_no_str = self.laktasyon_no_entry.get().strip()
             son_dogum_tarihi = self.son_dogum_tarihi_entry.get().strip()
-
-            if not laktasyon_no_str or not son_dogum_tarihi:
-                return messagebox.showerror("Hata", "Sağmal/Kuru inekler için Laktasyon Numarası ve Son Doğum Tarihi zorunludur!")
-
-            try:
-                laktasyon_no = int(laktasyon_no_str)
-                if laktasyon_no <= 0: raise ValueError
-            except ValueError:
-                return messagebox.showerror("Hata", "Geçersiz laktasyon numarası. Lütfen pozitif bir sayı girin.")
-
-            son_dogum_dt = self.tarih_coz(son_dogum_tarihi, "Son doğum tarihi")
-            if son_dogum_dt is None:
+            dogumlar_listesi = self.laktasyon_dogumlari_olustur(cins, laktasyon_no_str, son_dogum_tarihi, dogum_dt)
+            if dogumlar_listesi is None:
                 return
-            if son_dogum_dt < dogum_dt:
-                return messagebox.showerror("Hata", "Son doğum tarihi, hayvanın doğum tarihinden önce olamaz.")
-
-            if laktasyon_no > 1:
-                for _ in range(laktasyon_no - 1):
-                    gecmis_dogum = {'tarih': 'Bilinmiyor', 'yavrular': [], 'laktasyon_bitis_tarihi': 'Bilinmiyor', 'not': 'Geçmiş kayıt, süre bilinmiyor'}
-                    dogumlar_listesi.append(gecmis_dogum)
-            
-            aktif_dogum = {'tarih': son_dogum_tarihi, 'yavrular': [], 'laktasyon_bitis_tarihi': None, 'not': 'Sisteme giriş yapılan laktasyon'}
-            if cins == "Kuru İnek":
-                aktif_dogum['laktasyon_bitis_tarihi'] = datetime.now().strftime("%d/%m/%Y")
-            dogumlar_listesi.append(aktif_dogum)
         
         yeni_id = uuid.uuid4().hex
         gorunen_kupe = ciftlik_kupe if ciftlik_kupe else resmi_kupe
@@ -9035,8 +9076,83 @@ class HayvanTakipSistemi:
             dogum_tree_yenile()
             self.ekranlari_guncelle()
 
+        def laktasyon_bilgisi_tamamla():
+            if hayvan.get('cins') not in ["Sağmal İnek", "Kuru İnek"] and hayvan.get('durum') not in ["Sağmal İnek", "Kuru İnek"]:
+                return messagebox.showinfo("Laktasyon", "Laktasyon bilgisi yalnızca sağmal veya kuru ineklerde kullanılır.", parent=pencere)
+
+            dialog = tk.Toplevel(pencere)
+            dialog.title("Laktasyon Bilgisi")
+            dialog.geometry("460x300")
+            dialog.configure(bg=self.renkler["arkaplan"])
+            dialog.transient(pencere)
+            dialog.grab_set()
+            alan = tk.Frame(dialog, bg=self.renkler["arkaplan"], padx=22, pady=22)
+            alan.pack(fill='both', expand=True)
+            mevcut_dogumlar = hayvan.get('dogumlar') or []
+            son_bilinen = ""
+            for dogum in reversed(mevcut_dogumlar):
+                tarih = (dogum.get('tarih') or '').strip()
+                if tarih and tarih != "Bilinmiyor":
+                    son_bilinen = tarih
+                    break
+
+            laktasyon_entry = ttk.Entry(alan, style='TEntry')
+            laktasyon_entry.insert(0, str(len(mevcut_dogumlar)) if mevcut_dogumlar else "")
+            son_dogum_entry = ttk.Entry(alan, style='TEntry')
+            son_dogum_entry.insert(0, son_bilinen)
+            son_dogum_entry.bind('<KeyRelease>', self.tarih_formatlama)
+
+            for row, (label_text, widget) in enumerate([
+                ("Laktasyon Numarası", laktasyon_entry),
+                ("Son Doğum Tarihi", son_dogum_entry),
+            ]):
+                tk.Label(alan, text=label_text, bg=self.renkler["arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 11, 'bold')).grid(row=row, column=0, sticky='w', pady=10)
+                widget.grid(row=row, column=1, sticky='ew', pady=10, padx=(12, 0))
+            self.modern_buton(alan, "Takvim", lambda: self.tarih_secici_ac(son_dogum_entry), purpose='default', small=True).grid(row=1, column=2, sticky='e', padx=(8, 0))
+            alan.columnconfigure(1, weight=1)
+
+            bilgi = tk.Label(
+                alan,
+                text="Eksik sağmal verisini tamamlamak için iki alanı birlikte doldurun.",
+                bg=self.renkler["arkaplan"],
+                fg=self.renkler["muted"],
+                font=('Segoe UI', 9)
+            )
+            bilgi.grid(row=2, column=0, columnspan=2, sticky='w', pady=(2, 10))
+
+            def kaydet():
+                dogum_dt = self.tarih_coz(hayvan.get('dogum_tarihi', ''), "Hayvan doğum tarihi", parent=dialog)
+                if dogum_dt is None:
+                    return
+                yeni_dogumlar = self.laktasyon_dogumlari_olustur(
+                    hayvan.get('cins') or hayvan.get('durum'),
+                    laktasyon_entry.get(),
+                    son_dogum_entry.get(),
+                    dogum_dt,
+                    parent=dialog,
+                    bos_birakilabilir=False
+                )
+                if yeni_dogumlar is None:
+                    return
+                if mevcut_dogumlar and not messagebox.askyesno(
+                    "Laktasyon Bilgisi",
+                    "Mevcut doğum/laktasyon kayıtları bu bilgiyle yeniden düzenlenecek. Devam edilsin mi?",
+                    parent=dialog
+                ):
+                    return
+                self.islem_kaydi_baslat(f"Laktasyon bilgisi tamamlandı: {kupe_no}")
+                hayvan['dogumlar'] = yeni_dogumlar
+                hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                self.veri_kaydet(kupe_no=kupe_no)
+                dogum_tree_yenile()
+                self.ekranlari_guncelle()
+                dialog.destroy()
+
+            self.modern_buton(alan, "LAKTASYON BİLGİSİNİ KAYDET", kaydet, purpose='success').grid(row=3, column=0, columnspan=2, pady=18)
+
         dogum_btn = tk.Frame(dogum_kart, bg=self.renkler["kart_arkaplan"])
         dogum_btn.pack(pady=(0, 10))
+        self.modern_buton(dogum_btn, "BİLGİ TAMAMLA", laktasyon_bilgisi_tamamla, purpose='success').pack(side='left', padx=8)
         self.modern_buton(dogum_btn, "DÜZENLE", dogum_duzenle, purpose='default').pack(side='left', padx=8)
         self.modern_buton(dogum_btn, "SİL", dogum_sil, purpose='danger').pack(side='left', padx=8)
         dogum_tree_yenile()
@@ -9198,6 +9314,9 @@ class HayvanTakipSistemi:
             return uyarilar
 
         gorunen = self.hayvan_gorunen_kupe(kupe_no, hayvan)
+        if self.sagmal_laktasyon_eksik_mi(hayvan):
+            uyarilar.append(("Eksik veri", "Laktasyon numarası ve son doğum tarihi tamamlanmalı.", 0))
+
         son_tohumlama = (hayvan.get("tohumlamalar") or [None])[-1]
         if son_tohumlama and son_tohumlama.get("gebe_mi") is None:
             try:
@@ -9738,7 +9857,10 @@ class HayvanTakipSistemi:
             if hayvan.get('durum') == 'Sağmal İnek':
                 try:
                     dogumlar = hayvan.get('dogumlar', [])
-                    if dogumlar:
+                    if self.sagmal_laktasyon_eksik_mi(hayvan):
+                        uyarilar += "Eksik veri: laktasyon/son doğum! "
+                        sagim_gun_str = "Eksik"
+                    elif dogumlar:
                         son_dogum = dogumlar[-1]
                         if son_dogum.get('laktasyon_bitis_tarihi') is None and son_dogum.get('tarih') != 'Bilinmiyor':
                             s_tarihi = datetime.strptime(son_dogum['tarih'], "%d/%m/%Y")
@@ -9757,6 +9879,8 @@ class HayvanTakipSistemi:
                 tag = "slaughtered"
             elif satildi:
                 tag = "sold"
+            elif self.sagmal_laktasyon_eksik_mi(hayvan):
+                tag = "warning"
             elif hayvan.get('gebe_mi', False) and dogum_tahmini != "-":
                 try:
                     kalan_gun = (datetime.strptime(dogum_tahmini, "%d/%m/%Y") - datetime.now()).days
