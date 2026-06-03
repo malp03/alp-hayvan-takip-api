@@ -11,6 +11,8 @@ APP_NAME = "Alp Ziraat Sürü Takip"
 APP_EXE = "ALP_Ziraat_Suru_Takip.exe"
 APP_ICON = "alp_ziraat_pdf_dark.ico"
 INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Programs" / APP_NAME
+COPY_RETRY_SECONDS = 90
+LOCKED_WINERRORS = {5, 32}
 LEGACY_APP_NAMES = ("ALP Ziraat Hayvan Takip",)
 LEGACY_INSTALL_DIRS = (
     Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Programs" / "ALP Ziraat Hayvan Takip",
@@ -29,6 +31,49 @@ def ps_quote(value: Path | str) -> str:
 def show_message(title: str, message: str, error: bool = False) -> None:
     flags = 0x10 if error else 0x40
     ctypes.windll.user32.MessageBoxW(None, message, title, flags)
+
+
+def is_locked_error(exc: BaseException) -> bool:
+    return isinstance(exc, OSError) and getattr(exc, "winerror", None) in LOCKED_WINERRORS
+
+
+def stop_running_app_processes() -> None:
+    try:
+        subprocess.run(
+            ["taskkill", "/IM", APP_EXE, "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        time.sleep(0.8)
+    except Exception:
+        pass
+
+
+def copy_replace_with_retry(source: Path, destination: Path, timeout: int = COPY_RETRY_SECONDS) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_destination = destination.with_name(f"{destination.name}.new.{os.getpid()}")
+    deadline = time.time() + timeout
+    attempted_process_stop = False
+
+    while True:
+        try:
+            shutil.copy2(source, temp_destination)
+            os.replace(temp_destination, destination)
+            return
+        except OSError as exc:
+            try:
+                temp_destination.unlink(missing_ok=True)
+            except Exception:
+                pass
+            if is_locked_error(exc) and time.time() < deadline:
+                if not attempted_process_stop:
+                    stop_running_app_processes()
+                    attempted_process_stop = True
+                time.sleep(1.0)
+                continue
+            raise
 
 
 def create_shortcuts() -> None:
@@ -96,8 +141,10 @@ def wait_for_process(pid: int, timeout: int = 45) -> None:
     try:
         handle = ctypes.windll.kernel32.OpenProcess(0x00100000, False, int(pid))
         if handle:
-            ctypes.windll.kernel32.WaitForSingleObject(handle, timeout * 1000)
+            result = ctypes.windll.kernel32.WaitForSingleObject(handle, timeout * 1000)
             ctypes.windll.kernel32.CloseHandle(handle)
+            if result == 0x102:
+                stop_running_app_processes()
             time.sleep(0.6)
     except Exception:
         time.sleep(1.5)
@@ -113,15 +160,16 @@ def install() -> None:
         raise FileNotFoundError(f"Kurulum paketi eksik: {source_exe}")
 
     cleanup_legacy_install()
+    stop_running_app_processes()
     INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_exe, INSTALL_DIR / APP_EXE)
+    copy_replace_with_retry(source_exe, INSTALL_DIR / APP_EXE)
     if source_icon.exists():
-        shutil.copy2(source_icon, INSTALL_DIR / APP_ICON)
+        copy_replace_with_retry(source_icon, INSTALL_DIR / APP_ICON)
 
     if uninstall_script.exists():
-        shutil.copy2(uninstall_script, INSTALL_DIR / "uninstall.ps1")
+        copy_replace_with_retry(uninstall_script, INSTALL_DIR / "uninstall.ps1")
     if uninstall_bat.exists():
-        shutil.copy2(uninstall_bat, INSTALL_DIR / "Kaldir.bat")
+        copy_replace_with_retry(uninstall_bat, INSTALL_DIR / "Kaldir.bat")
 
     create_shortcuts()
 
