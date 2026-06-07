@@ -1070,13 +1070,14 @@ def normalize_hayvan(veri: Dict[str, Any], *, hayvan_id: Optional[str] = None) -
     if sonuc["satildi"]:
         sonuc["durum"] = "Satıldı"
         sonuc["durum_notu"] = "Satıldı"
-        sonuc["gebe_mi"] = False
-        sonuc["gebelik_tarihi"] = None
-        sonuc["aktif_tohumlama_id"] = None
     sonuc["arsivli"] = bool(sonuc.get("arsivli", False))
     sonuc["arsiv_tarihi"] = bos_yoksa_none(sonuc.get("arsiv_tarihi"))
     if sonuc["arsiv_tarihi"]:
         parse_tarih(sonuc["arsiv_tarihi"], "Arşiv tarihi")
+    if sonuc["satildi"] or sonuc["arsivli"] or sonuc["olu"] or sonuc["kesildi"]:
+        sonuc["gebe_mi"] = False
+        sonuc["gebelik_tarihi"] = None
+        sonuc["aktif_tohumlama_id"] = None
     foto_alanlarini_normalize_et(sonuc)
     for alan, etiket in [
         ("dogum_tarihi", "Doğum tarihi"),
@@ -2207,6 +2208,9 @@ def delete_hayvan(
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     veri["arsivli"] = True
     veri["arsiv_tarihi"] = bugun()
+    veri["gebe_mi"] = False
+    veri["gebelik_tarihi"] = None
+    veri["aktif_tohumlama_id"] = None
     audit_kaydi(
         db,
         kullanici,
@@ -2609,7 +2613,7 @@ def get_rapor_ozet(
     return {
         "toplam": len(hayvanlar),
         "aktif": sum(1 for h in hayvanlar if hayvan_aktif_mi(h)),
-        "gebe": sum(1 for h in hayvanlar if h.get("gebe_mi")),
+        "gebe": sum(1 for h in hayvanlar if hayvan_aktif_mi(h) and h.get("gebe_mi")),
         "arsivli": sum(1 for h in hayvanlar if h.get("arsivli")),
         "olu": sum(1 for h in hayvanlar if h.get("olu")),
         "kesildi": sum(1 for h in hayvanlar if h.get("kesildi")),
