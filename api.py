@@ -914,6 +914,42 @@ def gelen_zaman_daha_eski_mi(gelen_zaman: Optional[str], mevcut_zaman: Optional[
     return bool(gelen and mevcut and gelen < mevcut)
 
 
+def sonraki_surum_zamani(
+    mevcut_zaman: Optional[str],
+    onerilen_zaman: Optional[str] = None,
+) -> str:
+    """Kayit surumunu, ayni saniyedeki islemlerde bile monoton ilerletir."""
+    mevcut = parse_zaman_sessiz(mevcut_zaman)
+    onerilen = parse_zaman_sessiz(onerilen_zaman)
+    aday = (onerilen or simdi_dt()).replace(microsecond=0)
+    if mevcut and aday <= mevcut:
+        aday = max(simdi_dt(), mevcut + timedelta(seconds=1))
+    return aday.strftime(ZAMAN_FORMATI)
+
+
+def eski_degisim_cakismasi(mevcut_zaman: Optional[str]) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "stale_update",
+            "message": "Merkezdeki kayit daha yeni. Cevrimdisi degisiklik otomatik uygulanmadi.",
+            "server_updated_at": mevcut_zaman,
+        },
+    )
+
+
+def alt_kayit_cakisma_kontrol(
+    db_hayvan: models.Hayvan,
+    beklenen_son_guncelleme: Optional[str],
+) -> None:
+    if not beklenen_son_guncelleme:
+        return
+    beklenen = parse_zaman_sessiz(beklenen_son_guncelleme)
+    mevcut = parse_zaman_sessiz(db_hayvan.son_guncelleme)
+    if beklenen and mevcut and beklenen != mevcut:
+        raise eski_degisim_cakismasi(db_hayvan.son_guncelleme)
+
+
 def son_silme_zamani(db: Session, hayvan_id: str) -> Optional[datetime]:
     kayitlar = (
         db.query(models.IslemGecmisi)
@@ -990,6 +1026,13 @@ def normalize_dogum(veri: Dict[str, Any], *, yeni: bool = False) -> Dict[str, An
         raise HTTPException(status_code=400, detail="Doğum tarihi gelecekte olamaz.")
     if sonuc.get("laktasyon_bitis_tarihi"):
         parse_tarih(sonuc.get("laktasyon_bitis_tarihi"), "Laktasyon bitiş tarihi")
+        if dogum_tarihi:
+            bitis_tarihi = parse_tarih_sessiz(sonuc.get("laktasyon_bitis_tarihi"))
+            if bitis_tarihi and bitis_tarihi < dogum_tarihi:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Laktasyon bitiş tarihi doğum tarihinden önce olamaz.",
+                )
     yavrular = []
     for yavru in sonuc.get("yavrular") or []:
         resmi = metin(yavru.get("resmi_kupe_no"), upper=True)
@@ -1155,7 +1198,11 @@ def db_hayvandan_payload(h: models.Hayvan, *, include_photo_urls: bool = True) -
         }
         for a in h.asi_prosedurler
     ]
-    aktif_tohumlama = next((t for t in reversed(tohumlamalar) if t.get("gebe_mi") is True), None)
+    son_tohumlama = max(
+        enumerate(tohumlamalar),
+        key=lambda item: _tohumlama_sira_anahtari(item[1], item[0]),
+    )[1] if tohumlamalar else None
+    aktif_tohumlama = son_tohumlama if son_tohumlama and son_tohumlama.get("gebe_mi") is True else None
     yas_gun = (h.yas_yil or 0) * 365 + (h.yas_ay or 0) * 30
     return foto_goruntuleme_url_ekle(normalize_hayvan(
         {
@@ -1503,18 +1550,115 @@ def tohumlama_kurallarini_kontrol(veri: Dict[str, Any], tohumlama: Dict[str, Any
         raise HTTPException(status_code=400, detail="Önce bekleyen tohumlama sonucunu girin.")
 
 
-def tohumlama_sonucunu_isle(veri: Dict[str, Any], tohumlama: Dict[str, Any]) -> None:
-    if tohumlama.get("gebe_mi") is True:
+def _tohumlama_sira_anahtari(tohumlama: Dict[str, Any], index: int) -> tuple:
+    tarih = parse_tarih_sessiz(tohumlama.get("tarih")) or datetime.min
+    return tarih, index
+
+
+def en_son_tohumlama(veri: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    kayitlar = veri.get("tohumlamalar") or []
+    if not kayitlar:
+        return None
+    return max(
+        enumerate(kayitlar),
+        key=lambda item: _tohumlama_sira_anahtari(item[1], item[0]),
+    )[1]
+
+
+def tohumlama_sonucunu_isle(veri: Dict[str, Any]) -> None:
+    tohumlama = en_son_tohumlama(veri)
+    if tohumlama and tohumlama.get("gebe_mi") is True:
         veri["gebe_mi"] = True
         veri["gebelik_tarihi"] = tohumlama.get("tarih")
         veri["aktif_tohumlama_id"] = tohumlama.get("id")
         if veri.get("durum") not in {"Sağmal İnek", "Kuru İnek"}:
             veri["durum"] = "Gebe"
             veri["durum_notu"] = "Gebe"
-    elif veri.get("aktif_tohumlama_id") == tohumlama.get("id"):
+    else:
         veri["gebe_mi"] = False
         veri["gebelik_tarihi"] = None
         veri["aktif_tohumlama_id"] = None
+
+
+def eski_tohumlama_pozitif_olamaz(veri: Dict[str, Any], kayit: Dict[str, Any]) -> None:
+    if kayit.get("gebe_mi") is not True:
+        return
+    son = en_son_tohumlama(veri)
+    if son and metin(son.get("id")) != metin(kayit.get("id")):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Daha yeni bir tohumlama kaydı varken eski kayıt pozitif yapılamaz.",
+        )
+
+
+def alt_kayit_tarihlerini_kontrol(veri: Dict[str, Any]) -> None:
+    hayvan_dogum = parse_tarih(veri.get("dogum_tarihi"), "Hayvan doğum tarihi")
+    for tohumlama in veri.get("tohumlamalar") or []:
+        tarih = parse_tarih(tohumlama.get("tarih"), "Tohumlama tarihi", zorunlu=True)
+        if hayvan_dogum and tarih < hayvan_dogum:
+            raise HTTPException(status_code=400, detail="Tohumlama tarihi hayvanın doğum tarihinden önce olamaz.")
+    for dogum in veri.get("dogumlar") or []:
+        tarih = parse_tarih(dogum.get("tarih"), "Doğum tarihi", zorunlu=True)
+        if hayvan_dogum and tarih < hayvan_dogum:
+            raise HTTPException(status_code=400, detail="Doğum tarihi annenin doğum tarihinden önce olamaz.")
+        bitis = parse_tarih(dogum.get("laktasyon_bitis_tarihi"), "Laktasyon bitiş tarihi")
+        if bitis and bitis < tarih:
+            raise HTTPException(status_code=400, detail="Laktasyon bitiş tarihi doğum tarihinden önce olamaz.")
+
+
+def dogum_tarihi_degisimlerini_yavrulara_yansit(
+    db: Session,
+    db_hayvan: models.Hayvan,
+    onceki_dogumlar: List[Dict[str, Any]],
+    yeni_dogumlar: List[Dict[str, Any]],
+) -> None:
+    onceki_idler = {
+        metin(kayit.get("id")): kayit
+        for kayit in onceki_dogumlar
+        if metin(kayit.get("id"))
+    }
+    for index, yeni_dogum in enumerate(yeni_dogumlar):
+        onceki = onceki_idler.get(metin(yeni_dogum.get("id")))
+        if onceki is None and index < len(onceki_dogumlar):
+            onceki = onceki_dogumlar[index]
+        if not onceki or onceki.get("tarih") == yeni_dogum.get("tarih"):
+            continue
+
+        yeni_tarih = metin(yeni_dogum.get("tarih"))
+        if not yeni_tarih:
+            continue
+        for yavru in yeni_dogum.get("yavrular") or []:
+            refs = {
+                metin(yavru.get("id")),
+                metin(yavru.get("hayvan_id")),
+                metin(yavru.get("ciftlik_kupe_no")),
+                metin(yavru.get("resmi_kupe_no")),
+                metin(yavru.get("kupe")),
+            }
+            refs.discard("")
+            if not refs:
+                continue
+            yavru_db = (
+                db.query(models.Hayvan)
+                .filter(
+                    models.Hayvan.ciftlik_id == db_hayvan.ciftlik_id,
+                    models.Hayvan.id != db_hayvan.id,
+                    or_(
+                        models.Hayvan.id.in_(refs),
+                        models.Hayvan.ciftlik_kupe_no.in_(refs),
+                        models.Hayvan.resmi_kupe_no.in_(refs),
+                    ),
+                )
+                .first()
+            )
+            if not yavru_db:
+                continue
+            yavru_veri = db_hayvandan_payload(yavru_db, include_photo_urls=False)
+            yavru_veri["dogum_tarihi"] = yeni_tarih
+            yavru_veri["son_guncelleme"] = sonraki_surum_zamani(
+                yavru_db.son_guncelleme,
+            )
+            db_hayvana_yaz(db, yavru_db, yavru_veri)
 
 
 def nested_kayit_bul(liste: List[Dict[str, Any]], ref: str, etiket: str) -> Dict[str, Any]:
@@ -1543,7 +1687,10 @@ def response_kaydet(
     son_guncelleme: Optional[str] = None,
     include_photo_urls: bool = True,
 ) -> Dict[str, Any]:
-    veri["son_guncelleme"] = son_guncelleme or simdi()
+    veri["son_guncelleme"] = sonraki_surum_zamani(
+        db_hayvan.son_guncelleme,
+        son_guncelleme,
+    )
     db_hayvana_yaz(db, db_hayvan, veri)
     db.commit()
     db.refresh(db_hayvan)
@@ -2109,12 +2256,15 @@ def update_hayvan(
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     mevcut = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
+    onceki_dogumlar = json.loads(
+        json.dumps(mevcut.get("dogumlar") or [], ensure_ascii=False)
+    )
     onceki_foto_paths, _, _ = foto_referanslarini_topla(mevcut)
     guncelleme = model_verisi(hayvan, exclude_unset=True)
     guncelleme.pop("id", None)
     gelen_son_guncelleme = guncelleme.get("son_guncelleme")
     if gelen_zaman_daha_eski_mi(gelen_son_guncelleme, db_hayvan.son_guncelleme):
-        return mevcut
+        raise eski_degisim_cakismasi(db_hayvan.son_guncelleme)
     if "ciftlik_id" in guncelleme and kullanici.rol != "admin":
         guncelleme.pop("ciftlik_id", None)
     mevcut.update(guncelleme)
@@ -2124,6 +2274,13 @@ def update_hayvan(
     if mevcut.get("ciftlik_id"):
         ciftlik_bul(db, mevcut["ciftlik_id"])
     veri = normalize_hayvan(mevcut, hayvan_id=db_hayvan.id)
+    alt_kayit_tarihlerini_kontrol(veri)
+    dogum_tarihi_degisimlerini_yavrulara_yansit(
+        db,
+        db_hayvan,
+        onceki_dogumlar,
+        veri.get("dogumlar") or [],
+    )
     kupe_cakismasi_kontrol(db, veri, haric_id=db_hayvan.id, ciftlik_id=veri.get("ciftlik_id"))
     annenin_dogum_kaydina_yavru_ekle(db, db_hayvan, veri)
     audit_kaydi(
@@ -2154,11 +2311,7 @@ def delete_hayvan(
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     if kalici:
         if gelen_zaman_daha_eski_mi(degisiklik_zamani, db_hayvan.son_guncelleme):
-            return {
-                "status": "skipped",
-                "message": "Merkezdeki hayvan kaydi daha yeni; eski offline silme uygulanmadi.",
-                "id": db_hayvan.id,
-            }
+            raise eski_degisim_cakismasi(db_hayvan.son_guncelleme)
         silinen_id = db_hayvan.id
         silinen_kupe = db_hayvan.ciftlik_kupe_no or db_hayvan.resmi_kupe_no or db_hayvan.id
         silinen_ciftlik_id = db_hayvan.ciftlik_id
@@ -2333,17 +2486,24 @@ def delete_hayvan_fotografi(
 def create_tohumlama(
     hayvan_ref: str,
     tohumlama: schemas.TohumlamaCreate,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     yeni = normalize_tohumlama(model_verisi(tohumlama), yeni=True)
     tohumlama_kurallarini_kontrol(veri, yeni)
-    tohumlama_sonucunu_isle(veri, yeni)
     veri.setdefault("tohumlamalar", []).append(yeni)
-    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
-    return {**yeni, "hayvan_id": db_hayvan.id}
+    eski_tohumlama_pozitif_olamaz(veri, yeni)
+    tohumlama_sonucunu_isle(veri)
+    audit_kaydi(
+        db, kullanici, "tohumlama_olustur", "Tohumlama kaydı oluşturuldu.",
+        ciftlik_id=veri.get("ciftlik_id"), hedef_tipi="hayvan", hedef_id=db_hayvan.id,
+    )
+    hayvan_sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
+    return {**yeni, "hayvan_id": db_hayvan.id, "hayvan_son_guncelleme": hayvan_sonuc.get("son_guncelleme")}
 
 
 @app.put(
@@ -2358,39 +2518,54 @@ def update_tohumlama(
     hayvan_ref: str,
     tohumlama_ref: str,
     tohumlama: schemas.TohumlamaUpdate,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
-    kayit = nested_kayit_bul(veri.setdefault("tohumlamalar", []), tohumlama_ref, "Tohumlama")
+    mevcut_kayit = nested_kayit_bul(veri.setdefault("tohumlamalar", []), tohumlama_ref, "Tohumlama")
+    kayit = dict(mevcut_kayit)
     kayit.update(model_verisi(tohumlama, exclude_unset=True))
     kayit = normalize_tohumlama(kayit)
+    hayvan_dogum = parse_tarih(veri.get("dogum_tarihi"), "Hayvan doğum tarihi")
+    tohumlama_tarihi = parse_tarih(kayit.get("tarih"), "Tohumlama tarihi", zorunlu=True)
+    if hayvan_dogum and tohumlama_tarihi < hayvan_dogum:
+        raise HTTPException(status_code=400, detail="Tohumlama tarihi hayvanın doğum tarihinden önce olamaz.")
     for index, mevcut in enumerate(veri["tohumlamalar"]):
         if mevcut.get("id") == kayit.get("id"):
             veri["tohumlamalar"][index] = kayit
             break
-    tohumlama_sonucunu_isle(veri, kayit)
-    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
-    return {**kayit, "hayvan_id": db_hayvan.id}
+    eski_tohumlama_pozitif_olamaz(veri, kayit)
+    tohumlama_sonucunu_isle(veri)
+    audit_kaydi(
+        db, kullanici, "tohumlama_guncelle", "Tohumlama kaydı güncellendi.",
+        ciftlik_id=veri.get("ciftlik_id"), hedef_tipi="hayvan", hedef_id=db_hayvan.id,
+    )
+    hayvan_sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
+    return {**kayit, "hayvan_id": db_hayvan.id, "hayvan_son_guncelleme": hayvan_sonuc.get("son_guncelleme")}
 
 
 @app.delete("/api/hayvanlar/{hayvan_ref}/tohumlamalar/{tohumlama_ref}", response_model=schemas.IslemSonucResponse)
 def delete_tohumlama(
     hayvan_ref: str,
     tohumlama_ref: str,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     silinen = nested_kayit_sil(veri.setdefault("tohumlamalar", []), tohumlama_ref, "Tohumlama")
-    if veri.get("aktif_tohumlama_id") == silinen.get("id"):
-        veri["gebe_mi"] = False
-        veri["gebelik_tarihi"] = None
-        veri["aktif_tohumlama_id"] = None
-    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
-    return {"status": "ok", "message": "Tohumlama kaydı silindi.", "id": silinen.get("id")}
+    tohumlama_sonucunu_isle(veri)
+    audit_kaydi(
+        db, kullanici, "tohumlama_sil", "Tohumlama kaydı silindi.",
+        ciftlik_id=veri.get("ciftlik_id"), hedef_tipi="hayvan", hedef_id=db_hayvan.id,
+    )
+    hayvan_sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
+    return {"status": "ok", "message": "Tohumlama kaydı silindi.", "id": silinen.get("id"), "son_guncelleme": hayvan_sonuc.get("son_guncelleme")}
 
 
 @app.post(
@@ -2401,15 +2576,21 @@ def delete_tohumlama(
 def create_asi(
     hayvan_ref: str,
     asi: schemas.AsiProsedurCreate,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     yeni = normalize_asi(model_verisi(asi), yeni=True)
     veri.setdefault("asi_prosedurler", []).append(yeni)
-    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
-    return {**yeni, "hayvan_id": db_hayvan.id}
+    audit_kaydi(
+        db, kullanici, "asi_prosedur_olustur", "Aşı/prosedür kaydı oluşturuldu.",
+        ciftlik_id=veri.get("ciftlik_id"), hedef_tipi="hayvan", hedef_id=db_hayvan.id,
+    )
+    hayvan_sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
+    return {**yeni, "hayvan_id": db_hayvan.id, "hayvan_son_guncelleme": hayvan_sonuc.get("son_guncelleme")}
 
 
 @app.put(
@@ -2424,10 +2605,12 @@ def update_asi(
     hayvan_ref: str,
     asi_ref: str,
     asi: schemas.AsiProsedurUpdate,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     kayit = nested_kayit_bul(veri.setdefault("asi_prosedurler", []), asi_ref, "Aşı/prosedür")
     kayit.update(model_verisi(asi, exclude_unset=True))
@@ -2436,22 +2619,32 @@ def update_asi(
         if mevcut.get("id") == kayit.get("id"):
             veri["asi_prosedurler"][index] = kayit
             break
-    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
-    return {**kayit, "hayvan_id": db_hayvan.id}
+    audit_kaydi(
+        db, kullanici, "asi_prosedur_guncelle", "Aşı/prosedür kaydı güncellendi.",
+        ciftlik_id=veri.get("ciftlik_id"), hedef_tipi="hayvan", hedef_id=db_hayvan.id,
+    )
+    hayvan_sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
+    return {**kayit, "hayvan_id": db_hayvan.id, "hayvan_son_guncelleme": hayvan_sonuc.get("son_guncelleme")}
 
 
 @app.delete("/api/hayvanlar/{hayvan_ref}/asi-prosedurler/{asi_ref}", response_model=schemas.IslemSonucResponse)
 def delete_asi(
     hayvan_ref: str,
     asi_ref: str,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     silinen = nested_kayit_sil(veri.setdefault("asi_prosedurler", []), asi_ref, "Aşı/prosedür")
-    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
-    return {"status": "ok", "message": "Aşı/prosedür kaydı silindi.", "id": silinen.get("id")}
+    audit_kaydi(
+        db, kullanici, "asi_prosedur_sil", "Aşı/prosedür kaydı silindi.",
+        ciftlik_id=veri.get("ciftlik_id"), hedef_tipi="hayvan", hedef_id=db_hayvan.id,
+    )
+    hayvan_sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
+    return {"status": "ok", "message": "Aşı/prosedür kaydı silindi.", "id": silinen.get("id"), "son_guncelleme": hayvan_sonuc.get("son_guncelleme")}
 
 
 @app.post(
@@ -2462,10 +2655,12 @@ def delete_asi(
 def create_dogum(
     hayvan_ref: str,
     dogum: schemas.DogumCreate,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     anne = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     yeni = normalize_dogum(model_verisi(dogum), yeni=True)
     dogum_tarihi = parse_tarih(yeni.get("tarih"), "Doğum tarihi", zorunlu=True)
@@ -2548,8 +2743,12 @@ def create_dogum(
         anne["cins"] = "Sağmal İnek"
         anne["durum"] = "Sağmal İnek"
         anne["durum_notu"] = "Sağmal İnek"
-    response_kaydet(db, db_hayvan, anne, include_photo_urls=False)
-    return yeni
+    audit_kaydi(
+        db, kullanici, "dogum_olustur", "Doğum/laktasyon kaydı oluşturuldu.",
+        ciftlik_id=anne.get("ciftlik_id"), hedef_tipi="hayvan", hedef_id=db_hayvan.id,
+    )
+    hayvan_sonuc = response_kaydet(db, db_hayvan, anne, include_photo_urls=False)
+    return {**yeni, "hayvan_son_guncelleme": hayvan_sonuc.get("son_guncelleme")}
 
 
 @app.put("/api/hayvanlar/{hayvan_ref}/dogumlar/{dogum_ref}", response_model=schemas.DogumResponse)
@@ -2558,34 +2757,58 @@ def update_dogum(
     hayvan_ref: str,
     dogum_ref: str,
     dogum: schemas.DogumUpdate,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
-    kayit = nested_kayit_bul(veri.setdefault("dogumlar", []), dogum_ref, "Doğum")
+    mevcut_kayit = nested_kayit_bul(veri.setdefault("dogumlar", []), dogum_ref, "Doğum")
+    eski_tarih = mevcut_kayit.get("tarih")
+    kayit = dict(mevcut_kayit)
     kayit.update(model_verisi(dogum, exclude_unset=True))
     kayit = normalize_dogum(kayit)
+    anne_dogum = parse_tarih(veri.get("dogum_tarihi"), "Anne doğum tarihi")
+    dogum_tarihi = parse_tarih(kayit.get("tarih"), "Doğum tarihi", zorunlu=True)
+    if anne_dogum and dogum_tarihi < anne_dogum:
+        raise HTTPException(status_code=400, detail="Doğum tarihi annenin doğum tarihinden önce olamaz.")
     for index, mevcut in enumerate(veri["dogumlar"]):
         if mevcut is kayit or mevcut.get("id") == kayit.get("id"):
             veri["dogumlar"][index] = kayit
             break
-    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
-    return kayit
+    dogum_tarihi_degisimlerini_yavrulara_yansit(
+        db,
+        db_hayvan,
+        [{**mevcut_kayit, "tarih": eski_tarih}],
+        [kayit],
+    )
+    audit_kaydi(
+        db, kullanici, "dogum_guncelle", "Doğum/laktasyon kaydı güncellendi.",
+        ciftlik_id=veri.get("ciftlik_id"), hedef_tipi="hayvan", hedef_id=db_hayvan.id,
+    )
+    hayvan_sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
+    return {**kayit, "hayvan_son_guncelleme": hayvan_sonuc.get("son_guncelleme")}
 
 
 @app.delete("/api/hayvanlar/{hayvan_ref}/dogumlar/{dogum_ref}", response_model=schemas.IslemSonucResponse)
 def delete_dogum(
     hayvan_ref: str,
     dogum_ref: str,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     silinen = nested_kayit_sil(veri.setdefault("dogumlar", []), dogum_ref, "Doğum")
-    response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
-    return {"status": "ok", "message": "Doğum/laktasyon kaydı silindi.", "id": silinen.get("id")}
+    audit_kaydi(
+        db, kullanici, "dogum_sil", "Doğum/laktasyon kaydı silindi.",
+        ciftlik_id=veri.get("ciftlik_id"), hedef_tipi="hayvan", hedef_id=db_hayvan.id,
+    )
+    hayvan_sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
+    return {"status": "ok", "message": "Doğum/laktasyon kaydı silindi.", "id": silinen.get("id"), "son_guncelleme": hayvan_sonuc.get("son_guncelleme")}
 
 
 @app.get("/api/uyarilar", response_model=List[schemas.UyariResponse])
@@ -2605,10 +2828,14 @@ def get_rapor_ozet(
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     hayvanlar = [db_hayvandan_payload(h, include_photo_urls=False) for h in hayvan_sorgusu_scope(db, kullanici, ciftlik_id).all()]
-    cins_dagilimi: Dict[str, int] = {}
-    for h in hayvanlar:
-        cins = h.get("cins") or "Bilinmiyor"
-        cins_dagilimi[cins] = cins_dagilimi.get(cins, 0) + 1
+    aktif_hayvanlar = [h for h in hayvanlar if hayvan_aktif_mi(h)]
+    cinsiyet_dagilimi: Dict[str, int] = {}
+    hayvan_tipi_dagilimi: Dict[str, int] = {}
+    for h in aktif_hayvanlar:
+        tip = h.get("cins") or "Bilinmiyor"
+        cinsiyet = h.get("cinsiyet") or ("Erkek" if tip in ERKEK_CINSLER else "Dişi")
+        cinsiyet_dagilimi[cinsiyet] = cinsiyet_dagilimi.get(cinsiyet, 0) + 1
+        hayvan_tipi_dagilimi[tip] = hayvan_tipi_dagilimi.get(tip, 0) + 1
     uyarilar = uyarilari_hesapla(hayvanlar)
     return {
         "toplam": len(hayvanlar),
@@ -2617,7 +2844,8 @@ def get_rapor_ozet(
         "arsivli": sum(1 for h in hayvanlar if h.get("arsivli")),
         "olu": sum(1 for h in hayvanlar if h.get("olu")),
         "kesildi": sum(1 for h in hayvanlar if h.get("kesildi")),
-        "cins_dagilimi": cins_dagilimi,
+        "cins_dagilimi": cinsiyet_dagilimi,
+        "hayvan_tipi_dagilimi": hayvan_tipi_dagilimi,
         "acik_uyari": len(uyarilar),
     }
 
