@@ -118,6 +118,7 @@ class TohumlamaUpdate(AlpModel):
 class TohumlamaResponse(TohumlamaBase):
     id: str
     hayvan_id: Optional[str] = None
+    hayvan_son_guncelleme: Optional[str] = None
 
 
 class AsiProsedurBase(AlpModel):
@@ -141,6 +142,7 @@ class AsiProsedurUpdate(AlpModel):
 class AsiProsedurResponse(AsiProsedurBase):
     id: str
     hayvan_id: Optional[str] = None
+    hayvan_son_guncelleme: Optional[str] = None
 
 
 class YavruBilgi(AlpModel):
@@ -170,6 +172,7 @@ class DogumUpdate(AlpModel):
 
 class DogumResponse(DogumBase):
     id: Optional[str] = None
+    hayvan_son_guncelleme: Optional[str] = None
 
 
 class HayvanBase(AlpModel):
@@ -321,6 +324,7 @@ class RaporOzetResponse(AlpModel):
     olu: int
     kesildi: int
     cins_dagilimi: Dict[str, int] = Field(default_factory=dict)
+    hayvan_tipi_dagilimi: Dict[str, int] = Field(default_factory=dict)
     acik_uyari: int = 0
 
 
@@ -328,6 +332,7 @@ class IslemSonucResponse(AlpModel):
     status: str = "ok"
     message: str
     id: Optional[str] = None
+    son_guncelleme: Optional[str] = None
 
 
 class IslemGecmisiResponse(AlpModel):
