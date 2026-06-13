@@ -1009,7 +1009,12 @@ def normalize_asi(veri: Dict[str, Any], *, yeni: bool = False) -> Dict[str, Any]
     if asi_tarihi and asi_tarihi.date() > bugun_tarih():
         raise HTTPException(status_code=400, detail="Aşı/prosedür uygulama tarihi gelecekte olamaz.")
     if sonuc.get("sonraki_tarih"):
-        parse_tarih(sonuc.get("sonraki_tarih"), "Sonraki tarih")
+        sonraki_tarih = parse_tarih(sonuc.get("sonraki_tarih"), "Sonraki tarih")
+        if asi_tarihi and sonraki_tarih and sonraki_tarih < asi_tarihi:
+            raise HTTPException(
+                status_code=400,
+                detail="Sonraki tarih uygulama tarihinden önce olamaz.",
+            )
     sonuc["sonraki_tarih"] = bos_yoksa_none(sonuc.get("sonraki_tarih"))
     sonuc["not"] = sonuc.pop("not_", sonuc.get("not", "")) or ""
     return sonuc
@@ -1531,11 +1536,9 @@ def hayvan_aktif_mi(veri: Dict[str, Any]) -> bool:
     return not (veri.get("arsivli") or veri.get("olu") or veri.get("kesildi") or veri.get("satildi"))
 
 
-def tohumlama_kurallarini_kontrol(veri: Dict[str, Any], tohumlama: Dict[str, Any]) -> None:
-    if not hayvan_aktif_mi(veri):
-        raise HTTPException(status_code=400, detail="Aktif olmayan hayvana tohumlama eklenemez.")
+def tohumlama_tarih_kurallarini_kontrol(veri: Dict[str, Any], tohumlama: Dict[str, Any]) -> None:
     cins = veri.get("cins") or ""
-    if cins in ERKEK_CINSLER:
+    if cins in ERKEK_CINSLER or veri.get("cinsiyet") == "Erkek":
         raise HTTPException(status_code=400, detail="Erkek hayvana tohumlama eklenemez.")
     dogum_tarihi = parse_tarih(veri.get("dogum_tarihi"), "Hayvan doğum tarihi")
     tohumlama_tarihi = parse_tarih(tohumlama.get("tarih"), "Tohumlama tarihi", zorunlu=True)
@@ -1543,6 +1546,12 @@ def tohumlama_kurallarini_kontrol(veri: Dict[str, Any], tohumlama: Dict[str, Any
         raise HTTPException(status_code=400, detail="Tohumlama tarihi doğum tarihinden önce olamaz.")
     if cins in DISI_CINSLER and dogum_tarihi and (tohumlama_tarihi - dogum_tarihi).days < 365:
         raise HTTPException(status_code=400, detail="12 aylıktan küçük dişi hayvana tohumlama eklenemez.")
+
+
+def tohumlama_kurallarini_kontrol(veri: Dict[str, Any], tohumlama: Dict[str, Any]) -> None:
+    if not hayvan_aktif_mi(veri):
+        raise HTTPException(status_code=400, detail="Aktif olmayan hayvana tohumlama eklenemez.")
+    tohumlama_tarih_kurallarini_kontrol(veri, tohumlama)
     if veri.get("gebe_mi"):
         raise HTTPException(status_code=400, detail="Gebe hayvana yeni tohumlama eklenemez.")
     son_tohumlama = (veri.get("tohumlamalar") or [None])[-1]
@@ -1594,9 +1603,10 @@ def eski_tohumlama_pozitif_olamaz(veri: Dict[str, Any], kayit: Dict[str, Any]) -
 def alt_kayit_tarihlerini_kontrol(veri: Dict[str, Any]) -> None:
     hayvan_dogum = parse_tarih(veri.get("dogum_tarihi"), "Hayvan doğum tarihi")
     for tohumlama in veri.get("tohumlamalar") or []:
-        tarih = parse_tarih(tohumlama.get("tarih"), "Tohumlama tarihi", zorunlu=True)
-        if hayvan_dogum and tarih < hayvan_dogum:
-            raise HTTPException(status_code=400, detail="Tohumlama tarihi hayvanın doğum tarihinden önce olamaz.")
+        tohumlama_tarih_kurallarini_kontrol(veri, tohumlama)
+    erkek_hayvan = veri.get("cins") in ERKEK_CINSLER or veri.get("cinsiyet") == "Erkek"
+    if erkek_hayvan and (veri.get("dogumlar") or []):
+        raise HTTPException(status_code=400, detail="Erkek hayvana doğum kaydı eklenemez.")
     for dogum in veri.get("dogumlar") or []:
         tarih = parse_tarih(dogum.get("tarih"), "Doğum tarihi", zorunlu=True)
         if hayvan_dogum and tarih < hayvan_dogum:
@@ -2529,10 +2539,7 @@ def update_tohumlama(
     kayit = dict(mevcut_kayit)
     kayit.update(model_verisi(tohumlama, exclude_unset=True))
     kayit = normalize_tohumlama(kayit)
-    hayvan_dogum = parse_tarih(veri.get("dogum_tarihi"), "Hayvan doğum tarihi")
-    tohumlama_tarihi = parse_tarih(kayit.get("tarih"), "Tohumlama tarihi", zorunlu=True)
-    if hayvan_dogum and tohumlama_tarihi < hayvan_dogum:
-        raise HTTPException(status_code=400, detail="Tohumlama tarihi hayvanın doğum tarihinden önce olamaz.")
+    tohumlama_tarih_kurallarini_kontrol(veri, kayit)
     for index, mevcut in enumerate(veri["tohumlamalar"]):
         if mevcut.get("id") == kayit.get("id"):
             veri["tohumlamalar"][index] = kayit
@@ -2662,6 +2669,8 @@ def create_dogum(
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     anne = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
+    if anne.get("cins") in ERKEK_CINSLER or anne.get("cinsiyet") == "Erkek":
+        raise HTTPException(status_code=400, detail="Erkek hayvana doğum kaydı eklenemez.")
     yeni = normalize_dogum(model_verisi(dogum), yeni=True)
     dogum_tarihi = parse_tarih(yeni.get("tarih"), "Doğum tarihi", zorunlu=True)
     anne_dogum_tarihi = parse_tarih(anne.get("dogum_tarihi"), "Anne doğum tarihi")
@@ -2764,6 +2773,8 @@ def update_dogum(
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
+    if veri.get("cins") in ERKEK_CINSLER or veri.get("cinsiyet") == "Erkek":
+        raise HTTPException(status_code=400, detail="Erkek hayvanın doğum kaydı düzenlenemez.")
     mevcut_kayit = nested_kayit_bul(veri.setdefault("dogumlar", []), dogum_ref, "Doğum")
     eski_tarih = mevcut_kayit.get("tarih")
     kayit = dict(mevcut_kayit)
