@@ -2092,17 +2092,62 @@ def update_kullanici(
     if not db_kullanici:
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı.")
     veri = model_verisi(kullanici, exclude_unset=True)
-    if "kullanici_adi" in veri:
-        db_kullanici.kullanici_adi = veri["kullanici_adi"].strip().lower()
+    yeni_kullanici_adi = str(
+        veri.get("kullanici_adi", db_kullanici.kullanici_adi) or ""
+    ).strip().lower()
+    if not yeni_kullanici_adi:
+        raise HTTPException(status_code=400, detail="Kullanici adi bos olamaz.")
+    ayni_ad = (
+        db.query(models.Kullanici)
+        .filter(
+            models.Kullanici.kullanici_adi == yeni_kullanici_adi,
+            models.Kullanici.id != db_kullanici.id,
+        )
+        .first()
+    )
+    if ayni_ad:
+        raise HTTPException(status_code=400, detail="Bu kullanici adi zaten kayitli.")
+
+    yeni_rol = str(veri.get("rol", db_kullanici.rol) or "ciftlik").strip().lower()
+    if yeni_rol not in {"admin", "ciftlik"}:
+        raise HTTPException(status_code=400, detail="Gecersiz kullanici rolu.")
+    yeni_aktif = bool(veri.get("aktif", db_kullanici.aktif))
+    yeni_ciftlik_id = veri.get("ciftlik_id", db_kullanici.ciftlik_id)
+    if yeni_rol == "admin":
+        yeni_ciftlik_id = None
+    else:
+        if not yeni_ciftlik_id:
+            raise HTTPException(status_code=400, detail="Ciftlik kullanicisi icin ciftlik secilmelidir.")
+        ciftlik_bul(db, yeni_ciftlik_id)
+
+    adminlik_sona_eriyor = (
+        db_kullanici.rol == "admin"
+        and db_kullanici.aktif
+        and (yeni_rol != "admin" or not yeni_aktif)
+    )
+    if adminlik_sona_eriyor:
+        kalan_admin = (
+            db.query(models.Kullanici)
+            .filter(
+                models.Kullanici.rol == "admin",
+                models.Kullanici.aktif.is_(True),
+                models.Kullanici.id != db_kullanici.id,
+            )
+            .count()
+        )
+        if kalan_admin == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Son aktif admin pasiflestirilemez veya ciftlik kullanicisina cevrilemez.",
+            )
+
+    db_kullanici.kullanici_adi = yeni_kullanici_adi
     if "sifre" in veri and veri["sifre"]:
         sifre_gucu_kontrol(veri["sifre"])
         db_kullanici.sifre_hash = sifre_hashle(veri["sifre"])
-    if "rol" in veri:
-        db_kullanici.rol = veri["rol"]
-    if "ciftlik_id" in veri:
-        db_kullanici.ciftlik_id = veri["ciftlik_id"] if db_kullanici.rol != "admin" else None
-    if "aktif" in veri:
-        db_kullanici.aktif = bool(veri["aktif"])
+    db_kullanici.rol = yeni_rol
+    db_kullanici.ciftlik_id = yeni_ciftlik_id
+    db_kullanici.aktif = yeni_aktif
     audit_kaydi(
         db,
         admin,
@@ -2261,6 +2306,7 @@ def create_hayvan(
             status_code=409,
             detail="Bu hayvan merkezde daha yeni silinmis; eski offline kayit geri yuklenmedi.",
         )
+    alt_kayit_tarihlerini_kontrol(veri)
     kupe_cakismasi_kontrol(db, veri, ciftlik_id=veri["ciftlik_id"])
     db_hayvan = models.Hayvan(id=veri["id"])
     db.add(db_hayvan)
@@ -2295,10 +2341,12 @@ def create_hayvan(
 def update_hayvan(
     hayvan_ref: str,
     hayvan: schemas.HayvanUpdate,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     mevcut = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     onceki_dogumlar = json.loads(
         json.dumps(mevcut.get("dogumlar") or [], ensure_ascii=False)
@@ -2349,10 +2397,12 @@ def delete_hayvan(
     hayvan_ref: str,
     kalici: bool = False,
     degisiklik_zamani: Optional[str] = None,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     if kalici:
         if gelen_zaman_daha_eski_mi(degisiklik_zamani, db_hayvan.son_guncelleme):
             raise eski_degisim_cakismasi(db_hayvan.son_guncelleme)
@@ -2426,10 +2476,12 @@ async def upload_hayvan_fotograflari(
     hayvan_ref: str,
     fotograflar: List[UploadFile] = File(...),
     replace: bool = Form(False),
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     onceki_paths, _, _ = foto_referanslarini_topla(veri)
     mevcut_paths, mevcut_urls, mevcut_datas = foto_referanslarini_topla(veri)
@@ -2524,10 +2576,12 @@ def hayvan_fotografi_sil_ve_kaydet(
 def delete_hayvan_fotografi_by_path(
     hayvan_ref: str,
     foto_path: str = Query(..., min_length=1),
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     paths, urls, datas = foto_referanslarini_topla(veri)
     fotograflar = paths + urls + datas
@@ -2548,10 +2602,12 @@ def delete_hayvan_fotografi_by_path(
 def delete_hayvan_fotografi(
     hayvan_ref: str,
     foto_index: int,
+    beklenen_son_guncelleme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     return hayvan_fotografi_sil_ve_kaydet(
         db,
@@ -2782,7 +2838,9 @@ def create_dogum(
 
     kaydedilen_yavrular = []
     for yavru in yeni.get("yavrular") or []:
-        yavru_id = yeni_id()
+        yavru_id = metin(yavru.get("hayvan_id") or yavru.get("id")) or yeni_id()
+        if db.query(models.Hayvan).filter(models.Hayvan.id == yavru_id).first():
+            raise HTTPException(status_code=400, detail="Yavru kimligi zaten kayitli.")
         yavru_resmi = yavru.get("resmi_kupe_no") or ""
         yavru_ciftlik = yavru.get("ciftlik_kupe_no") or ""
         yavru_kupe = yavru_ciftlik or yavru_resmi or yavru.get("kupe") or yavru_id
@@ -2811,6 +2869,8 @@ def create_dogum(
         db.add(yavru_db)
         db_hayvana_yaz(db, yavru_db, yavru_veri)
         kaydedilen_yavrular.append({
+            "id": yavru_id,
+            "hayvan_id": yavru_id,
             "kupe": yavru_kupe,
             "resmi_kupe_no": yavru_resmi,
             "ciftlik_kupe_no": yavru_ciftlik,
@@ -3432,7 +3492,7 @@ def get_islem_gecmisi(
     bitis = parse_zaman_sessiz(tarih_bitis)
     if bitis and tarih_bitis and len(tarih_bitis.strip()) <= 10:
         bitis = bitis.replace(hour=23, minute=59, second=59)
-    kayitlar = sorgu.order_by(models.IslemGecmisi.zaman.desc()).limit(max(limit * 3, limit)).all()
+    kayitlar = sorgu.all()
     if baslangic or bitis:
         filtreli = []
         for kayit in kayitlar:
@@ -3443,6 +3503,10 @@ def get_islem_gecmisi(
                 continue
             filtreli.append(kayit)
         kayitlar = filtreli
+    kayitlar.sort(
+        key=lambda kayit: parse_zaman_sessiz(kayit.zaman) or datetime.min,
+        reverse=True,
+    )
     kayitlar = kayitlar[:limit]
     return [islem_payload(kayit) for kayit in kayitlar]
 
