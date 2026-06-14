@@ -1,6 +1,6 @@
 # ALP Ziraat Proje Hafizasi
 
-Son guncelleme: 21 Mayis 2026
+Son guncelleme: 14 Haziran 2026
 
 Bu dosya projenin mevcut halini, yapilan degisiklikleri, testleri ve dagitim notlarini hatirlamak icin tutulur. Yeni bir isleme baslamadan once burayi oku.
 
@@ -471,3 +471,7 @@ Desktop profil ile ayni sekmeleri icermeli:
 - API `/api/health` artık gerçek `SELECT 1` sorgusuyla veritabanını kontrol ediyor.
 - PostgreSQL üretiminde `ALP_AUTH_SECRET` eksik, varsayılan veya 32 karakterden kısaysa health 503 döndürüyor; anahtarın kendisi hiçbir yanıtta açığa çıkarılmıyor.
 - API smoke testi path tabanlı fotoğraf silmeyi, gerçek DB health sonucunu ve auth secret yapılandırma durumunu doğruluyor.
+# 14 Haziran 2026 - Masaüstü v1.9.35
+
+- Senkron, health ve veri güvenliği düzeltmelerini içeren masaüstü dağıtımı için uygulama sürümü `1.9.35` yapıldı.
+- Güncel EXE, Setup EXE ve kurulum ZIP paketi yeniden üretildi.
