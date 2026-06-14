@@ -166,6 +166,26 @@ def main():
         )
         admin_token = device_login["access_token"]
 
+        _, admin_users = request(
+            base_url, "GET", "/api/kullanicilar", token=admin_token, expected=200
+        )
+        bootstrap_admin = next(item for item in admin_users if item["rol"] == "admin")
+        expect_http_error(
+            base_url,
+            "PATCH",
+            f"/api/kullanicilar/{bootstrap_admin['id']}",
+            400,
+            {"aktif": False},
+            token=admin_token,
+        )
+        expect_http_error(
+            base_url,
+            "DELETE",
+            f"/api/kullanicilar/{bootstrap_admin['id']}",
+            400,
+            token=admin_token,
+        )
+
         _, farm = request(
             base_url,
             "POST",
@@ -191,6 +211,28 @@ def main():
             expected=201,
         )
         assert user["ciftlik_id"] == farm_id
+        expect_http_error(
+            base_url,
+            "POST",
+            "/api/kullanicilar",
+            400,
+            {
+                "kullanici_adi": "SMOKE_USER",
+                "sifre": "smoke1234",
+                "rol": "ciftlik",
+                "ciftlik_id": farm_id,
+                "aktif": True,
+            },
+            token=admin_token,
+        )
+        expect_http_error(
+            base_url,
+            "PATCH",
+            f"/api/kullanicilar/{user['id']}",
+            404,
+            {"ciftlik_id": "missing-farm"},
+            token=admin_token,
+        )
 
         _, removable_user = request(
             base_url,
@@ -241,6 +283,7 @@ def main():
         _, animal = request(base_url, "POST", "/api/hayvanlar", animal_payload, token=farm_token, expected=201)
         assert animal["foto_path"] == animal_payload["foto_path"]
         assert animal["irk"] == "Simental", animal
+        initial_version = animal["son_guncelleme"]
         def png_bytes(color):
             buffer = BytesIO()
             Image.new("RGB", (12, 12), color).save(buffer, format="PNG")
@@ -302,6 +345,20 @@ def main():
             token=farm_token,
             expected=201,
         )
+        expect_http_error(
+            base_url,
+            "POST",
+            "/api/hayvanlar",
+            400,
+            {
+                "id": "api-smoke-invalid-embedded-insemination",
+                "ciftlik_id": farm_id,
+                "dogum_tarihi": "01/01/2025",
+                "cins": "D\u00fcve",
+                "tohumlamalar": [{"tarih": "01/07/2025", "sekil": "Bo\u011fa"}],
+            },
+            token=farm_token,
+        )
         _, valid_insemination = request(
             base_url,
             "POST",
@@ -333,6 +390,21 @@ def main():
             },
             token=farm_token,
             expected=201,
+        )
+        expect_http_error(
+            base_url,
+            "POST",
+            "/api/hayvanlar",
+            400,
+            {
+                "id": "api-smoke-invalid-embedded-birth",
+                "ciftlik_id": farm_id,
+                "dogum_tarihi": "01/01/2024",
+                "cins": "Dana",
+                "cinsiyet": "Erkek",
+                "dogumlar": [{"tarih": "01/05/2026", "yavrular": []}],
+            },
+            token=farm_token,
         )
         expect_http_error(
             base_url,
@@ -379,7 +451,9 @@ def main():
         _, patched_animal = request(
             base_url,
             "PATCH",
-            "/api/hayvanlar/api-smoke-h1",
+            "/api/hayvanlar/api-smoke-h1?" + urllib.parse.urlencode(
+                {"beklenen_son_guncelleme": photo_delete["son_guncelleme"]}
+            ),
             {
                 "cins": "Sa\u011fmal \u0130nek",
                 "irk": "Holstein",
@@ -392,6 +466,16 @@ def main():
             expected=200,
         )
         assert patched_animal["irk"] == "Holstein", patched_animal
+        expect_http_error(
+            base_url,
+            "PATCH",
+            "/api/hayvanlar/api-smoke-h1?" + urllib.parse.urlencode(
+                {"beklenen_son_guncelleme": initial_version}
+            ),
+            409,
+            {"irk": "Simental"},
+            token=farm_token,
+        )
 
         _, birth = request(
             base_url,
@@ -401,6 +485,7 @@ def main():
                 "tarih": "01/05/2026",
                 "yavrular": [
                     {
+                        "hayvan_id": "offline_yavru_smoke_1",
                         "cins": "Di\u015fi Buza\u011f\u0131",
                         "resmi_kupe_no": "TRCALF001",
                         "ciftlik_kupe_no": "CCALF001",
@@ -411,8 +496,9 @@ def main():
             expected=201,
         )
         assert birth["yavrular"][0]["ciftlik_kupe_no"] == "CCALF001", birth
+        assert birth["yavrular"][0]["hayvan_id"] == "offline_yavru_smoke_1", birth
 
-        _, calf = request(base_url, "GET", "/api/hayvanlar/CCALF001", token=farm_token, expected=200)
+        _, calf = request(base_url, "GET", "/api/hayvanlar/offline_yavru_smoke_1", token=farm_token, expected=200)
         assert calf["resmi_kupe_no"] == "TRCALF001", calf
 
         _, history = request(base_url, "GET", "/api/islem-gecmisi", token=farm_token, expected=200)
