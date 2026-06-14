@@ -475,3 +475,14 @@ Desktop profil ile ayni sekmeleri icermeli:
 
 - Senkron, health ve veri güvenliği düzeltmelerini içeren masaüstü dağıtımı için uygulama sürümü `1.9.35` yapıldı.
 - Güncel EXE, Setup EXE ve kurulum ZIP paketi yeniden üretildi.
+
+# 15 Haziran 2026 - API/Desktop/Mobil veri bütünlüğü
+
+- API kullanıcı yönetiminde son aktif adminin pasifleştirilmesi, rolünün düşürülmesi veya silinmesi engellendi; mükerrer kullanıcı adı ve geçersiz çiftlik atamaları reddediliyor.
+- Hayvan güncelleme/silme, fotoğraf ve alt kayıt işlemlerinde istemcinin okuduğu `son_guncelleme` sürümüyle çakışma kontrolü eklendi. Eski mobil/masaüstü veri yeni kaydı sessizce ezemiyor; 409 çakışma olarak bildiriliyor.
+- Mobil senkron aynı anda tek çalışma kullanır; yeni hayvan ile mevcut hayvan ayrımı kuyrukta açık işaretle tutulur. Draft kimlikli fakat sunucuya kaydedilmiş hayvan artık yanlışlıkla yeniden POST edilmez.
+- Mobil 401 durumunda saklanan oturum temizlenip giriş ekranına dönülür. Başarısız kuyruk kaydı kaldırılırken yerel veri sunucudan tekrar uzlaştırılır.
+- Offline doğum yavru kimlikleri API tarafında korunur; fotoğraf işlemleri sonraki kuyruk işlemlerine yeni sunucu sürümünü aktarır. Tohumlama silme cevabı artık sahte hayvan olarak cache'e yazılmaz.
+- Mobil profil yerel ve online fotoğrafları birlikte gösterir; fotoğraf sayısı doğru hesaplanır. Profilde laktasyon sayısı, son doğum, aktif ve toplam sağım günü özetleri eklendi.
+- İşlem geçmişi gerçek tarih sırası ile döner. Health endpoint gerçek veritabanı sorgusu ve auth secret yapılandırmasını kontrol eder.
+- Doğrulama: Python compile, API smoke, tüm desktop UI/login/offline/export/update smoke testleri, `flutter analyze`, 13 Flutter testi ve release APK build başarılı.
