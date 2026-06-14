@@ -60,7 +60,8 @@ ERKEK_CINSLER = {"Erkek Buzağı", "Dana"}
 DISI_CINSLER = {"Dişi Buzağı", "Düve", "Sağmal İnek", "Kuru İnek"}
 LEGACY_DEFAULT_CIFTLIK_ID = "varsayilan-ciftlik"
 LEGACY_DEFAULT_CIFTLIK_ADI = "Varsayılan Çiftlik"
-AUTH_SECRET = os.getenv("ALP_AUTH_SECRET", "alp-ziraat-dev-secret-change-me")
+DEFAULT_AUTH_SECRET = "alp-ziraat-dev-secret-change-me"
+AUTH_SECRET = os.getenv("ALP_AUTH_SECRET", DEFAULT_AUTH_SECRET)
 TOKEN_TTL_SECONDS = int(os.getenv("ALP_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 DEVICE_TOKEN_TTL_SECONDS = int(os.getenv("ALP_DEVICE_TOKEN_TTL_SECONDS", str(90 * 24 * 60 * 60)))
 APP_TIMEZONE_NAME = os.getenv("ALP_TIMEZONE", "Europe/Istanbul")
@@ -1793,8 +1794,41 @@ def read_root():
 
 
 @app.get("/api/health")
-def health():
-    return {"status": "ok", "database": "connected"}
+def health(db: Session = Depends(get_db)):
+    try:
+        db.execute(sql_text("SELECT 1")).scalar_one()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "status": "error",
+                "database": "disconnected",
+                "message": "Veritabanı bağlantısı doğrulanamadı.",
+            },
+        ) from exc
+
+    auth_secret_configured = bool(
+        AUTH_SECRET
+        and AUTH_SECRET != DEFAULT_AUTH_SECRET
+        and len(AUTH_SECRET) >= 32
+    )
+    backend = engine.url.get_backend_name()
+    if backend != "sqlite" and not auth_secret_configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "status": "error",
+                "database": "connected",
+                "auth_secret_configured": False,
+                "message": "ALP_AUTH_SECRET üretim ortamında tanımlı değil veya çok kısa.",
+            },
+        )
+    return {
+        "status": "ok",
+        "database": "connected",
+        "database_backend": backend,
+        "auth_secret_configured": auth_secret_configured,
+    }
 
 
 @app.post("/api/auth/login", response_model=schemas.LoginResponse)
@@ -2451,20 +2485,18 @@ async def upload_hayvan_fotograflari(
     return sonuc
 
 
-@app.delete("/api/hayvanlar/{hayvan_ref}/fotograflar/{foto_index}", response_model=schemas.HayvanResponse)
-def delete_hayvan_fotografi(
-    hayvan_ref: str,
-    foto_index: int,
-    db: Session = Depends(get_db),
-    kullanici: models.Kullanici = Depends(get_current_user),
+def hayvan_fotografi_sil_ve_kaydet(
+    db: Session,
+    kullanici: models.Kullanici,
+    db_hayvan: models.Hayvan,
+    veri: Dict[str, Any],
+    silinecek_index: int,
 ):
-    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
-    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     paths, urls, datas = foto_referanslarini_topla(veri)
     fotograflar = paths + urls + datas
-    if foto_index < 1 or foto_index > len(fotograflar):
+    if silinecek_index < 0 or silinecek_index >= len(fotograflar):
         raise HTTPException(status_code=404, detail="Fotoğraf bulunamadı.")
-    silinen = fotograflar.pop(foto_index - 1)
+    silinen = fotograflar.pop(silinecek_index)
     paths = [foto for foto in fotograflar if storage_path_from_ref(foto)]
     urls = [foto for foto in fotograflar if foto_url_mu(foto) and not storage_path_from_ref(foto)]
     datas = [foto for foto in fotograflar if not foto_url_mu(foto) and not storage_path_from_ref(foto)]
@@ -2486,6 +2518,48 @@ def delete_hayvan_fotografi(
     sonuc = response_kaydet(db, db_hayvan, veri, include_photo_urls=False)
     storage_fotograflari_sil([silinen])
     return sonuc
+
+
+@app.delete("/api/hayvanlar/{hayvan_ref}/fotograflar", response_model=schemas.HayvanResponse)
+def delete_hayvan_fotografi_by_path(
+    hayvan_ref: str,
+    foto_path: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
+    paths, urls, datas = foto_referanslarini_topla(veri)
+    fotograflar = paths + urls + datas
+    try:
+        silinecek_index = fotograflar.index(foto_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Fotoğraf bulunamadı.") from exc
+    return hayvan_fotografi_sil_ve_kaydet(
+        db,
+        kullanici,
+        db_hayvan,
+        veri,
+        silinecek_index,
+    )
+
+
+@app.delete("/api/hayvanlar/{hayvan_ref}/fotograflar/{foto_index}", response_model=schemas.HayvanResponse)
+def delete_hayvan_fotografi(
+    hayvan_ref: str,
+    foto_index: int,
+    db: Session = Depends(get_db),
+    kullanici: models.Kullanici = Depends(get_current_user),
+):
+    db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
+    return hayvan_fotografi_sil_ve_kaydet(
+        db,
+        kullanici,
+        db_hayvan,
+        veri,
+        foto_index - 1,
+    )
 
 
 @app.post(

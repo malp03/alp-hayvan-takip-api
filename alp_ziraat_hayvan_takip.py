@@ -44,7 +44,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.33"
+APP_VERSION = "1.9.34"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -7075,16 +7075,17 @@ class HayvanTakipSistemi:
             else:
                 cinsiyet_dagilimi['Dişi'] += 1
             
+            cins_dagilimi[cins] = cins_dagilimi.get(cins, 0) + 1
+            if hayvan.get('gebe_mi', False):
+                ozel_durum_dagilimi['Gebe'] += 1
+
+        for hayvan in self.hayvanlar.values():
             if hayvan.get('olu', False):
                 ozel_durum_dagilimi['Ölü'] += 1
-            elif hayvan.get('kesildi', False):
+            if hayvan.get('kesildi', False):
                 ozel_durum_dagilimi['Kesildi'] += 1
-            elif hayvan.get('satildi', False):
+            if hayvan.get('satildi', False):
                 ozel_durum_dagilimi['Satıldı'] += 1
-            else:
-                cins_dagilimi[cins] = cins_dagilimi.get(cins, 0) + 1
-                if hayvan.get('gebe_mi', False):
-                    ozel_durum_dagilimi['Gebe'] += 1
 
         arsivli_sayi = sum(1 for h in self.hayvanlar.values() if h.get('arsivli', False))
         ozet = self.dashboard_ozeti_hesapla()
@@ -7757,7 +7758,7 @@ class HayvanTakipSistemi:
             popup.add_command(label="Detayları Göster", command=lambda: self.hayvan_detay_ac(None))
             if self.hayvan_tohumlanabilir_mi(hayvan):
                 popup.add_command(label="Tohumlama Yap", command=self.hizli_tohumlama)
-            if hayvan and hayvan.get('arsivli'):
+            if hayvan and hayvan.get('arsivli') and not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('satildi'):
                 popup.add_command(label="Arşivden Çıkar", command=lambda h=kupe_no: self.hayvan_arsivden_cikar(h, self.root))
             popup.tk_popup(event.x_root, event.y_root)
 
@@ -7799,9 +7800,10 @@ class HayvanTakipSistemi:
                 try:
                     g_tarihi = datetime.strptime(hayvan['gebelik_tarihi'], "%d/%m/%Y")
                     kalan_gun_doguma = (g_tarihi + timedelta(days=283) - datetime.now()).days
-                    uyari_key = self.uyari_key_olustur(kupe_no, "kuruya_al", aktif_tohumlama_id, kalan_gun_doguma)
-                    if uyari_key:
-                        aktif_uyari_keyleri.append(uyari_key)
+                    if kalan_gun_doguma <= 60:
+                        uyari_key = self.uyari_key_olustur(kupe_no, "kuruya_al", aktif_tohumlama_id, kalan_gun_doguma)
+                        if uyari_key:
+                            aktif_uyari_keyleri.append(uyari_key)
                 except: continue
             
             if aktif_tohumlama_id and hayvan.get('gebe_mi', False):
@@ -8659,6 +8661,17 @@ class HayvanTakipSistemi:
         self.raporlari_guncelle()
 
     def hayvan_sil_detay(self, kupe_no, pencere):
+        if kupe_no not in self.hayvanlar:
+            return
+        hayvan = self.hayvanlar[kupe_no]
+        if hayvan.get('olu') or hayvan.get('kesildi') or hayvan.get('satildi'):
+            gorunen = self.hayvan_gorunen_kupe(kupe_no, hayvan)
+            messagebox.showwarning(
+                "Arşivlenemez",
+                f"{gorunen} aktif sürüde olmadığı için arşive alınamaz.",
+                parent=pencere or self.root,
+            )
+            return
         uyari = f"DİKKAT!\n\n{kupe_no} küpeli hayvan aktif sürüden arşive alınacak.\n\nKayıt geçmişi korunur; hayvan listesinde sadece 'Arşivli' filtresinde görünür."
         if messagebox.askyesno("Hayvan Arşivleme Onayı", uyari):
             self.islem_kaydi_baslat(f"Hayvan arşive alındı: {kupe_no}")
@@ -8684,6 +8697,12 @@ class HayvanTakipSistemi:
         gorunen = self.hayvan_gorunen_kupe(kupe_no, hayvan)
         if not hayvan.get('arsivli', False):
             return messagebox.showinfo("Arşivden Çıkar", f"{gorunen} zaten aktif listede.", parent=pencere or self.root)
+        if hayvan.get('olu') or hayvan.get('kesildi') or hayvan.get('satildi'):
+            return messagebox.showwarning(
+                "Arşivden Çıkarılamaz",
+                f"{gorunen} satılmış, kesilmiş veya ölü olduğu için aktif sürüye alınamaz.",
+                parent=pencere or self.root,
+            )
         if not messagebox.askyesno(
             "Arşivden Çıkar",
             f"{gorunen} arşivden çıkarılıp aktif sürü listesine alınsın mı?",
@@ -9137,6 +9156,12 @@ class HayvanTakipSistemi:
                     return
                 if tarih_dt < dogum_dt:
                     return messagebox.showerror("Hata", "Tohumlama tarihi doğum tarihinden önce olamaz.", parent=dialog)
+                if hayvan.get('cins') in ["Dişi Buzağı", "Düve", "Sağmal İnek", "Kuru İnek"] and (tarih_dt - dogum_dt).days < 365:
+                    return messagebox.showerror(
+                        "Hata",
+                        "Tohumlama tarihinde hayvan en az 12 aylık olmalıdır.",
+                        parent=dialog,
+                    )
                 sekil = sekil_combo.get().strip()
                 if sekil == "Suni" and not suni_entry.get().strip():
                     return messagebox.showerror("Hata", "Suni tohumlama ismi zorunludur.", parent=dialog)
@@ -9235,6 +9260,33 @@ class HayvanTakipSistemi:
                 bitis = bitis_entry.get().strip()
                 if bitis and self.tarih_coz(bitis, "Laktasyon bitiş tarihi", parent=dialog) is None:
                     return
+                anne_dogum = self.tarih_coz(
+                    hayvan.get('dogum_tarihi', ''),
+                    "Anne doğum tarihi",
+                    parent=dialog,
+                )
+                yeni_dogum = (
+                    self.tarih_coz(tarih, "Doğum tarihi", parent=dialog)
+                    if tarih != "Bilinmiyor"
+                    else None
+                )
+                yeni_bitis = (
+                    self.tarih_coz(bitis, "Laktasyon bitiş tarihi", parent=dialog)
+                    if bitis
+                    else None
+                )
+                if anne_dogum and yeni_dogum and yeni_dogum < anne_dogum:
+                    return messagebox.showerror(
+                        "Hata",
+                        "Doğum tarihi annenin doğum tarihinden önce olamaz.",
+                        parent=dialog,
+                    )
+                if yeni_bitis and yeni_dogum and yeni_bitis < yeni_dogum:
+                    return messagebox.showerror(
+                        "Hata",
+                        "Laktasyon bitiş tarihi doğum tarihinden önce olamaz.",
+                        parent=dialog,
+                    )
                 self.islem_kaydi_baslat(f"Doğum kaydı düzenlendi: {kupe_no}")
                 kayit['tarih'] = tarih
                 kayit['laktasyon_bitis_tarihi'] = bitis or None
@@ -9612,11 +9664,12 @@ class HayvanTakipSistemi:
             ("Düzenle", lambda: self.hayvan_duzenle_penceresi(hayvan_id, detay_window), "default"),
             ("Aşı/Prosedür", lambda: self.asi_prosedur_penceresi(hayvan_id, detay_window), "success"),
         ]
+        aktif_hayvan = not hayvan.get("olu") and not hayvan.get("kesildi") and not hayvan.get("arsivli") and not hayvan.get("satildi")
         if self.hayvan_tohumlama_sonuclanabilir_mi(hayvan):
             aksiyonlar.append(("Tohumlamayı Sonuçla", lambda: self.tohumlama_sonuc_penceresi(hayvan_id, detay_window), "warning"))
         elif self.hayvan_tohumlanabilir_mi(hayvan):
             aksiyonlar.append(("Tohumla", lambda: self.tohumlama_ekranina_hayvanla_git(hayvan_id, detay_window), "primary"))
-        if not hayvan.get("olu") and not hayvan.get("kesildi") and not hayvan.get("arsivli") and not hayvan.get("satildi"):
+        if aktif_hayvan:
             if not is_male and hayvan.get("gebe_mi"):
                 aksiyonlar.append(("Doğum Kaydet", lambda: self.dogum_kayit_olustur(hayvan_id, detay_window), "success"))
             if not is_male and hayvan.get("durum") == "Sağmal İnek":
@@ -9627,9 +9680,10 @@ class HayvanTakipSistemi:
                 ("Öldü", lambda: self.hayvan_oldu(hayvan_id, detay_window), "danger"),
             ])
         if hayvan.get("arsivli"):
-            aksiyonlar.append(("Arşivden Çıkar", lambda: self.hayvan_arsivden_cikar(hayvan_id, detay_window), "success"))
+            if not hayvan.get("olu") and not hayvan.get("kesildi") and not hayvan.get("satildi"):
+                aksiyonlar.append(("Arşivden Çıkar", lambda: self.hayvan_arsivden_cikar(hayvan_id, detay_window), "success"))
             aksiyonlar.append(("Kalıcı Sil", lambda: self.hayvan_kalici_sil(hayvan_id, detay_window), "danger"))
-        else:
+        elif aktif_hayvan:
             aksiyonlar.append(("Arşivle", lambda: self.hayvan_sil_detay(hayvan_id, detay_window), "danger"))
         aksiyonlar.append(("Kapat", kapat, "default"))
 
@@ -10183,7 +10237,11 @@ class HayvanTakipSistemi:
                 try:
                     g_tarihi = datetime.strptime(hayvan['gebelik_tarihi'], "%d/%m/%Y")
                     kalan_gun_doguma = (g_tarihi + timedelta(days=283) - datetime.now()).days
-                    uyari_key = self.uyari_key_olustur(kupe_no, "kuruya_al", aktif_tohumlama_id, kalan_gun_doguma)
+                    uyari_key = (
+                        self.uyari_key_olustur(kupe_no, "kuruya_al", aktif_tohumlama_id, kalan_gun_doguma)
+                        if kalan_gun_doguma <= 60
+                        else None
+                    )
                     if uyari_key:
                         okundu_mu = uyari_key in self.okunan_uyarilar
                         

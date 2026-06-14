@@ -447,6 +447,13 @@ Desktop profil ile ayni sekmeleri icermeli:
 - Pencereye minimum boyut verildi, kucuk ekranlarda kaydet butonunun alta kacmasi engellendi.
 - Desktop `APP_VERSION` `1.9.33` yapildi; release tag'i `v1.9.33` olmalidir.
 
+## 13 Haziran 2026 Desktop v1.9.34 Notu
+
+- Tohumlama kaydi duzenlenirken de hayvanin tohumlama tarihinde en az 12 aylik olmasi zorunlu hale getirildi. Kontrol API, masaustu ve mobil katmanlarinda ayni sekilde uygulanir.
+- API erkek hayvana dogum kaydi eklenmesini veya mevcut dogum kaydinin duzenlenmesini reddeder.
+- Asi/prosedur kayitlarinda sonraki tarih uygulama tarihinden once olamaz. Kontrol API ve mobil ekleme/duzenleme ekranlarinda uygulanir; masaustu mevcut kontrolu korur.
+- Desktop `APP_VERSION` `1.9.34` yapildi; release tag'i `v1.9.34` olmalidir. Mobil paket surumu `1.0.2+3` yapildi.
+
 ## Hata Ararken Ilk Bakilacak Yerler
 
 - Login donuyorsa: `api_giris_penceresi`, `api_giris_yap`, `taninan_bilgisayar_giris_dene`, `tools/smoke_login_responsive.py`
@@ -455,3 +462,12 @@ Desktop profil ile ayni sekmeleri icermeli:
 - Offline/senkron sorunlari: `bekleyen_senkron_*`, `api_senkronize_et_ui`, `otomatik_baglanti_kontrol`
 - Admin paneli sorunlari: `admin_yonetim_merkezi`, ciftlik/kullanici yonetim popup'lari
 - Fotograf sorunlari: `foto_data_olustur`, `foto_data_to_image`, hayvan profil penceresi
+# 14 Haziran 2026 - Senkron kuyruğu, güvenli fotoğraf silme ve health
+
+- Mobil Senkronize ekranına bekleyen/başarısız işlemleri ayrıntılı gösteren yönetim alanı eklendi.
+- Kullanıcı başarısız bir işlemi yeniden deneyebilir veya uyarı onayıyla kuyruktan kaldırabilir.
+- Fotoğraf silme işlemi Storage sıra numarası yerine kalıcı `foto_path` ile çalışacak şekilde güncellendi; eski indeksli kuyruk kayıtları geriye uyumlu kaldı.
+- Mobil hayvan modeli ve yerel önbellek `foto_paths` alanını koruyor.
+- API `/api/health` artık gerçek `SELECT 1` sorgusuyla veritabanını kontrol ediyor.
+- PostgreSQL üretiminde `ALP_AUTH_SECRET` eksik, varsayılan veya 32 karakterden kısaysa health 503 döndürüyor; anahtarın kendisi hiçbir yanıtta açığa çıkarılmıyor.
+- API smoke testi path tabanlı fotoğraf silmeyi, gerçek DB health sonucunu ve auth secret yapılandırma durumunu doğruluyor.

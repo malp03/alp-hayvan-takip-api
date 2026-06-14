@@ -7,8 +7,9 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -114,6 +115,7 @@ def main():
         env.pop(key, None)
     env["APPDATA"] = tmp
     env["DATABASE_URL"] = "sqlite:///" + str(db_path).replace("\\", "/")
+    env["ALP_AUTH_SECRET"] = "smoke-test-auth-secret-at-least-32-characters"
     env["ALP_BOOTSTRAP_ADMIN_USERNAME"] = "admin"
     env["ALP_BOOTSTRAP_ADMIN_PASSWORD"] = "admin1234"
 
@@ -141,6 +143,9 @@ def main():
 
     try:
         wait_for_health(proc, base_url)
+        _, health = request(base_url, "GET", "/api/health", expected=200)
+        assert health["database"] == "connected", health
+        assert health["auth_secret_configured"] is True, health
 
         _, login = request(
             base_url,
@@ -230,11 +235,11 @@ def main():
             "dogum_tarihi": "01/01/2024",
             "cins": "D\u00fcve",
             "irk": "Simental",
-            "foto_data": "data:image/jpeg;base64,abc",
+            "foto_path": "smoke/api-smoke-h1/original.jpg",
             "son_guncelleme": "21/05/2026 01:10:00",
         }
         _, animal = request(base_url, "POST", "/api/hayvanlar", animal_payload, token=farm_token, expected=201)
-        assert animal["foto_data"] == animal_payload["foto_data"]
+        assert animal["foto_path"] == animal_payload["foto_path"]
         assert animal["irk"] == "Simental", animal
         def png_bytes(color):
             buffer = BytesIO()
@@ -253,15 +258,24 @@ def main():
             token=farm_token,
             expected=200,
         )
-        assert len(photo_upload.get("foto_datas") or []) == 3, photo_upload
+        assert (
+            len(photo_upload.get("foto_paths") or [])
+            + len(photo_upload.get("foto_urls") or [])
+            + len(photo_upload.get("foto_datas") or [])
+        ) == 3, photo_upload
         _, photo_delete = request(
             base_url,
             "DELETE",
-            "/api/hayvanlar/api-smoke-h1/fotograflar/2",
+            "/api/hayvanlar/api-smoke-h1/fotograflar?foto_path="
+            + urllib.parse.quote(animal_payload["foto_path"], safe=""),
             token=farm_token,
             expected=200,
         )
-        assert len(photo_delete.get("foto_datas") or []) == 2, photo_delete
+        assert (
+            len(photo_delete.get("foto_paths") or [])
+            + len(photo_delete.get("foto_urls") or [])
+            + len(photo_delete.get("foto_datas") or [])
+        ) == 2, photo_delete
 
         _, normal_search = request(base_url, "GET", "/api/hayvanlar?q=TR%209876", token=farm_token, expected=200)
         assert any(item["id"] == "api-smoke-h1" for item in normal_search), normal_search
@@ -274,6 +288,94 @@ def main():
         _, camera_abbr = request(base_url, "GET", "/api/hayvanlar/bul?ref=TR%209876&kaynak=kamera", token=farm_token, expected=200)
         assert camera_abbr["eslesme_sayisi"] == 0, camera_abbr
 
+        _, young_female = request(
+            base_url,
+            "POST",
+            "/api/hayvanlar",
+            {
+                "id": "api-smoke-young-female",
+                "ciftlik_id": farm_id,
+                "resmi_kupe_no": "TR-YOUNG-FEMALE",
+                "dogum_tarihi": "01/01/2025",
+                "cins": "Düve",
+            },
+            token=farm_token,
+            expected=201,
+        )
+        _, valid_insemination = request(
+            base_url,
+            "POST",
+            "/api/hayvanlar/api-smoke-young-female/tohumlamalar",
+            {"tarih": "02/01/2026", "sekil": "Boğa"},
+            token=farm_token,
+            expected=201,
+        )
+        expect_http_error(
+            base_url,
+            "PATCH",
+            f"/api/hayvanlar/api-smoke-young-female/tohumlamalar/{valid_insemination['id']}",
+            400,
+            {"tarih": "01/07/2025"},
+            token=farm_token,
+        )
+
+        request(
+            base_url,
+            "POST",
+            "/api/hayvanlar",
+            {
+                "id": "api-smoke-male",
+                "ciftlik_id": farm_id,
+                "resmi_kupe_no": "TR-SMOKE-MALE",
+                "dogum_tarihi": "01/01/2024",
+                "cins": "Dana",
+                "cinsiyet": "Erkek",
+            },
+            token=farm_token,
+            expected=201,
+        )
+        expect_http_error(
+            base_url,
+            "POST",
+            "/api/hayvanlar/api-smoke-male/dogumlar",
+            400,
+            {"tarih": "01/05/2026", "yavrular": []},
+            token=farm_token,
+        )
+
+        expect_http_error(
+            base_url,
+            "POST",
+            "/api/hayvanlar/api-smoke-young-female/asi-prosedurler",
+            400,
+            {
+                "ad": "Tarih sırası testi",
+                "tarih": "10/01/2026",
+                "sonraki_tarih": "01/01/2026",
+            },
+            token=farm_token,
+        )
+        _, valid_procedure = request(
+            base_url,
+            "POST",
+            "/api/hayvanlar/api-smoke-young-female/asi-prosedurler",
+            {
+                "ad": "Geçerli prosedür",
+                "tarih": "10/01/2026",
+                "sonraki_tarih": "10/02/2026",
+            },
+            token=farm_token,
+            expected=201,
+        )
+        expect_http_error(
+            base_url,
+            "PATCH",
+            f"/api/hayvanlar/api-smoke-young-female/asi-prosedurler/{valid_procedure['id']}",
+            400,
+            {"sonraki_tarih": "01/01/2026"},
+            token=farm_token,
+        )
+
         _, patched_animal = request(
             base_url,
             "PATCH",
@@ -284,7 +386,7 @@ def main():
                 "gebe_mi": True,
                 "gebelik_tarihi": "01/02/2026",
                 "aktif_tohumlama_id": "smoke",
-                "son_guncelleme": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                "son_guncelleme": (datetime.now() + timedelta(minutes=1)).strftime("%d/%m/%Y %H:%M:%S"),
             },
             token=farm_token,
             expected=200,
