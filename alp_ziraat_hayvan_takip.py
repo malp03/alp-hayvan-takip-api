@@ -1751,6 +1751,7 @@ class HayvanTakipSistemi:
         self.api_cevrimdisi = False
         self.api_offline_oturum = False
         self._api_son_idler = set()
+        self._api_base_versions = {}
         self._api_son_hata = None
         self._offline_kullanici_adi = None
         self._offline_sifre = None
@@ -2391,8 +2392,14 @@ class HayvanTakipSistemi:
     def bekleyen_senkron_upsert(self, h_id, veri):
         h_id = str(h_id)
         self.bekleyen_senkron.setdefault("deletes", {}).pop(h_id, None)
+        onceki = (self.bekleyen_senkron.get("upserts", {}) or {}).get(h_id) or {}
+        base_version = onceki.get("base_son_guncelleme") or getattr(
+            self, "_api_base_versions", {}
+        ).get(h_id)
         kayit = copy.deepcopy(self.hayvan_kayit_tamamla(h_id, veri))
         kayit["id"] = h_id
+        if base_version:
+            kayit["base_son_guncelleme"] = base_version
         self.bekleyen_senkron.setdefault("upserts", {})[h_id] = kayit
 
     def bekleyen_senkron_delete(self, h_id):
@@ -2401,6 +2408,7 @@ class HayvanTakipSistemi:
         self.bekleyen_senkron.setdefault("deletes", {})[h_id] = {
             "id": h_id,
             "zaman": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            "base_son_guncelleme": getattr(self, "_api_base_versions", {}).get(h_id),
         }
 
     def bekleyen_senkron_snapshot_guncelle(self, hedef_id=None):
@@ -2574,13 +2582,19 @@ class HayvanTakipSistemi:
         onceki_idler = set(onceki_idler or set())
         payload = self.hayvan_kayit_tamamla(h_id, veri)
         payload["id"] = h_id
+        base_version = payload.pop("base_son_guncelleme", None) or getattr(
+            self, "_api_base_versions", {}
+        ).get(h_id)
         if self.admin_mi() and getattr(self, "admin_aktif_ciftlik_id", None):
             payload["ciftlik_id"] = payload.get("ciftlik_id") or self.admin_aktif_ciftlik_id
             payload["ciftlik_ad"] = payload.get("ciftlik_ad") or self.admin_aktif_ciftlik_ad
 
         if h_id in onceki_idler:
             try:
-                kayit = self.api_istek("PATCH", f"/api/hayvanlar/{self.api_ref(h_id)}", payload)
+                patch_path = f"/api/hayvanlar/{self.api_ref(h_id)}"
+                if base_version:
+                    patch_path += f"?beklenen_son_guncelleme={self.api_ref(base_version)}"
+                kayit = self.api_istek("PATCH", patch_path, payload)
             except ApiHatasi as e:
                 if e.status != 404:
                     raise
@@ -2602,9 +2616,16 @@ class HayvanTakipSistemi:
                 )
                 if not ayni_id_cakismasi:
                     raise
-                kayit = self.api_istek("PATCH", f"/api/hayvanlar/{self.api_ref(h_id)}", payload)
+                patch_path = f"/api/hayvanlar/{self.api_ref(h_id)}"
+                if base_version:
+                    patch_path += f"?beklenen_son_guncelleme={self.api_ref(base_version)}"
+                kayit = self.api_istek("PATCH", patch_path, payload)
 
         kayit_id = str((kayit or {}).get("id") or h_id)
+        yeni_version = (kayit or {}).get("son_guncelleme")
+        if yeni_version:
+            self._api_base_versions.pop(h_id, None)
+            self._api_base_versions[kayit_id] = yeni_version
         return kayit_id, self.hayvan_kayit_tamamla(kayit_id, kayit or payload)
 
     def bekleyen_senkron_gonder(self, sessiz=False, ui_guncelle=True):
@@ -2623,10 +2644,16 @@ class HayvanTakipSistemi:
             onceki_idler = set(getattr(self, "_api_son_idler", set()))
 
             for h_id in sorted(deletes.keys()):
-                silme_zamani = (deletes.get(h_id) or {}).get("zaman")
+                delete_info = deletes.get(h_id) or {}
+                silme_zamani = delete_info.get("zaman")
+                base_version = delete_info.get("base_son_guncelleme") or getattr(
+                    self, "_api_base_versions", {}
+                ).get(str(h_id))
                 delete_path = f"/api/hayvanlar/{self.api_ref(h_id)}?kalici=true"
                 if silme_zamani:
                     delete_path += f"&degisiklik_zamani={self.api_ref(silme_zamani)}"
+                if base_version:
+                    delete_path += f"&beklenen_son_guncelleme={self.api_ref(base_version)}"
                 try:
                     sonuc = self.api_istek("DELETE", delete_path, timeout=20)
                 except ApiHatasi as e:
@@ -2641,6 +2668,7 @@ class HayvanTakipSistemi:
                     continue
                 onceki_idler.discard(str(h_id))
                 self.hayvanlar.pop(str(h_id), None)
+                self._api_base_versions.pop(str(h_id), None)
 
             for h_id, veri in upserts.items():
                 kayit_id, tamamlanmis = self.api_hayvan_kayit_gonder(h_id, veri, onceki_idler)
@@ -4617,6 +4645,11 @@ class HayvanTakipSistemi:
                 break
             skip += limit
         self._api_son_idler = set(hayvanlar_dict.keys())
+        self._api_base_versions = {
+            h_id: veri.get("son_guncelleme")
+            for h_id, veri in hayvanlar_dict.items()
+            if veri.get("son_guncelleme")
+        }
         self.api_cevrimdisi = False
         self.api_offline_oturum = False
         self._api_son_hata = None
@@ -4639,6 +4672,9 @@ class HayvanTakipSistemi:
             onceki_idler.discard(h_id)
             onceki_idler.add(kayit_id)
             self._api_son_idler = onceki_idler
+            self._api_base_versions.pop(h_id, None)
+            if tamamlanmis.get("son_guncelleme"):
+                self._api_base_versions[kayit_id] = tamamlanmis["son_guncelleme"]
             self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
             return kayit_id
         except ApiHatasi as e:
@@ -4656,7 +4692,12 @@ class HayvanTakipSistemi:
         mevcut_idler = {str(h_id) for h_id in self.hayvanlar.keys()}
 
         for silinen_id in sorted(onceki_idler - mevcut_idler):
-            self.api_istek("DELETE", f"/api/hayvanlar/{self.api_ref(silinen_id)}?kalici=true")
+            delete_path = f"/api/hayvanlar/{self.api_ref(silinen_id)}?kalici=true"
+            base_version = getattr(self, "_api_base_versions", {}).get(silinen_id)
+            if base_version:
+                delete_path += f"&beklenen_son_guncelleme={self.api_ref(base_version)}"
+            self.api_istek("DELETE", delete_path)
+            self._api_base_versions.pop(silinen_id, None)
 
         guncel_hayvanlar = {}
         for h_id, veri in list(self.hayvanlar.items()):
@@ -4689,8 +4730,13 @@ class HayvanTakipSistemi:
         onceki_idler = set(getattr(self, "_api_son_idler", set()))
         if h_id not in self.hayvanlar:
             if h_id in onceki_idler:
-                self.api_istek("DELETE", f"/api/hayvanlar/{self.api_ref(h_id)}?kalici=true")
+                delete_path = f"/api/hayvanlar/{self.api_ref(h_id)}?kalici=true"
+                base_version = getattr(self, "_api_base_versions", {}).get(h_id)
+                if base_version:
+                    delete_path += f"&beklenen_son_guncelleme={self.api_ref(base_version)}"
+                self.api_istek("DELETE", delete_path)
                 onceki_idler.discard(h_id)
+                self._api_base_versions.pop(h_id, None)
                 self._api_son_idler = onceki_idler
             self.api_cevrimdisi = False
             self.api_offline_oturum = False

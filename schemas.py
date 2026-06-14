@@ -146,6 +146,8 @@ class AsiProsedurResponse(AsiProsedurBase):
 
 
 class YavruBilgi(AlpModel):
+    id: Optional[str] = None
+    hayvan_id: Optional[str] = None
     kupe: Optional[str] = None
     resmi_kupe_no: Optional[str] = None
     ciftlik_kupe_no: Optional[str] = None
