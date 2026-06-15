@@ -8,15 +8,21 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - name: Ping API health
-        continue-on-error: true
         env:
           ALP_API_URL: ${{ secrets.ALP_API_URL }}
         run: |
-          if [ -z "$ALP_API_URL" ]; then
-            echo "ALP_API_URL secret is not set; skipping keepalive."
-            exit 0
-          fi
-          curl --fail --silent --show-error --max-time 75 --retry 2 --retry-delay 8 "$ALP_API_URL/api/health"
+          API_URL="${ALP_API_URL:-https://alp-hayvan-takip-api.onrender.com}"
+          for attempt in 1 2 3; do
+            response="$(curl --fail --silent --show-error --max-time 75 "$API_URL/api/health" || true)"
+            if printf '%s' "$response" | grep -q '"status":"ok"'; then
+              echo "Render health check passed."
+              exit 0
+            fi
+            echo "Health check attempt $attempt did not return ready status."
+            sleep 12
+          done
+          echo "Render service did not become ready."
+          exit 1
