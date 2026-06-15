@@ -35,7 +35,7 @@ Android icin daha verimli yol `POST /api/hayvanlar/{hayvan_ref}/fotograflar` mul
 
 ## Render Cold Start
 
-Render Free servisleri uykuya gecebilir. GitHub Actions icinde `Render Keepalive` workflow'u `/api/health` adresini periyodik pingler. Bunun calismasi icin GitHub Actions secret olarak `ALP_API_URL` tanimli olmali.
+Render Free servisleri uykuya gecebilir. GitHub Actions icindeki `Render Keepalive` workflow'u `/api/health` adresini 10 dakikada bir pingler. `ALP_API_URL` secret'i tanimliysa onu, tanimli degilse canli Render API adresini kullanir. Workflow basarisiz olursa hata gizlenmez ve Actions ekraninda gorunur.
 
 ## Yedekleme
 

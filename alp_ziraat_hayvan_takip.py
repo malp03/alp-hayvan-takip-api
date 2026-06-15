@@ -17,6 +17,8 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
+import traceback
 import uuid
 import urllib.error
 import urllib.parse
@@ -44,7 +46,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.35"
+APP_VERSION = "1.9.38"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -81,6 +83,8 @@ class HayvanTakipSistemi:
         self._baslatma_tamam = False
         try:
             self.root = tk.Tk()
+            self._ui_callback_kuyrugu = queue.Queue()
+            self._ui_callback_after_id = None
 
             # --- TEMA RENK PALETLERİ ---
             self.dark_theme = {
@@ -165,6 +169,7 @@ class HayvanTakipSistemi:
 
             self.stil_ayarla()
             self.veri_klasoru_hazirla()
+            self.hata_gunlugu_hazirla()
             self.api_token = None
             self.api_kullanici = None
             self._pending_update_notes = None
@@ -184,7 +189,11 @@ class HayvanTakipSistemi:
             self._otomatik_baglanti_after_id = None
             self._tracked_after_ids = []
             self._otomatik_baglanti_kontrol_ediliyor = False
-            self.otomatik_baglanti_araligi_ms = 60 * 1000
+            self._api_senkronizasyon_devam_ediyor = False
+            self._api_ag_lock = threading.Lock()
+            self.api_baglanti_durumu = "checking" if self.api_modu else "local"
+            self.otomatik_baglanti_araligi_ms = 8 * 60 * 1000
+            self.otomatik_baglanti_hata_araligi_ms = 60 * 1000
             self.otomatik_baglanti_ilk_gecikme_ms = 30 * 1000
             if self.api_modu and not self.login_akisini_baslat():
                 self.root.destroy()
@@ -202,6 +211,7 @@ class HayvanTakipSistemi:
             self._puls_after_id = None
             self._otomatik_baglanti_after_id = None
             self._kapanis_istegi = False
+            self._ui_callback_after_id = self.root.after(50, self._ui_callback_kuyrugunu_isle)
             self.ana_interface_olustur()
             self.uyari_sistemi_baslat()
             self._pending_update_notes = self.guncelleme_notu_yukle()
@@ -209,6 +219,7 @@ class HayvanTakipSistemi:
             self._baslatma_tamam = True
 
         except Exception as e:
+            self.hata_gunlugu_yaz("Başlatma hatası", e)
             messagebox.showerror("Başlatma Hatası", f"Uygulama başlatılamadı: {e}")
 
     def stil_ayarla(self):
@@ -918,7 +929,6 @@ class HayvanTakipSistemi:
         if img:
             label.configure(image=img, text="")
             label.image = img
-            self._foto_referanslari.append(img)
         else:
             label.configure(image="", text=bos_metin)
             label.image = None
@@ -962,7 +972,6 @@ class HayvanTakipSistemi:
                 self.foto_url_arka_planda_yukle(foto_data, tamamlandi)
             if img:
                 canvas.image = img
-                self._foto_referanslari.append(img)
                 canvas.create_image(0, 0, image=img, anchor="nw")
                 canvas.create_rectangle(0, h - 24, w, h, fill="#020817", outline="#020817", stipple="gray50")
                 if remove_callback:
@@ -1043,8 +1052,6 @@ class HayvanTakipSistemi:
             font=("Segoe UI", 11, "bold"),
         )
         foto_lbl.image = img
-        if img:
-            self._foto_referanslari.append(img)
         foto_lbl.pack(fill="both", expand=True)
         if not img and self.foto_referansi_url_mu(foto_data):
             def yukleme_bitti(_data):
@@ -1053,7 +1060,6 @@ class HayvanTakipSistemi:
                     if yeni_img:
                         foto_lbl.configure(image=yeni_img, text="")
                         foto_lbl.image = yeni_img
-                        self._foto_referanslari.append(yeni_img)
                     else:
                         foto_lbl.configure(text="Fotograf goruntulenemedi.")
                 except tk.TclError:
@@ -1741,8 +1747,11 @@ class HayvanTakipSistemi:
         self.pending_sync_file = os.path.join(self.data_dir, "bekleyen_senkron.json")
         self.admin_cache_file = os.path.join(self.data_dir, "admin_onbellek.json")
         self.foto_cache_dir = os.path.join(self.data_dir, "foto_onbellek")
+        self.log_dir = os.path.join(self.data_dir, "logs")
+        self.log_file = os.path.join(self.log_dir, "masaustu.log")
         os.makedirs(self.islem_yedek_dir, exist_ok=True)
         os.makedirs(self.foto_cache_dir, exist_ok=True)
+        os.makedirs(self.log_dir, exist_ok=True)
 
         self.eski_veriyi_tasi("hayvan_verileri.json", self.data_file)
         self.eski_veriyi_tasi("okunan_uyarilar.json", self.uyari_file)
@@ -1758,6 +1767,58 @@ class HayvanTakipSistemi:
         self.pending_update_notes_file = os.path.join(self.data_dir, "bekleyen_guncelleme_notu.json")
         self.bekleyen_senkron = self.bekleyen_senkron_yukle()
         self.admin_onbellek = self.admin_onbellek_yukle()
+
+    def hata_gunlugu_hazirla(self):
+        self._onceki_sys_excepthook = sys.excepthook
+        self._onceki_thread_excepthook = getattr(threading, "excepthook", None)
+        self.root.report_callback_exception = self.tk_callback_hatasi
+        sys.excepthook = self.yakalanmamis_hata
+        if hasattr(threading, "excepthook"):
+            threading.excepthook = self.thread_hatasi
+
+    def hata_gunlugu_yaz(self, baslik, hata=None, iz=None):
+        try:
+            if iz is None:
+                if hata is not None and getattr(hata, "__traceback__", None):
+                    iz = "".join(traceback.format_exception(type(hata), hata, hata.__traceback__))
+                elif hata is not None:
+                    iz = str(hata)
+                else:
+                    iz = ""
+            satir = (
+                f"\n[{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}] {baslik}\n"
+                f"{iz.rstrip()}\n"
+            )
+            with open(self.log_file, "a", encoding="utf-8") as log:
+                log.write(satir)
+        except Exception:
+            pass
+
+    def tk_callback_hatasi(self, exc_type, exc_value, exc_traceback):
+        iz = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        self.hata_gunlugu_yaz("Tkinter callback hatası", iz=iz)
+        try:
+            messagebox.showerror(
+                "Uygulama Hatası",
+                f"Beklenmeyen bir arayüz hatası oluştu. Ayrıntılar kaydedildi:\n{self.log_file}",
+                parent=self.root,
+            )
+        except Exception:
+            pass
+
+    def yakalanmamis_hata(self, exc_type, exc_value, exc_traceback):
+        iz = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        self.hata_gunlugu_yaz("Yakalanmamış hata", iz=iz)
+        onceki = getattr(self, "_onceki_sys_excepthook", None)
+        if onceki:
+            onceki(exc_type, exc_value, exc_traceback)
+
+    def thread_hatasi(self, args):
+        iz = "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))
+        self.hata_gunlugu_yaz(f"Arka plan thread hatası: {args.thread.name}", iz=iz)
+        onceki = getattr(self, "_onceki_thread_excepthook", None)
+        if onceki:
+            onceki(args)
 
     def api_url_yukle(self):
         api_url = os.environ.get("ALP_API_URL", "").strip()
@@ -2274,9 +2335,8 @@ class HayvanTakipSistemi:
             raise ApiHatasi("Offline oturum sifresi hatali.")
         self.api_token = None
         self.api_kullanici = cache.get("kullanici") or {}
-        self.api_cevrimdisi = True
         self.api_offline_oturum = True
-        self._api_son_hata = str(asil_hata)
+        self.api_baglanti_durumu_ata("offline", asil_hata, ui_guncelle=False)
         self._offline_kullanici_adi = girilen_kullanici
         self._offline_sifre = sifre
         return True
@@ -2342,9 +2402,8 @@ class HayvanTakipSistemi:
                 return False
             self.api_token = token
             self.api_kullanici = (yanit or {}).get("kullanici") or cache.get("kullanici") or {}
-            self.api_cevrimdisi = False
             self.api_offline_oturum = False
-            self._api_son_hata = None
+            self.api_baglanti_durumu_ata("online", ui_guncelle=False)
             self.taninan_bilgisayar_kaydet(device_token, self.api_kullanici)
             return True
         except ApiHatasi as e:
@@ -2353,9 +2412,8 @@ class HayvanTakipSistemi:
             elif cache.get("kullanici"):
                 self.api_token = None
                 self.api_kullanici = cache.get("kullanici") or {}
-                self.api_cevrimdisi = True
                 self.api_offline_oturum = True
-                self._api_son_hata = str(e)
+                self.api_baglanti_durumu_ata("offline", e, ui_guncelle=False)
                 return True
             print(f"Tanınan bilgisayar girişi başarısız: {e}")
             return False
@@ -2460,7 +2518,144 @@ class HayvanTakipSistemi:
     def api_ref(self, deger):
         return urllib.parse.quote(str(deger), safe="")
 
-    def api_istek(self, method, path, payload=None, timeout=12, auth=True):
+    def ui_threadinde_calistir(self, callback):
+        if threading.current_thread() is threading.main_thread():
+            callback()
+            return
+        kuyruk = getattr(self, "_ui_callback_kuyrugu", None)
+        if kuyruk is not None:
+            kuyruk.put(callback)
+
+    def _ui_callback_kuyrugunu_isle(self):
+        self._ui_callback_after_id = None
+        if getattr(self, "_kapanis_istegi", False):
+            return
+        kuyruk = getattr(self, "_ui_callback_kuyrugu", None)
+        if kuyruk is not None:
+            while True:
+                try:
+                    callback = kuyruk.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    callback()
+                except Exception as e:
+                    self.hata_gunlugu_yaz("Ana thread callback hatası", e)
+        try:
+            self._ui_callback_after_id = self.root.after(50, self._ui_callback_kuyrugunu_isle)
+        except tk.TclError:
+            self._ui_callback_after_id = None
+
+    def api_baglanti_durumu_ata(self, durum, hata=None, ui_guncelle=True):
+        self.api_baglanti_durumu = durum
+        if durum == "online":
+            self.api_cevrimdisi = False
+            self._api_son_hata = None
+        elif durum in {"checking", "waking", "offline"}:
+            self.api_cevrimdisi = True
+            if hata:
+                self._api_son_hata = str(hata)
+        if ui_guncelle:
+            self.ui_threadinde_calistir(self.api_durum_guncelle)
+
+    def api_uyandir(self, maksimum_bekleme=95, ilk_timeout=18):
+        if not getattr(self, "api_modu", False):
+            return True
+        baslangic = time.monotonic()
+        son_hata = None
+        self.api_baglanti_durumu_ata("checking")
+        while time.monotonic() - baslangic < maksimum_bekleme:
+            kalan = maksimum_bekleme - (time.monotonic() - baslangic)
+            timeout = max(3, min(ilk_timeout, int(kalan)))
+            try:
+                sonuc = self.api_istek("GET", "/api/health", timeout=timeout, auth=False)
+                if isinstance(sonuc, dict) and sonuc.get("status") == "ok":
+                    self.api_baglanti_durumu_ata("online")
+                    return True
+                son_hata = ApiHatasi("API sağlık kontrolü beklenen yanıtı vermedi.")
+            except ApiHatasi as e:
+                son_hata = e
+                if not self.api_hatasi_yeniden_denebilir_mi(e):
+                    break
+            self.api_baglanti_durumu_ata("waking", son_hata)
+            kalan = maksimum_bekleme - (time.monotonic() - baslangic)
+            if kalan <= 0:
+                break
+            time.sleep(min(4, kalan))
+        hata = son_hata or ApiHatasi("Render servisi belirtilen sürede uyanmadı.")
+        self.api_baglanti_durumu_ata("offline", hata)
+        raise hata
+
+    def api_hatasi_yeniden_denebilir_mi(self, hata):
+        hata_metni = str(hata or "").lower()
+        status = getattr(hata, "status", None)
+        return (
+            status in {502, 503, 504}
+            or "zaman aşımı" in hata_metni
+            or "timed out" in hata_metni
+            or "timeout" in hata_metni
+            or "connection reset" in hata_metni
+            or "connection aborted" in hata_metni
+            or "remote end closed" in hata_metni
+            or "temporarily unavailable" in hata_metni
+        )
+
+    def api_stale_update_hatasi_mi(self, hata):
+        hata_metni = str(hata or "").lower()
+        return (
+            getattr(hata, "status", None) == 409
+            and (
+                "stale_update" in hata_metni
+                or "merkezdeki kayıt" in hata_metni
+                or "merkezdeki kayit" in hata_metni
+                or "daha yeni" in hata_metni
+            )
+        )
+
+    def api_hayvan_sunucudan_uzlastir(self, h_id, onceki_idler=None):
+        h_id = str(h_id)
+        onceki_idler = set(onceki_idler or set())
+        try:
+            kayit = self.api_istek("GET", f"/api/hayvanlar/{self.api_ref(h_id)}", timeout=20)
+        except ApiHatasi as e:
+            if getattr(e, "status", None) == 404:
+                self.hayvanlar.pop(h_id, None)
+                onceki_idler.discard(h_id)
+                self._api_base_versions.pop(h_id, None)
+                return onceki_idler
+            raise
+        kayit_id = str((kayit or {}).get("id") or h_id)
+        if kayit_id != h_id:
+            self.hayvanlar.pop(h_id, None)
+            onceki_idler.discard(h_id)
+        tamamlanmis = self.hayvan_kayit_tamamla(kayit_id, kayit or {})
+        self.hayvanlar[kayit_id] = tamamlanmis
+        onceki_idler.add(kayit_id)
+        yeni_version = tamamlanmis.get("son_guncelleme")
+        if yeni_version:
+            self._api_base_versions[kayit_id] = yeni_version
+        return onceki_idler
+
+    def api_oturumu_yenile(self):
+        self.api_token = None
+        try:
+            self.api_online_oturum_ac()
+        except ApiHatasi as e:
+            self.api_baglanti_durumu_ata("offline", e)
+            raise
+        return bool(getattr(self, "api_token", None))
+
+    def api_istek(self, method, path, payload=None, timeout=12, auth=True, oturum_yenile=True):
+        try:
+            return self._api_istek_ham(method, path, payload=payload, timeout=timeout, auth=auth)
+        except ApiHatasi as e:
+            if auth and oturum_yenile and getattr(e, "status", None) == 401:
+                self.hata_gunlugu_yaz("API oturumu süresi doldu; oturum yenileniyor", e)
+                self.api_oturumu_yenile()
+                return self._api_istek_ham(method, path, payload=payload, timeout=timeout, auth=auth)
+            raise
+
+    def _api_istek_ham(self, method, path, payload=None, timeout=12, auth=True):
         if not getattr(self, "api_url", ""):
             raise ApiHatasi("API adresi ayarlı değil.")
         data = None
@@ -2479,7 +2674,23 @@ class HayvanTakipSistemi:
             )
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read().decode("utf-8")
-                return json.loads(raw) if raw else None
+                if not raw:
+                    self.api_baglanti_durumu_ata("online")
+                    return None
+                try:
+                    sonuc = json.loads(raw)
+                except json.JSONDecodeError as e:
+                    content_type = str(response.headers.get("Content-Type", "")).lower()
+                    if "text/html" in content_type or raw.lstrip().startswith("<"):
+                        raise ApiHatasi(
+                            "Render servisi uyanıyor. Lütfen bağlantı kurulana kadar bekleyin.",
+                            status=503,
+                        ) from e
+                    raise ApiHatasi("API geçersiz bir yanıt döndürdü.") from e
+                self.api_baglanti_durumu_ata("online")
+                return sonuc
+        except ApiHatasi:
+            raise
         except urllib.error.HTTPError as e:
             detay = e.read().decode("utf-8", errors="replace")
             mesaj = detay
@@ -2490,7 +2701,10 @@ class HayvanTakipSistemi:
                 pass
             raise ApiHatasi(f"API {e.code}: {mesaj}", status=e.code) from e
         except urllib.error.URLError as e:
-            raise ApiHatasi(f"API bağlantısı kurulamadı: {e.reason}") from e
+            sebep = getattr(e, "reason", e)
+            if isinstance(sebep, (socket.timeout, TimeoutError)):
+                raise ApiHatasi("API isteği zaman aşımına uğradı.") from e
+            raise ApiHatasi(f"API bağlantısı kurulamadı: {sebep}") from e
         except socket.timeout as e:
             raise ApiHatasi("API isteği zaman aşımına uğradı.") from e
         except TimeoutError as e:
@@ -2500,6 +2714,7 @@ class HayvanTakipSistemi:
 
     def api_giris_yap(self, kullanici_adi, sifre, bu_bilgisayari_tani=False):
         try:
+            self.api_uyandir(maksimum_bekleme=95)
             yanit = self.api_istek(
                 "POST",
                 "/api/auth/login",
@@ -2516,9 +2731,8 @@ class HayvanTakipSistemi:
             raise ApiHatasi("API giriş yanıtında token yok.")
         self.api_token = token
         self.api_kullanici = (yanit or {}).get("kullanici") or {}
-        self.api_cevrimdisi = False
         self.api_offline_oturum = False
-        self._api_son_hata = None
+        self.api_baglanti_durumu_ata("online", ui_guncelle=False)
         self._offline_kullanici_adi = str(kullanici_adi or "").strip().lower()
         self._offline_sifre = sifre
         self.offline_auth_kaydet(kullanici_adi, sifre, self.api_kullanici)
@@ -2553,9 +2767,8 @@ class HayvanTakipSistemi:
             raise ApiHatasi("API giris yanitinda token yok.")
         self.api_token = token
         self.api_kullanici = (yanit or {}).get("kullanici") or {}
-        self.api_cevrimdisi = False
         self.api_offline_oturum = False
-        self._api_son_hata = None
+        self.api_baglanti_durumu_ata("online", ui_guncelle=False)
         self.offline_auth_kaydet(kullanici_adi, sifre, self.api_kullanici)
         return True
 
@@ -2631,6 +2844,7 @@ class HayvanTakipSistemi:
     def bekleyen_senkron_gonder(self, sessiz=False, ui_guncelle=True):
         if not getattr(self, "api_modu", False):
             return True
+        self._son_senkron_atlanan_cakisma = 0
         if not self.bekleyen_senkron_var():
             if not sessiz:
                 messagebox.showinfo("Senkron", "Bekleyen degisiklik yok.", parent=getattr(self, "root", None))
@@ -2642,6 +2856,7 @@ class HayvanTakipSistemi:
             upserts = bekleyen.get("upserts", {}) or {}
             deletes = bekleyen.get("deletes", {}) or {}
             onceki_idler = set(getattr(self, "_api_son_idler", set()))
+            atlanan_cakisma = 0
 
             for h_id in sorted(deletes.keys()):
                 delete_info = deletes.get(h_id) or {}
@@ -2657,6 +2872,10 @@ class HayvanTakipSistemi:
                 try:
                     sonuc = self.api_istek("DELETE", delete_path, timeout=20)
                 except ApiHatasi as e:
+                    if self.api_stale_update_hatasi_mi(e):
+                        onceki_idler = self.api_hayvan_sunucudan_uzlastir(h_id, onceki_idler)
+                        atlanan_cakisma += 1
+                        continue
                     if e.status != 404:
                         raise
                     sonuc = None
@@ -2671,7 +2890,14 @@ class HayvanTakipSistemi:
                 self._api_base_versions.pop(str(h_id), None)
 
             for h_id, veri in upserts.items():
-                kayit_id, tamamlanmis = self.api_hayvan_kayit_gonder(h_id, veri, onceki_idler)
+                try:
+                    kayit_id, tamamlanmis = self.api_hayvan_kayit_gonder(h_id, veri, onceki_idler)
+                except ApiHatasi as e:
+                    if not self.api_stale_update_hatasi_mi(e):
+                        raise
+                    onceki_idler = self.api_hayvan_sunucudan_uzlastir(h_id, onceki_idler)
+                    atlanan_cakisma += 1
+                    continue
                 if tamamlanmis is None:
                     onceki_idler.discard(str(h_id))
                     self.hayvanlar.pop(str(h_id), None)
@@ -2689,9 +2915,13 @@ class HayvanTakipSistemi:
             self.api_cevrimdisi = False
             self.api_offline_oturum = False
             self._api_son_hata = None
+            self._son_senkron_atlanan_cakisma = atlanan_cakisma
             self.api_durum_guncelle()
             if not sessiz:
-                messagebox.showinfo("Senkron", "Bekleyen degisiklikler API'ye gonderildi.", parent=getattr(self, "root", None))
+                mesaj = "Bekleyen degisiklikler API'ye gonderildi."
+                if atlanan_cakisma:
+                    mesaj += f"\n\n{atlanan_cakisma} eski offline degisiklik merkezde daha yeni kayit oldugu icin atlandi."
+                messagebox.showinfo("Senkron", mesaj, parent=getattr(self, "root", None))
             return True
         except ApiHatasi as e:
             self.api_cevrimdisi = True
@@ -2708,47 +2938,95 @@ class HayvanTakipSistemi:
     def bekleyen_senkron_gonder_ui(self):
         return self.api_senkronize_et_ui()
 
-    def api_baglantiyi_yenile_sessiz(self):
+    def api_yazma_kuyruga_alinmali_mi(self):
+        return bool(
+            getattr(self, "api_modu", False)
+            and (
+                getattr(self, "_api_senkronizasyon_devam_ediyor", False)
+                or getattr(self, "_otomatik_baglanti_kontrol_ediliyor", False)
+            )
+        )
+
+    def api_baglantiyi_yenile_sessiz(self, ui_guncelle=True):
         if not getattr(self, "api_modu", False):
             return False
         if not getattr(self, "api_token", None) or getattr(self, "api_offline_oturum", False):
             self.api_online_oturum_ac()
-        if self.bekleyen_senkron_var() and not self.bekleyen_senkron_gonder(sessiz=True):
-            hata = getattr(self, "_api_son_hata", None) or "Bekleyen offline degisiklikler senkronlanamadi."
-            raise ApiHatasi(hata)
-        self.hayvanlar = self.api_hayvanlari_yukle()
+        hayvanlar = None
+        for _ in range(3):
+            if self.bekleyen_senkron_var() and not self.bekleyen_senkron_gonder(sessiz=True):
+                hata = getattr(self, "_api_son_hata", None) or "Bekleyen offline degisiklikler senkronlanamadi."
+                raise ApiHatasi(hata)
+            hayvanlar = self.api_hayvanlari_yukle()
+            if not self.bekleyen_senkron_var():
+                break
+        if self.bekleyen_senkron_var():
+            if not self.bekleyen_senkron_gonder(sessiz=True):
+                hata = getattr(self, "_api_son_hata", None) or "Bekleyen offline degisiklikler senkronlanamadi."
+                raise ApiHatasi(hata)
+            hayvanlar = self.api_hayvanlari_yukle()
+        self.hayvanlar = hayvanlar or {}
         self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
-        if hasattr(self, "notebook"):
-            if hasattr(self, "notebook"):
-                self.ekranlari_guncelle()
+        if ui_guncelle and hasattr(self, "notebook"):
+            self.ekranlari_guncelle()
             self.header_ozet_guncelle()
+        self.api_baglanti_durumu_ata("online", ui_guncelle=ui_guncelle)
         self.api_durum_guncelle()
         return True
 
     def api_senkronize_et_ui(self):
         if not getattr(self, "api_modu", False):
             return messagebox.showinfo("Senkronizasyon", "Uygulama yerel veri modunda.", parent=getattr(self, "root", None))
-        bekleyen_once = self.bekleyen_senkron_sayisi()
-        try:
-            if self.api_baglantiyi_yenile_sessiz():
-                if bekleyen_once:
-                    mesaj = (
-                        "API baglantisi yenilendi.\n"
-                        f"{bekleyen_once} bekleyen degisiklik API'ye gonderildi.\n"
-                        "Veriler guncellendi."
-                    )
-                else:
-                    mesaj = "API baglantisi yenilendi ve veriler guncellendi."
-                messagebox.showinfo("Senkronizasyon", mesaj, parent=getattr(self, "root", None))
-        except ApiHatasi as e:
-            self.api_cevrimdisi = True
-            self._api_son_hata = str(e)
-            self.api_durum_guncelle()
-            messagebox.showwarning(
+        if getattr(self, "_api_senkronizasyon_devam_ediyor", False):
+            return messagebox.showinfo(
                 "Senkronizasyon",
-                f"API baglantisi kurulamadi:\n{e}\n\nBekleyen degisiklikler yerel kuyrukta tutuluyor.",
+                "Bağlantı kuruluyor ve senkronizasyon devam ediyor.",
                 parent=getattr(self, "root", None),
             )
+        bekleyen_once = self.bekleyen_senkron_sayisi()
+        self._api_senkronizasyon_devam_ediyor = True
+        self.api_baglanti_durumu_ata("checking")
+
+        def worker():
+            hata = None
+            try:
+                with self._api_ag_lock:
+                    self.api_uyandir(maksimum_bekleme=95)
+                    self.api_baglantiyi_yenile_sessiz(ui_guncelle=False)
+            except Exception as e:
+                hata = e
+                self.hata_gunlugu_yaz("Manuel senkronizasyon hatası", e)
+
+            def tamamla():
+                self._api_senkronizasyon_devam_ediyor = False
+                if hata is not None:
+                    self.api_baglanti_durumu_ata("offline", hata)
+                    messagebox.showwarning(
+                        "Senkronizasyon",
+                        f"API bağlantısı kurulamadı:\n{hata}\n\nBekleyen değişiklikler yerel kuyrukta tutuluyor.",
+                        parent=getattr(self, "root", None),
+                    )
+                    return
+                if hasattr(self, "notebook"):
+                    self.ekranlari_guncelle()
+                    self.header_ozet_guncelle()
+                self.api_baglanti_durumu_ata("online")
+                if bekleyen_once:
+                    mesaj = (
+                        "API bağlantısı yenilendi.\n"
+                        f"{bekleyen_once} bekleyen değişiklik API'ye gönderildi.\n"
+                        "Veriler güncellendi."
+                    )
+                else:
+                    mesaj = "API bağlantısı yenilendi ve veriler güncellendi."
+                atlanan = getattr(self, "_son_senkron_atlanan_cakisma", 0)
+                if atlanan:
+                    mesaj += f"\n\n{atlanan} eski offline değişiklik merkezde daha yeni kayıt olduğu için atlandı."
+                messagebox.showinfo("Senkronizasyon", mesaj, parent=getattr(self, "root", None))
+
+            self.ui_threadinde_calistir(tamamla)
+
+        threading.Thread(target=worker, daemon=True, name="alp-manuel-senkron").start()
 
     def api_baglantiyi_yenile_ui(self):
         return self.api_senkronize_et_ui()
@@ -2758,9 +3036,8 @@ class HayvanTakipSistemi:
         self.api_kullanici = None
         self.admin_aktif_ciftlik_id = None
         self.admin_aktif_ciftlik_ad = None
-        self.api_cevrimdisi = False
         self.api_offline_oturum = False
-        self._api_son_hata = None
+        self.api_baglanti_durumu_ata("checking", ui_guncelle=False)
 
     def aktif_zamanlayicilari_durdur(self):
         self.uyari_thread_running = False
@@ -4655,7 +4932,7 @@ class HayvanTakipSistemi:
         self._api_son_hata = None
         return hayvanlar_dict
 
-    def api_hayvan_detayini_yukle(self, h_id):
+    def api_hayvan_detayini_yukle(self, h_id, hata_yukselt=False):
         if not getattr(self, "api_modu", False) or self.offline_modda_mi():
             return str(h_id)
         h_id = str(h_id)
@@ -4679,7 +4956,33 @@ class HayvanTakipSistemi:
             return kayit_id
         except ApiHatasi as e:
             self._api_son_hata = str(e)
+            if hata_yukselt:
+                raise
             return h_id
+
+    def api_hayvan_detayini_arka_planda_yukle(self, h_id, tamam_callback):
+        if not getattr(self, "api_modu", False):
+            return
+        h_id = str(h_id)
+
+        def worker():
+            yeni_id = h_id
+            hata = None
+            try:
+                with self._api_ag_lock:
+                    self.api_uyandir(maksimum_bekleme=95)
+                    yeni_id = self.api_hayvan_detayini_yukle(h_id, hata_yukselt=True)
+            except Exception as e:
+                hata = e
+                self.hata_gunlugu_yaz(f"Hayvan detayı yenileme hatası: {h_id}", e)
+
+            self.ui_threadinde_calistir(lambda: tamam_callback(yeni_id, hata))
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name=f"alp-hayvan-detay-{h_id[:12]}",
+        ).start()
 
     def api_hayvanlari_kaydet(self):
         if self.offline_modda_mi():
@@ -4764,6 +5067,8 @@ class HayvanTakipSistemi:
         if not getattr(self, "api_modu", False):
             self.hayvan_listesini_guncelle()
             return True
+        if not sessiz:
+            return self.api_senkronize_et_ui()
         try:
             if self.bekleyen_senkron_var() and not self.bekleyen_senkron_gonder(sessiz=sessiz):
                 return False
@@ -5106,7 +5411,7 @@ class HayvanTakipSistemi:
 
     def veri_kaydet(self, kupe_no=None, hata_mesaji_goster=True, ui_guncelle=True):
         if getattr(self, "api_modu", False):
-            if self.offline_modda_mi():
+            if self.offline_modda_mi() or self.api_yazma_kuyruga_alinmali_mi():
                 self.bekleyen_senkron_snapshot_guncelle(kupe_no)
                 if ui_guncelle:
                     self.api_durum_guncelle()
@@ -5929,6 +6234,9 @@ class HayvanTakipSistemi:
             self.dashboard_guncelle()
 
     def api_durum_guncelle(self):
+        if threading.current_thread() is not threading.main_thread():
+            self.ui_threadinde_calistir(self.api_durum_guncelle)
+            return
         if not hasattr(self, 'api_status_label'):
             return
         try:
@@ -5944,7 +6252,16 @@ class HayvanTakipSistemi:
         if getattr(self, "api_modu", False):
             bekleyen = self.bekleyen_senkron_sayisi()
             bekleyen_metin = f" | {bekleyen} bekliyor" if bekleyen else ""
-            if getattr(self, "api_cevrimdisi", False):
+            baglanti_durumu = getattr(self, "api_baglanti_durumu", None)
+            if getattr(self, "api_cevrimdisi", False) and baglanti_durumu == "online":
+                baglanti_durumu = "offline"
+            if baglanti_durumu == "checking":
+                metin = "Bağlantı kontrol ediliyor"
+                renk = self.renkler["uyari"]
+            elif baglanti_durumu == "waking":
+                metin = "Render sunucusu uyanıyor"
+                renk = self.renkler["uyari"]
+            elif getattr(self, "api_cevrimdisi", False):
                 metin = "Offline"
                 renk = self.renkler["uyari"]
             else:
@@ -6067,14 +6384,7 @@ class HayvanTakipSistemi:
         self.raporlari_guncelle()
 
     def otomatik_baglanti_kontrol_gerekli(self):
-        return bool(
-            getattr(self, "api_modu", False)
-            and (
-                getattr(self, "api_cevrimdisi", False)
-                or getattr(self, "api_offline_oturum", False)
-                or self.bekleyen_senkron_var()
-            )
-        )
+        return bool(getattr(self, "api_modu", False))
 
     def otomatik_baglanti_kontrol_baslat(self, ilk_gecikme_ms=None):
         if not getattr(self, "api_modu", False) or getattr(self, "_kapanis_istegi", False):
@@ -6099,24 +6409,44 @@ class HayvanTakipSistemi:
             self.otomatik_baglanti_kontrol_baslat(getattr(self, "otomatik_baglanti_araligi_ms", 60000))
             return
 
-        if self.otomatik_baglanti_kontrol_gerekli():
-            self._otomatik_baglanti_kontrol_ediliyor = True
-            onceki_bekleyen = self.bekleyen_senkron_sayisi()
-            onceki_offline = self.offline_modda_mi()
-            try:
-                self.api_istek("GET", "/api/health", timeout=10, auth=False)
-                if self.api_baglantiyi_yenile_sessiz():
-                    self.api_durum_guncelle()
-                    if onceki_offline or onceki_bekleyen:
-                        self.otomatik_baglanti_bildir(onceki_bekleyen)
-            except ApiHatasi as e:
-                self.api_cevrimdisi = True
-                self._api_son_hata = str(e)
-                self.api_durum_guncelle()
-            finally:
-                self._otomatik_baglanti_kontrol_ediliyor = False
+        if not self.otomatik_baglanti_kontrol_gerekli():
+            return
 
-        self.otomatik_baglanti_kontrol_baslat(getattr(self, "otomatik_baglanti_araligi_ms", 60000))
+        self._otomatik_baglanti_kontrol_ediliyor = True
+        onceki_bekleyen = self.bekleyen_senkron_sayisi()
+        onceki_offline = self.offline_modda_mi()
+
+        def worker():
+            hata = None
+            senkron_yapildi = False
+            try:
+                with self._api_ag_lock:
+                    self.api_uyandir(maksimum_bekleme=95)
+                    if onceki_offline or onceki_bekleyen or self.bekleyen_senkron_var():
+                        self.api_baglantiyi_yenile_sessiz(ui_guncelle=False)
+                        senkron_yapildi = True
+            except Exception as e:
+                hata = e
+                self.hata_gunlugu_yaz("Otomatik bağlantı kontrolü hatası", e)
+
+            def tamamla():
+                self._otomatik_baglanti_kontrol_ediliyor = False
+                if hata is None:
+                    if senkron_yapildi:
+                        if hasattr(self, "notebook"):
+                            self.ekranlari_guncelle()
+                            self.header_ozet_guncelle()
+                        self.otomatik_baglanti_bildir(onceki_bekleyen)
+                    self.api_baglanti_durumu_ata("online")
+                    sonraki = getattr(self, "otomatik_baglanti_araligi_ms", 8 * 60 * 1000)
+                else:
+                    self.api_baglanti_durumu_ata("offline", hata)
+                    sonraki = getattr(self, "otomatik_baglanti_hata_araligi_ms", 60 * 1000)
+                self.otomatik_baglanti_kontrol_baslat(sonraki)
+
+            self.ui_threadinde_calistir(tamamla)
+
+        threading.Thread(target=worker, daemon=True, name="alp-api-keepalive").start()
 
     def otomatik_baglanti_bildir(self, onceki_bekleyen=0):
         if not hasattr(self, "api_status_label"):
@@ -8851,7 +9181,7 @@ class HayvanTakipSistemi:
         api_modu = getattr(self, "api_modu", False)
         offline_senkron_gerekiyor = False
         if api_modu:
-            if self.offline_modda_mi():
+            if self.offline_modda_mi() or self.api_yazma_kuyruga_alinmali_mi():
                 self.bekleyen_senkron_delete(kupe_no)
                 offline_senkron_gerekiyor = True
             else:
@@ -9633,16 +9963,13 @@ class HayvanTakipSistemi:
         if hayvan_id not in self.hayvanlar:
             return
         mevcut = self.hayvanlar.get(hayvan_id, {})
-        if (
+        foto_detayi_yenilenecek = bool(
             getattr(self, "api_modu", False)
             and mevcut.get("foto_paths")
             and not mevcut.get("foto_urls")
             and not mevcut.get("foto_datas")
             and not mevcut.get("foto_data")
-        ):
-            hayvan_id = self.api_hayvan_detayini_yukle(hayvan_id)
-            if hayvan_id not in self.hayvanlar:
-                return
+        )
         hayvan = self.hayvanlar[hayvan_id]
         cins = hayvan.get("cins", "")
         is_male = cins in ["Erkek Buzağı", "Dana"]
@@ -9772,14 +10099,21 @@ class HayvanTakipSistemi:
             pill.pack(side="left", padx=(0, 8))
             tk.Label(pill, text=baslik.upper(), bg=self.renkler["kart_ikincil"],
                      fg=self.renkler["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
-            tk.Label(pill, text=str(deger), bg=self.renkler["kart_ikincil"],
-                     fg=renk, font=("Segoe UI", 12, "bold")).pack(anchor="w")
+            deger_label = tk.Label(
+                pill,
+                text=str(deger),
+                bg=self.renkler["kart_ikincil"],
+                fg=renk,
+                font=("Segoe UI", 12, "bold"),
+            )
+            deger_label.pack(anchor="w")
+            return deger_label
 
         header_rozet("Yaş", yas_metin)
         header_rozet("Durum", durum,
                      self.renkler["button_success_bg"] if durum not in {"Arşivli", "Ölü", "Kesildi", "Satıldı"}
                      else self.renkler["uyari"])
-        header_rozet("Fotoğraf", f"{len(fotograflar)}/3")
+        header_foto_rozet = header_rozet("Fotoğraf", f"{len(fotograflar)}/3")
 
 
         sayfa = self.kaydirilabilir_sayfa(detay_window, padx=22, pady=18)
@@ -9796,6 +10130,7 @@ class HayvanTakipSistemi:
         foto_grid.pack(fill="both", expand=True)
         for col in range(3):
             foto_grid.grid_columnconfigure(col, weight=1)
+        foto_canvaslari = []
         for idx in range(3):
             slot = tk.Frame(
                 foto_grid,
@@ -9816,6 +10151,7 @@ class HayvanTakipSistemi:
                 bd=0,
             )
             foto_canvas.pack(fill="both", expand=True)
+            foto_canvaslari.append(foto_canvas)
             if idx < len(fotograflar):
                 self.foto_slot_canvas_ciz(
                     foto_canvas,
@@ -9837,13 +10173,14 @@ class HayvanTakipSistemi:
 
         foto_alt = tk.Frame(foto_body, bg=self.renkler["kart_arkaplan"])
         foto_alt.pack(fill="x")
-        tk.Label(
+        foto_sayisi_label = tk.Label(
             foto_alt,
             text=f"{len(fotograflar)}/3 fotoğraf",
             bg=self.renkler["kart_arkaplan"],
             fg=self.renkler["muted"],
             font=("Segoe UI", 9, "bold"),
-        ).pack(side="left")
+        )
+        foto_sayisi_label.pack(side="left")
         if len(fotograflar) < 3:
             self.modern_buton(foto_alt, "Fotoğraf Ekle", lambda: self.hayvan_fotograf_sec(hayvan_id, detay_window), purpose='primary', small=True).pack(side="right")
 
@@ -10080,6 +10417,40 @@ class HayvanTakipSistemi:
 
         alt.bind("<Configure>", profil_alt_yerlesim)
         alt.after_idle(profil_alt_yerlesim)
+
+        if foto_detayi_yenilenecek:
+            def foto_detayi_tamamlandi(yeni_id, hata):
+                if hata is not None:
+                    return
+                try:
+                    if not detay_window.winfo_exists():
+                        return
+                    guncel_hayvan = self.hayvanlar.get(yeni_id) or self.hayvanlar.get(hayvan_id) or {}
+                    yeni_fotograflar = list(guncel_hayvan.get("foto_urls") or [])
+                    if not yeni_fotograflar:
+                        yeni_fotograflar = self.hayvan_fotograflari(guncel_hayvan)
+                    yeni_fotograflar = yeni_fotograflar[:3]
+                    header_foto_rozet.config(text=f"{len(yeni_fotograflar)}/3")
+                    foto_sayisi_label.config(text=f"{len(yeni_fotograflar)}/3 fotoğraf")
+                    for idx, canvas in enumerate(foto_canvaslari):
+                        foto = yeni_fotograflar[idx] if idx < len(yeni_fotograflar) else None
+                        self.foto_slot_canvas_ciz(
+                            canvas,
+                            foto,
+                            idx + 1,
+                            max_size=(150, 92),
+                            open_callback=(
+                                lambda f=foto, i=idx: self.fotograf_buyut_penceresi(
+                                    f,
+                                    f"{gorunen_kupe} - {i + 1}. Fotoğraf",
+                                    detay_window,
+                                )
+                            ) if foto else None,
+                        )
+                except tk.TclError:
+                    pass
+
+            self.api_hayvan_detayini_arka_planda_yukle(hayvan_id, foto_detayi_tamamlandi)
 
         detay_window.lift(self.root)
         detay_window.focus_force()
@@ -10440,7 +10811,14 @@ class HayvanTakipSistemi:
         self._kapanis_istegi = True
         self.uyari_thread_running = False
         self._cancel_tracked_afters()
-        for after_attr in ("_uyari_after_id", "_saat_after_id", "_baslangic_after_id", "_puls_after_id", "_otomatik_baglanti_after_id"):
+        for after_attr in (
+            "_uyari_after_id",
+            "_saat_after_id",
+            "_baslangic_after_id",
+            "_puls_after_id",
+            "_otomatik_baglanti_after_id",
+            "_ui_callback_after_id",
+        ):
             after_id = getattr(self, after_attr, None)
             if after_id:
                 try:

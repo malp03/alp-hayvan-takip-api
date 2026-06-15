@@ -454,6 +454,25 @@ Desktop profil ile ayni sekmeleri icermeli:
 - Asi/prosedur kayitlarinda sonraki tarih uygulama tarihinden once olamaz. Kontrol API ve mobil ekleme/duzenleme ekranlarinda uygulanir; masaustu mevcut kontrolu korur.
 - Desktop `APP_VERSION` `1.9.34` yapildi; release tag'i `v1.9.34` olmalidir. Mobil paket surumu `1.0.2+3` yapildi.
 
+## 15 Haziran 2026 - Desktop v1.9.37 Render Uyku Dayanikliligi
+
+- Render Free cold start durumu masaustunde ayri `checking`, `waking`, `online` ve `offline` durumlariyla izlenir.
+- Manuel senkron, otomatik health kontrolu ve profil fotograf detayi ag beklerken Tk ana thread'ini bloklamaz.
+- Masaustu acikken API `/api/health` adresine 8 dakikada bir istek atarak 15 dakikalik bosta uyumayi onler.
+- GitHub `Render Keepalive`, `ALP_API_URL` secret'i yoksa canli API adresine fallback yapar ve basarisiz health sonucunu gizlemez.
+- Beklenmeyen Tk ve worker hatalari AppData altindaki `logs/masaustu.log` dosyasina kaydedilir.
+- Desktop `APP_VERSION` `1.9.37` yapildi; release tag'i `v1.9.37` olmalidir.
+
+## 15 Haziran 2026 - Desktop v1.9.38 Oturum ve Senkron Cakisma Duzeltmeleri
+
+- API 401 donerse masaustu tokeni temizleyip kayitli cihaz/yerel kimlik bilgisiyle oturumu bir kez yeniler ve basarisiz istegi tekrar dener.
+- `timed out` ve benzeri cold-start timeout mesajlari Render uyandirma retry dongusune dahil edildi.
+- Hayvan listesi `Yenile` butonu artik manuel senkron arka plan yolunu kullanir; ana UI thread'inde tam API yenilemesi yapmaz.
+- Senkron/health kontrolu surerken yapilan hayvan degisiklikleri dogrudan API'ye gitmez, offline kuyruga alinir ve ayni senkron turunda tekrar kontrol edilir.
+- `409 stale_update` alan eski offline kayitlar tum senkronu durdurmaz; ilgili kayit merkezden guncel haliyle uzlastirilir, kalan kuyruk devam eder.
+- Dogrulama: `python tools\run_smoke_tests.py` tum masaustu/API smoke testleriyle basarili.
+- Desktop `APP_VERSION` `1.9.38` yapildi; release tag'i `v1.9.38` olmalidir.
+
 ## Hata Ararken Ilk Bakilacak Yerler
 
 - Login donuyorsa: `api_giris_penceresi`, `api_giris_yap`, `taninan_bilgisayar_giris_dene`, `tools/smoke_login_responsive.py`
@@ -486,3 +505,9 @@ Desktop profil ile ayni sekmeleri icermeli:
 - Mobil profil yerel ve online fotoğrafları birlikte gösterir; fotoğraf sayısı doğru hesaplanır. Profilde laktasyon sayısı, son doğum, aktif ve toplam sağım günü özetleri eklendi.
 - İşlem geçmişi gerçek tarih sırası ile döner. Health endpoint gerçek veritabanı sorgusu ve auth secret yapılandırmasını kontrol eder.
 - Doğrulama: Python compile, API smoke, tüm desktop UI/login/offline/export/update smoke testleri, `flutter analyze`, 13 Flutter testi ve release APK build başarılı.
+
+# 15 Haziran 2026 - Dağıtım sürümleri
+
+- Masaüstü sürümü `1.9.36` olarak yükseltildi; GitHub release etiketi `v1.9.36` olmalıdır.
+- Mobil paket sürümü `1.0.3+4` olarak yükseltildi.
+- Güncel masaüstü EXE/Setup/ZIP ve Android release APK bu sürümlerle yeniden üretildi.
