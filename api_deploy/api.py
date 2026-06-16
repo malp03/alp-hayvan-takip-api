@@ -1590,6 +1590,42 @@ def tohumlama_sonucunu_isle(veri: Dict[str, Any]) -> None:
         veri["aktif_tohumlama_id"] = None
 
 
+def tohumlama_doguma_bagli_mi(veri: Dict[str, Any], kayit: Dict[str, Any]) -> bool:
+    if kayit.get("gebe_mi") is not True:
+        return False
+    tohumlama_tarihi = parse_tarih_sessiz(kayit.get("tarih"))
+    if not tohumlama_tarihi:
+        return False
+    for dogum in veri.get("dogumlar") or []:
+        dogum_tarihi = parse_tarih_sessiz(dogum.get("tarih"))
+        if dogum_tarihi and dogum_tarihi.date() >= tohumlama_tarihi.date():
+            return True
+    return False
+
+
+def doguma_bagli_tohumlama_silme_hatasi() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Bu pozitif tohumlama doğum/laktasyon geçmişine bağlı olduğu için silinemez.",
+    )
+
+
+def doguma_bagli_tohumlama_duzenleme_kontrolu(
+    veri: Dict[str, Any],
+    eski_kayit: Dict[str, Any],
+    yeni_kayit: Dict[str, Any],
+) -> None:
+    if not tohumlama_doguma_bagli_mi(veri, eski_kayit):
+        return
+    tarih_degisti = metin(eski_kayit.get("tarih")) != metin(yeni_kayit.get("tarih"))
+    sonuc_degisti = yeni_kayit.get("gebe_mi") is not True
+    if tarih_degisti or sonuc_degisti:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Bu pozitif tohumlama doğum/laktasyon geçmişine bağlı olduğu için sonucu veya tarihi değiştirilemez.",
+        )
+
+
 def eski_tohumlama_pozitif_olamaz(veri: Dict[str, Any], kayit: Dict[str, Any]) -> None:
     if kayit.get("gebe_mi") is not True:
         return
@@ -2669,6 +2705,7 @@ def update_tohumlama(
     kayit = dict(mevcut_kayit)
     kayit.update(model_verisi(tohumlama, exclude_unset=True))
     kayit = normalize_tohumlama(kayit)
+    doguma_bagli_tohumlama_duzenleme_kontrolu(veri, mevcut_kayit, kayit)
     tohumlama_tarih_kurallarini_kontrol(veri, kayit)
     for index, mevcut in enumerate(veri["tohumlamalar"]):
         if mevcut.get("id") == kayit.get("id"):
@@ -2695,6 +2732,9 @@ def delete_tohumlama(
     db_hayvan = hayvan_bul(db, hayvan_ref, kullanici)
     alt_kayit_cakisma_kontrol(db_hayvan, beklenen_son_guncelleme)
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
+    kayit = nested_kayit_bul(veri.setdefault("tohumlamalar", []), tohumlama_ref, "Tohumlama")
+    if tohumlama_doguma_bagli_mi(veri, kayit):
+        raise doguma_bagli_tohumlama_silme_hatasi()
     silinen = nested_kayit_sil(veri.setdefault("tohumlamalar", []), tohumlama_ref, "Tohumlama")
     tohumlama_sonucunu_isle(veri)
     audit_kaydi(
