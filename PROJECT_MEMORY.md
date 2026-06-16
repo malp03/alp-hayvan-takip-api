@@ -470,8 +470,16 @@ Desktop profil ile ayni sekmeleri icermeli:
 - Hayvan listesi `Yenile` butonu artik manuel senkron arka plan yolunu kullanir; ana UI thread'inde tam API yenilemesi yapmaz.
 - Senkron/health kontrolu surerken yapilan hayvan degisiklikleri dogrudan API'ye gitmez, offline kuyruga alinir ve ayni senkron turunda tekrar kontrol edilir.
 - `409 stale_update` alan eski offline kayitlar tum senkronu durdurmaz; ilgili kayit merkezden guncel haliyle uzlastirilir, kalan kuyruk devam eder.
+- Tkinter'in pencere/zamanlayici temizligi sirasinda uretebildigi `deletecommand` kaynakli zararsiz `NoneType.remove` hatasi artik kullaniciya kritik hata penceresi olarak gosterilmez.
 - Dogrulama: `python tools\run_smoke_tests.py` tum masaustu/API smoke testleriyle basarili.
 - Desktop `APP_VERSION` `1.9.38` yapildi; release tag'i `v1.9.38` olmalidir.
+
+## 16 Haziran 2026 - Desktop v1.9.39 Geri Al Senkron Kuyrugu Duzeltmesi
+
+- Masaustu `Geri Al` akisi, geri alinan islem yeni kayit silmeyi gerektirdiginde ve API gecici olarak 503/uyaniyor gibi hata verdiginde silmeyi senkron kuyruguna alip islemi basarisiz sayiyordu. Kuyruk diske yazilabildiyse geri alma artik tamamlanmis kabul edilir; boylece hayvan yerelden kalkar, silme online olunca API'ye gonderilir ve undo kaydi tekrar listede kalmaz.
+- Tohumlama gibi mevcut hayvan kaydini eski snapshot'a donduren geri alma islemlerinde eski snapshot'in `son_guncelleme` degeri API tarafindan `stale_update` olarak reddediliyordu. Geri yuklenen kayda artik geri alma aninin `son_guncelleme` degeri basilir; boylece islem merkezde yeni bir degisiklik olarak kabul edilir. Gercek stale/base cakismasi varsa degisiklik offline kuyruğa alinmaz, sunucudaki guncel kayit cekilir ve kullaniciya geri almanin uygulanmadigi soylenir.
+- `tools/smoke_render_resilience.py` icine yeni kayit silme, tohumlama geri alma ve gercek stale_update uzlastirma regresyon testleri eklendi. `python tools\run_smoke_tests.py` gecti.
+- Desktop `APP_VERSION` `1.9.39` yapildi; release tag'i `v1.9.39` olmalidir.
 
 ## Hata Ararken Ilk Bakilacak Yerler
 
