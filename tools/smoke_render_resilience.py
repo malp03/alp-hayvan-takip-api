@@ -1,3 +1,4 @@
+import copy
 import queue
 import sys
 import threading
@@ -255,11 +256,178 @@ def stale_update_kuyruk_testi():
     assert app._api_base_versions["A"] == "15/06/2026 15:57:30"
 
 
+def geri_al_gecici_api_hatasi_kuyruga_alir_testi():
+    app, _ = app_hazirla()
+    app.hayvanlar = {
+        "new": {
+            "id": "new",
+            "resmi_kupe_no": "NEW",
+            "cins": "Duve",
+            "son_guncelleme": "01/06/2026 10:00:00",
+        }
+    }
+    app.geri_al_yigini = [
+        {
+            "zaman": "16/06/2026 10:00:00",
+            "aciklama": "Hayvan eklendi: NEW",
+            "geri_alinabilir": True,
+            "hayvanlar": {},
+        }
+    ]
+    app.bekleyen_senkron = {"upserts": {}, "deletes": {}, "updated_at": None}
+    app.islem_gecmisi = []
+    app._api_son_idler = {"new"}
+    app._api_base_versions = {"new": "01/06/2026 10:00:00"}
+    app.json_dosyasi_kaydet = lambda *args, **kwargs: True
+    app.ekranlari_guncelle = lambda: None
+    app.header_ozet_guncelle = lambda: None
+    app.api_durum_guncelle = lambda: None
+    appmod.messagebox.askyesno = lambda *args, **kwargs: True
+    appmod.messagebox.showinfo = lambda *args, **kwargs: None
+    appmod.messagebox.showwarning = lambda *args, **kwargs: None
+
+    def api_istek(method, path, payload=None, timeout=12, auth=True, oturum_yenile=True):
+        assert method == "DELETE", f"Beklenmeyen istek: {method} {path}"
+        raise appmod.ApiHatasi("API 503: Render servisi uyaniyor.", status=503)
+
+    app.api_istek = api_istek
+    app.geri_al_kaydi_uygula(0)
+    assert "new" not in app.hayvanlar
+    assert "new" in app.bekleyen_senkron.get("deletes", {})
+    assert app.api_cevrimdisi is True
+    assert app.geri_al_yigini == []
+
+
+def geri_al_tohumlama_yeni_surumle_gonderir_testi():
+    app, _ = app_hazirla()
+    onceki = {
+        "A": {
+            "id": "A",
+            "resmi_kupe_no": "A",
+            "cins": "Sut inegi",
+            "tohumlamalar": [],
+            "dogumlar": [],
+            "asi_prosedurler": [],
+            "son_guncelleme": "16/06/2026 09:50:00",
+        }
+    }
+    app.hayvanlar = {
+        "A": {
+            **copy.deepcopy(onceki["A"]),
+            "tohumlamalar": [{"id": "t1", "tarih": "16/06/2026", "sekil": "Suni"}],
+            "son_guncelleme": "16/06/2026 09:57:40",
+        }
+    }
+    app.geri_al_yigini = [
+        {
+            "zaman": "16/06/2026 09:57:41",
+            "aciklama": "Tohumlama kaydi: A",
+            "geri_alinabilir": True,
+            "hayvanlar": onceki,
+        }
+    ]
+    app.bekleyen_senkron = {"upserts": {}, "deletes": {}, "updated_at": None}
+    app.islem_gecmisi = []
+    app._api_son_idler = {"A"}
+    app._api_base_versions = {"A": "16/06/2026 09:57:40"}
+    app.admin_mi = lambda: False
+    app.json_dosyasi_kaydet = lambda *args, **kwargs: True
+    app.ekranlari_guncelle = lambda: None
+    app.header_ozet_guncelle = lambda: None
+    app.api_durum_guncelle = lambda: None
+    appmod.messagebox.askyesno = lambda *args, **kwargs: True
+    appmod.messagebox.showinfo = lambda *args, **kwargs: None
+    appmod.messagebox.showwarning = lambda *args, **kwargs: None
+
+    def api_istek(method, path, payload=None, timeout=12, auth=True, oturum_yenile=True):
+        assert method == "PATCH", f"Beklenmeyen istek: {method} {path}"
+        assert payload["tohumlamalar"] == []
+        assert payload["son_guncelleme"] != "16/06/2026 09:50:00"
+        return {**payload, "id": "A"}
+
+    app.api_istek = api_istek
+    app.geri_al_kaydi_uygula(0)
+    assert app.hayvanlar["A"]["tohumlamalar"] == []
+    assert app.geri_al_yigini == []
+    assert not app.bekleyen_senkron_var()
+
+
+def geri_al_stale_update_kuyruga_almaz_testi():
+    app, _ = app_hazirla()
+    onceki = {
+        "A": {
+            "id": "A",
+            "resmi_kupe_no": "A",
+            "cins": "Sut inegi",
+            "tohumlamalar": [],
+            "dogumlar": [],
+            "asi_prosedurler": [],
+            "son_guncelleme": "16/06/2026 09:50:00",
+        }
+    }
+    app.hayvanlar = {
+        "A": {
+            **copy.deepcopy(onceki["A"]),
+            "tohumlamalar": [{"id": "t1", "tarih": "16/06/2026", "sekil": "Suni"}],
+            "son_guncelleme": "16/06/2026 09:57:40",
+        }
+    }
+    app.geri_al_yigini = [
+        {
+            "zaman": "16/06/2026 09:57:41",
+            "aciklama": "Tohumlama kaydi: A",
+            "geri_alinabilir": True,
+            "hayvanlar": onceki,
+        }
+    ]
+    app.bekleyen_senkron = {"upserts": {}, "deletes": {}, "updated_at": None}
+    app.islem_gecmisi = []
+    app._api_son_idler = {"A"}
+    app._api_base_versions = {"A": "16/06/2026 09:40:00"}
+    app.admin_mi = lambda: False
+    app.json_dosyasi_kaydet = lambda *args, **kwargs: True
+    app.ekranlari_guncelle = lambda: None
+    app.header_ozet_guncelle = lambda: None
+    app.api_durum_guncelle = lambda: None
+    uyari = {"geldi": False}
+    appmod.messagebox.askyesno = lambda *args, **kwargs: True
+    appmod.messagebox.showinfo = lambda *args, **kwargs: None
+    appmod.messagebox.showwarning = lambda *args, **kwargs: uyari.update(geldi=True)
+
+    def api_istek(method, path, payload=None, timeout=12, auth=True, oturum_yenile=True):
+        if method == "PATCH":
+            raise appmod.ApiHatasi(
+                "API 409: {'code': 'stale_update', 'message': 'Merkezdeki kayit daha yeni.'}",
+                status=409,
+            )
+        if method == "GET":
+            return {
+                "id": "A",
+                "resmi_kupe_no": "A",
+                "cins": "Sut inegi",
+                "tohumlamalar": [{"id": "server", "tarih": "17/06/2026", "sekil": "Suni"}],
+                "dogumlar": [],
+                "asi_prosedurler": [],
+                "son_guncelleme": "16/06/2026 10:05:00",
+            }
+        raise AssertionError(f"Beklenmeyen istek: {method} {path}")
+
+    app.api_istek = api_istek
+    app.geri_al_kaydi_uygula(0)
+    assert app.hayvanlar["A"]["tohumlamalar"][0]["id"] == "server"
+    assert not app.bekleyen_senkron_var()
+    assert len(app.geri_al_yigini) == 1
+    assert uyari["geldi"] is True
+
+
 def main():
     render_uyandirma_testi()
     timeout_retry_testi()
     oturum_401_yenileme_testi()
     stale_update_kuyruk_testi()
+    geri_al_gecici_api_hatasi_kuyruga_alir_testi()
+    geri_al_tohumlama_yeni_surumle_gonderir_testi()
+    geri_al_stale_update_kuyruga_almaz_testi()
     manuel_senkron_testi()
     otomatik_keepalive_testi()
     print("Render sleep resilience smoke passed.")
