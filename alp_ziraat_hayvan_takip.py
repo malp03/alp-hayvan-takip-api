@@ -46,7 +46,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.39"
+APP_VERSION = "1.9.41"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -5566,6 +5566,8 @@ class HayvanTakipSistemi:
             if not self.veri_kaydet(kupe_no=kupe_no, hata_mesaji_goster=hata_mesaji_goster, ui_guncelle=False):
                 if getattr(self, "_son_kayit_stale_update", False):
                     self._son_coklu_kayit_stale_update = True
+                    basarili = False
+                    break
                 basarili = False
         if ui_guncelle:
             try:
@@ -5573,6 +5575,21 @@ class HayvanTakipSistemi:
             except Exception:
                 pass
         return basarili
+
+    def kayit_basarisizsa_ui_yenile(self):
+        try:
+            self.ekranlari_guncelle()
+        except Exception:
+            pass
+        try:
+            self.header_ozet_guncelle()
+        except Exception:
+            pass
+        try:
+            self.api_durum_guncelle()
+        except Exception:
+            pass
+        return False
 
     def okunan_uyarilar_yukle(self):
         return self.json_dosyasi_yukle(self.uyari_file, {}, "okunan_uyarilar")
@@ -6377,7 +6394,9 @@ class HayvanTakipSistemi:
                 ):
                     self.hayvanlar = yerel_kopya
                     self._api_son_idler = set()
-                    self.veri_kaydet()
+                    if not self.veri_kaydet():
+                        self.kayit_basarisizsa_ui_yenile()
+                        return
                 else:
                     self.hayvanlar = api_verisi
             else:
@@ -7067,6 +7086,7 @@ class HayvanTakipSistemi:
         self.themed_widgets.append((btn_frame, 'kart'))
 
         self.modern_buton(btn_frame, "TOHUMLAMA KAYDET", self.tohumlama_kaydet, purpose='primary', width=22).pack(side='left', padx=(0, 10))
+        self.modern_buton(btn_frame, "PROFİLDE DÜZENLE/SİL", self.tohumlama_secili_hayvan_profil_ac, purpose='default', width=24).pack(side='left', padx=(0, 10))
         sonuc_notu = tk.Label(
             btn_frame,
             text="Gebelik sonucu hayvan profilindeki 'Tohumlamayı Sonuçla' butonundan işlenir.",
@@ -7946,7 +7966,9 @@ class HayvanTakipSistemi:
             veri['kayit_tarihi'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             hayvan['asi_prosedurler'].append(veri)
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.veri_kaydet(kupe_no=kupe_no)
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
             temizle()
             yenile()
             self.ekranlari_guncelle()
@@ -7964,7 +7986,9 @@ class HayvanTakipSistemi:
             veri['kayit_tarihi'] = eski.get('kayit_tarihi', datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
             hayvan['asi_prosedurler'][idx] = veri
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.veri_kaydet(kupe_no=kupe_no)
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
             yenile()
             self.ekranlari_guncelle()
 
@@ -7977,7 +8001,9 @@ class HayvanTakipSistemi:
             self.islem_kaydi_baslat(f"Aşı/prosedür silindi: {kupe_no}")
             hayvan['asi_prosedurler'].pop(idx)
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.veri_kaydet(kupe_no=kupe_no)
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
             temizle()
             yenile()
             self.ekranlari_guncelle()
@@ -8451,7 +8477,9 @@ class HayvanTakipSistemi:
             self.hayvan_kaydet_arka_planda(yeni_id, gorunen_kupe)
             return
 
-        self.veri_kaydet(yeni_id)
+        if not self.veri_kaydet(yeni_id):
+            self.kayit_basarisizsa_ui_yenile()
+            return
         self.hayvan_kayit_tamamlandi(gorunen_kupe)
 
     def hayvan_kaydet_buton_durum(self, kaydediyor=False):
@@ -8592,12 +8620,23 @@ class HayvanTakipSistemi:
         self.hayvanlar[kupe_no]['tohumlamalar'].append(tohumlama_bilgi)
         self.hayvanlar[kupe_no]['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         if not self.veri_kaydet(kupe_no=kupe_no, ui_guncelle=False):
+            self.kayit_basarisizsa_ui_yenile()
             return
-        messagebox.showinfo("Başarılı", f"Tohumlama kaydı başarılı!\nTohumlama ID: {tohumlama_id}")
         self.tohumlama_hayvan_combo.set('')
         self.suni_entry.delete(0, tk.END)
         self.tohumlama_sekli_combo.set('')
         self.hayvan_listesini_guncelle()
+        self.api_durum_guncelle()
+        self._track_after(self.root, 80, lambda h_id=kupe_no: self.hayvan_detay_penceresi(h_id))
+
+    def tohumlama_secili_hayvan_profil_ac(self):
+        kupe_girdi = self.tohumlama_hayvan_combo.get().strip().upper()
+        if not kupe_girdi:
+            return messagebox.showwarning("Tohumlama", "Önce hayvan seçin.")
+        kupe_no = self.hayvan_referans_coz(kupe_girdi, aktif_olsun=False) or kupe_girdi
+        if kupe_no not in self.hayvanlar:
+            return messagebox.showerror("Tohumlama", f"Hayvan bulunamadı: {kupe_girdi}")
+        self.hayvan_detay_penceresi(kupe_no)
 
     def gebelik_sonucu_kaydet(self, kupe_no, sonuc, parent=None):
         kupe_no = self.hayvan_referans_coz(kupe_no, aktif_olsun=True) or kupe_no
@@ -8642,6 +8681,7 @@ class HayvanTakipSistemi:
 
         hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         if not self.veri_kaydet(kupe_no=kupe_no):
+            self.kayit_basarisizsa_ui_yenile()
             return False
 
         messagebox.showinfo(
@@ -8970,8 +9010,11 @@ class HayvanTakipSistemi:
                         'cins': 'Sağmal İnek', 
                         'durum': 'Sağmal İnek',
                     })
+                anne_hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
                 
-                self.veri_kaydet_coklu(degisen_hayvan_idleri)
+                if not self.veri_kaydet_coklu(degisen_hayvan_idleri):
+                    self.kayit_basarisizsa_ui_yenile()
+                    return
                 kaydedilen_kupeler = [y['kupe'] for y in kaydedilen_yavrular_bilgi]
                 messagebox.showinfo("Başarılı", f"Doğum kaydı başarılı!\nKaydedilen Yavrular: {', '.join(kaydedilen_kupeler)}")
                 dogum_window.destroy()
@@ -8998,9 +9041,12 @@ class HayvanTakipSistemi:
         
         hayvan.update({
             'durum': 'Kuru İnek', 'cins': 'Kuru İnek',
+            'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         })
         
-        self.veri_kaydet(kupe_no=kupe_no)
+        if not self.veri_kaydet(kupe_no=kupe_no):
+            self.kayit_basarisizsa_ui_yenile()
+            return
         messagebox.showinfo("Başarılı", f"{kupe_no} numaralı hayvan kuruya ayrıldı!")
         pencere.destroy()
         self.hayvan_listesini_guncelle()
@@ -9014,7 +9060,9 @@ class HayvanTakipSistemi:
                 'gebelik_tarihi': None, 'aktif_tohumlama_id': None,
                 'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             })
-            self.veri_kaydet(kupe_no=kupe_no)
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
             messagebox.showinfo("Başarılı", f"{kupe_no} numaralı hayvan öldü olarak işaretlendi.")
             pencere.destroy()
             self.hayvan_listesini_guncelle()
@@ -9046,7 +9094,9 @@ class HayvanTakipSistemi:
                 'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             })
 
-            self.veri_kaydet(kupe_no=kupe_no)
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
             messagebox.showinfo("Başarılı", f"{kupe_no} küpeli hayvan kesildi olarak kaydedildi.")
             pencere.destroy()
             self.hayvan_listesini_guncelle()
@@ -9083,7 +9133,9 @@ class HayvanTakipSistemi:
             'aktif_tohumlama_id': None,
             'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         })
-        self.veri_kaydet(kupe_no=kupe_no)
+        if not self.veri_kaydet(kupe_no=kupe_no):
+            self.kayit_basarisizsa_ui_yenile()
+            return
         messagebox.showinfo("Satıldı", f"{gorunen} satıldı olarak kaydedildi.", parent=pencere)
         pencere.destroy()
         self.hayvan_listesini_guncelle()
@@ -9113,7 +9165,9 @@ class HayvanTakipSistemi:
                 'aktif_tohumlama_id': None,
                 'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             })
-            self.veri_kaydet(kupe_no=kupe_no)
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
             messagebox.showinfo("Başarılı", f"{kupe_no} numaralı hayvan arşive alındı.")
             pencere.destroy()
             self.hayvan_listesini_guncelle()
@@ -9145,7 +9199,9 @@ class HayvanTakipSistemi:
         if not hayvan.get('olu') and not hayvan.get('kesildi'):
             hayvan['durum'] = self.durum_hesapla(hayvan.get('cins'), hayvan.get('yas_gun', 0))
             self.hayvan_gebelik_durumunu_senkronla(kupe_no)
-        self.veri_kaydet(kupe_no=kupe_no)
+        if not self.veri_kaydet(kupe_no=kupe_no):
+            self.kayit_basarisizsa_ui_yenile()
+            return
         messagebox.showinfo("Arşivden Çıkar", f"{gorunen} aktif sürü listesine alındı.", parent=pencere or self.root)
         if pencere is not None and pencere is not self.root:
             try:
@@ -9181,7 +9237,9 @@ class HayvanTakipSistemi:
             self.hayvan_fotograflari_ata(hayvan, mevcut_fotograflar + yeni_fotograflar)
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             self.islem_kaydi_baslat(f"Hayvan fotoğrafı eklendi: {gorunen} ({len(yeni_fotograflar)} adet)")
-            self.veri_kaydet(kupe_no=kupe_no)
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
             self.ekranlari_guncelle()
             if pencere is not None and pencere is not self.root:
                 try:
@@ -9209,7 +9267,9 @@ class HayvanTakipSistemi:
         self.hayvan_fotograflari_ata(hayvan, fotograflar)
         hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         self.islem_kaydi_baslat(f"Hayvan fotoğrafı silindi: {gorunen}")
-        self.veri_kaydet(kupe_no=kupe_no)
+        if not self.veri_kaydet(kupe_no=kupe_no):
+            self.kayit_basarisizsa_ui_yenile()
+            return
         self.ekranlari_guncelle()
         if pencere is not None and pencere is not self.root:
             try:
@@ -9259,7 +9319,9 @@ class HayvanTakipSistemi:
             self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
             self.api_durum_guncelle()
         else:
-            self.veri_kaydet(kupe_no=kupe_no)
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
         ek = f"\nAnne doğum geçmişinden {temizlenen_yavru_sayisi} yavru bağlantısı temizlendi." if temizlenen_yavru_sayisi else ""
         messagebox.showinfo("Başarılı", f"{kupe_no} kalıcı olarak silindi.{ek}", parent=pencere)
         pencere.destroy()
@@ -9287,6 +9349,25 @@ class HayvanTakipSistemi:
             hayvan['aktif_tohumlama_id'] = None
             if not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('arsivli') and not hayvan.get('satildi'):
                 hayvan['durum'] = self.durum_hesapla(hayvan.get('cins'), hayvan.get('yas_gun', 0))
+
+    def tohumlama_doguma_bagli_mi(self, hayvan, tohumlama):
+        if not hayvan or not tohumlama or tohumlama.get('gebe_mi') is not True:
+            return False
+        try:
+            tohumlama_dt = datetime.strptime(tohumlama.get('tarih') or "", "%d/%m/%Y")
+        except (ValueError, TypeError):
+            return False
+        for dogum in hayvan.get('dogumlar') or []:
+            dogum_tarihi = dogum.get('tarih')
+            if not dogum_tarihi or dogum_tarihi == "Bilinmiyor":
+                continue
+            try:
+                dogum_dt = datetime.strptime(dogum_tarihi, "%d/%m/%Y")
+            except (ValueError, TypeError):
+                continue
+            if dogum_dt.date() >= tohumlama_dt.date():
+                return True
+        return False
 
     def hayvan_duzenle_penceresi(self, kupe_no, detay_pencere=None):
         if kupe_no not in self.hayvanlar:
@@ -9510,7 +9591,9 @@ class HayvanTakipSistemi:
                 hayvan['aktif_tohumlama_id'] = None
             self.hayvan_gebelik_durumunu_senkronla(kupe_no)
             hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self.veri_kaydet(kupe_no=kupe_no)
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
             self.ekranlari_guncelle()
             messagebox.showinfo("Başarılı", "Genel bilgiler güncellendi.", parent=pencere)
 
@@ -9594,18 +9677,38 @@ class HayvanTakipSistemi:
                 sekil = sekil_combo.get().strip()
                 if sekil == "Suni" and not suni_entry.get().strip():
                     return messagebox.showerror("Hata", "Suni tohumlama ismi zorunludur.", parent=dialog)
+                sonuc = sonuc_combo.get()
+                if self.tohumlama_doguma_bagli_mi(hayvan, kayit) and (
+                    sonuc != "Pozitif" or tarih != (kayit.get('tarih') or "")
+                ):
+                    return messagebox.showwarning(
+                        "Tohumlama Bağlı",
+                        "Bu pozitif tohumlama doğum/laktasyon geçmişine bağlı olduğu için sonucu veya tarihi değiştirilemez.",
+                        parent=dialog,
+                    )
 
                 self.islem_kaydi_baslat(f"Tohumlama düzenlendi: {kupe_no}")
                 kayit['tarih'] = tarih
                 kayit['sekil'] = sekil
                 kayit['suni_isim'] = suni_entry.get().strip() if sekil == "Suni" else ""
-                sonuc = sonuc_combo.get()
-                kayit['gebe_mi'] = True if sonuc == "Pozitif" else False if sonuc == "Negatif" else None
-                kayit['kontrol_tarihi'] = datetime.now().strftime("%d/%m/%Y") if sonuc in ["Pozitif", "Negatif"] else None
+                onceki_gebe_mi = kayit.get('gebe_mi')
+                onceki_kontrol_tarihi = kayit.get('kontrol_tarihi')
+                yeni_gebe_mi = True if sonuc == "Pozitif" else False if sonuc == "Negatif" else None
+                kayit['gebe_mi'] = yeni_gebe_mi
+                if sonuc in ["Pozitif", "Negatif"]:
+                    kayit['kontrol_tarihi'] = (
+                        onceki_kontrol_tarihi
+                        if yeni_gebe_mi == onceki_gebe_mi and onceki_kontrol_tarihi
+                        else datetime.now().strftime("%d/%m/%Y")
+                    )
+                else:
+                    kayit['kontrol_tarihi'] = None
                 kayit['id'] = kayit.get('id') or uuid.uuid4().hex[:12]
                 self.hayvan_gebelik_durumunu_senkronla(kupe_no)
                 hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                self.veri_kaydet(kupe_no=kupe_no)
+                if not self.veri_kaydet(kupe_no=kupe_no):
+                    self.kayit_basarisizsa_ui_yenile()
+                    return
                 tohumlama_tree_yenile()
                 self.ekranlari_guncelle()
                 dialog.destroy()
@@ -9616,12 +9719,22 @@ class HayvanTakipSistemi:
             idx = secili_tohumlama_index()
             if idx is None:
                 return
+            kayit = hayvan['tohumlamalar'][idx]
+            if self.tohumlama_doguma_bagli_mi(hayvan, kayit):
+                return messagebox.showwarning(
+                    "Tohumlama Silinemez",
+                    "Bu pozitif tohumlama doğum/laktasyon geçmişine bağlı olduğu için silinemez.",
+                    parent=pencere,
+                )
             if not messagebox.askyesno("Sil", "Seçili tohumlama kaydı silinsin mi?", parent=pencere):
                 return
             self.islem_kaydi_baslat(f"Tohumlama kaydı silindi: {kupe_no}")
             hayvan['tohumlamalar'].pop(idx)
             self.hayvan_gebelik_durumunu_senkronla(kupe_no)
-            self.veri_kaydet(kupe_no=kupe_no)
+            hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
             tohumlama_tree_yenile()
             self.ekranlari_guncelle()
 
@@ -9720,7 +9833,9 @@ class HayvanTakipSistemi:
                 kayit['tarih'] = tarih
                 kayit['laktasyon_bitis_tarihi'] = bitis or None
                 hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                self.veri_kaydet(kupe_no=kupe_no)
+                if not self.veri_kaydet(kupe_no=kupe_no):
+                    self.kayit_basarisizsa_ui_yenile()
+                    return
                 dogum_tree_yenile()
                 self.ekranlari_guncelle()
                 dialog.destroy()
@@ -9735,7 +9850,10 @@ class HayvanTakipSistemi:
                 return
             self.islem_kaydi_baslat(f"Doğum kaydı silindi: {kupe_no}")
             hayvan['dogumlar'].pop(idx)
-            self.veri_kaydet(kupe_no=kupe_no)
+            hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            if not self.veri_kaydet(kupe_no=kupe_no):
+                self.kayit_basarisizsa_ui_yenile()
+                return
             dogum_tree_yenile()
             self.ekranlari_guncelle()
 
@@ -9806,7 +9924,9 @@ class HayvanTakipSistemi:
                 self.islem_kaydi_baslat(f"Laktasyon bilgisi tamamlandı: {kupe_no}")
                 hayvan['dogumlar'] = yeni_dogumlar
                 hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                self.veri_kaydet(kupe_no=kupe_no)
+                if not self.veri_kaydet(kupe_no=kupe_no):
+                    self.kayit_basarisizsa_ui_yenile()
+                    return
                 dogum_tree_yenile()
                 self.ekranlari_guncelle()
                 dialog.destroy()
