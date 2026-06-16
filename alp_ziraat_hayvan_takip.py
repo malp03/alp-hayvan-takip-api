@@ -46,7 +46,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.38"
+APP_VERSION = "1.9.39"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -1796,6 +1796,8 @@ class HayvanTakipSistemi:
 
     def tk_callback_hatasi(self, exc_type, exc_value, exc_traceback):
         iz = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        if self.tk_after_temizlik_hatasi_mi(exc_type, exc_value, iz):
+            return
         self.hata_gunlugu_yaz("Tkinter callback hatası", iz=iz)
         try:
             messagebox.showerror(
@@ -1805,6 +1807,14 @@ class HayvanTakipSistemi:
             )
         except Exception:
             pass
+
+    def tk_after_temizlik_hatasi_mi(self, exc_type, exc_value, iz):
+        mesaj = str(exc_value)
+        return (
+            exc_type is AttributeError
+            and "'NoneType' object has no attribute 'remove'" in mesaj
+            and "deletecommand" in str(iz)
+        )
 
     def yakalanmamis_hata(self, exc_type, exc_value, exc_traceback):
         iz = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
@@ -5410,6 +5420,7 @@ class HayvanTakipSistemi:
         return hayvanlar_dict
 
     def veri_kaydet(self, kupe_no=None, hata_mesaji_goster=True, ui_guncelle=True):
+        self._son_kayit_stale_update = False
         if getattr(self, "api_modu", False):
             if self.offline_modda_mi() or self.api_yazma_kuyruga_alinmali_mi():
                 self.bekleyen_senkron_snapshot_guncelle(kupe_no)
@@ -5421,6 +5432,29 @@ class HayvanTakipSistemi:
                     return self.api_hayvan_kaydet_tekil(kupe_no, ui_guncelle=ui_guncelle)
                 return self.api_hayvanlari_kaydet()
             except ApiHatasi as e:
+                if self.api_stale_update_hatasi_mi(e):
+                    self._son_kayit_stale_update = True
+                    try:
+                        if kupe_no is not None:
+                            self._api_son_idler = self.api_hayvan_sunucudan_uzlastir(
+                                kupe_no,
+                                getattr(self, "_api_son_idler", set()),
+                            )
+                        else:
+                            self.hayvanlar = self.api_hayvanlari_yukle()
+                        self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
+                    except ApiHatasi as uzlasma_hatasi:
+                        self.api_cevrimdisi = True
+                        self._api_son_hata = str(uzlasma_hatasi)
+                    if ui_guncelle:
+                        self.api_durum_guncelle()
+                    if hata_mesaji_goster:
+                        messagebox.showwarning(
+                            "Kayit Cakismasi",
+                            "Merkezdeki kayit bu bilgisayardaki kayittan daha yeni.\n\n"
+                            "Degisiklik otomatik kuyruga alinmadi; hayvan kaydi sunucudaki guncel haliyle yenilendi."
+                        )
+                    return False
                 self.api_cevrimdisi = True
                 self._api_son_hata = str(e)
                 self.bekleyen_senkron_snapshot_guncelle(kupe_no)
@@ -5513,6 +5547,7 @@ class HayvanTakipSistemi:
         return self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "Veri Kayıt Hatası")
 
     def veri_kaydet_coklu(self, kupe_nolari, hata_mesaji_goster=True, ui_guncelle=True):
+        self._son_coklu_kayit_stale_update = False
         if not getattr(self, "api_modu", False):
             return self.veri_kaydet(hata_mesaji_goster=hata_mesaji_goster, ui_guncelle=ui_guncelle)
 
@@ -5529,6 +5564,8 @@ class HayvanTakipSistemi:
         basarili = True
         for kupe_no in temiz_idler:
             if not self.veri_kaydet(kupe_no=kupe_no, hata_mesaji_goster=hata_mesaji_goster, ui_guncelle=False):
+                if getattr(self, "_son_kayit_stale_update", False):
+                    self._son_coklu_kayit_stale_update = True
                 basarili = False
         if ui_guncelle:
             try:
@@ -5636,8 +5673,7 @@ class HayvanTakipSistemi:
             self.api_cevrimdisi = True
             self._api_son_hata = str(e)
             self.bekleyen_senkron_delete(h_id)
-            self.bekleyen_senkron_kaydet()
-            return False
+            return bool(self.bekleyen_senkron_kaydet())
 
     def geri_al_kaydi_uygula(self, index, parent=None):
         if not (0 <= index < len(getattr(self, "geri_al_yigini", []))):
@@ -5674,20 +5710,30 @@ class HayvanTakipSistemi:
             pass
 
         basarili = True
+        stale_cakisma = False
         try:
             for h_id in fark["silinecek"]:
                 self.hayvanlar.pop(h_id, None)
                 if not self.geri_al_api_sil(h_id):
                     basarili = False
 
+            geri_al_zamani = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             for h_id, veri in fark["geri_yuklenecek"].items():
                 if veri is not None:
-                    self.hayvanlar[h_id] = copy.deepcopy(veri)
+                    geri_yuklenen = copy.deepcopy(veri)
+                    geri_yuklenen["son_guncelleme"] = geri_al_zamani
+                    self.hayvanlar[h_id] = geri_yuklenen
 
             if getattr(self, "api_modu", False):
                 self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
                 if fark["geri_yuklenecek"]:
-                    basarili = self.veri_kaydet_coklu(fark["geri_yuklenecek"].keys(), ui_guncelle=False) and basarili
+                    kayit_sonucu = self.veri_kaydet_coklu(
+                        fark["geri_yuklenecek"].keys(),
+                        hata_mesaji_goster=False,
+                        ui_guncelle=False,
+                    )
+                    stale_cakisma = bool(getattr(self, "_son_coklu_kayit_stale_update", False))
+                    basarili = kayit_sonucu and basarili
                 else:
                     self.api_durum_guncelle()
             else:
@@ -5712,6 +5758,13 @@ class HayvanTakipSistemi:
                 self.ekranlari_guncelle()
                 self.header_ozet_guncelle()
                 self.api_durum_guncelle()
+                if stale_cakisma:
+                    messagebox.showwarning(
+                        "Geri Al",
+                        "Geri alma uygulanmadi.\n\nMerkezdeki hayvan kaydi bu bilgisayardaki kayittan daha yeni oldugu icin kayit sunucudaki guncel haliyle yenilendi.",
+                        parent=parent or self.root,
+                    )
+                    return
                 messagebox.showwarning(
                     "Geri Al",
                     "Geri alma yerel olarak uygulandı; API bağlantısı sorunlu olduğu için bazı değişiklikler senkron kuyruğuna alındı.",
