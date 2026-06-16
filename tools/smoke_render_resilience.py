@@ -256,6 +256,43 @@ def stale_update_kuyruk_testi():
     assert app._api_base_versions["A"] == "15/06/2026 15:57:30"
 
 
+def coklu_kayit_stale_sonraki_kayitlari_durdurur_testi():
+    app, _ = app_hazirla()
+    cagrilar = []
+
+    def veri_kaydet(kupe_no=None, hata_mesaji_goster=True, ui_guncelle=True):
+        cagrilar.append(kupe_no)
+        app._son_kayit_stale_update = kupe_no == "A"
+        return kupe_no != "A"
+
+    app.veri_kaydet = veri_kaydet
+    assert not appmod.HayvanTakipSistemi.veri_kaydet_coklu(app, ["A", "B"])
+    assert cagrilar == ["A"]
+    assert app._son_coklu_kayit_stale_update is True
+
+
+def doguma_bagli_pozitif_tohumlama_tespit_testi():
+    app, _ = app_hazirla()
+    hayvan = {
+        "tohumlamalar": [
+            {"id": "t1", "tarih": "01/01/2026", "gebe_mi": True},
+        ],
+        "dogumlar": [
+            {"id": "d1", "tarih": "15/10/2026"},
+        ],
+    }
+    assert appmod.HayvanTakipSistemi.tohumlama_doguma_bagli_mi(
+        app,
+        hayvan,
+        hayvan["tohumlamalar"][0],
+    )
+    assert not appmod.HayvanTakipSistemi.tohumlama_doguma_bagli_mi(
+        app,
+        hayvan,
+        {"id": "t2", "tarih": "01/01/2026", "gebe_mi": False},
+    )
+
+
 def geri_al_gecici_api_hatasi_kuyruga_alir_testi():
     app, _ = app_hazirla()
     app.hayvanlar = {
@@ -425,6 +462,8 @@ def main():
     timeout_retry_testi()
     oturum_401_yenileme_testi()
     stale_update_kuyruk_testi()
+    coklu_kayit_stale_sonraki_kayitlari_durdurur_testi()
+    doguma_bagli_pozitif_tohumlama_tespit_testi()
     geri_al_gecici_api_hatasi_kuyruga_alir_testi()
     geri_al_tohumlama_yeni_surumle_gonderir_testi()
     geri_al_stale_update_kuyruga_almaz_testi()
