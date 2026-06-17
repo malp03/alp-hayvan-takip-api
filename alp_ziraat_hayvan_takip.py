@@ -2851,6 +2851,90 @@ class HayvanTakipSistemi:
             self._api_base_versions[kayit_id] = yeni_version
         return kayit_id, self.hayvan_kayit_tamamla(kayit_id, kayit or payload)
 
+    def kuyruk_sadece_bekleyen_tohumlama_silmesi_mi(self, sunucu_kaydi, yerel_kayit):
+        yok_say = {
+            "tohumlamalar",
+            "son_guncelleme",
+            "base_son_guncelleme",
+            "gebe_mi",
+            "gebelik_tarihi",
+            "aktif_tohumlama_id",
+            "foto_url",
+            "foto_urls",
+        }
+
+        def sade(kaynak):
+            sonuc = copy.deepcopy(kaynak or {})
+            for alan in yok_say:
+                sonuc.pop(alan, None)
+            for dogum in sonuc.get("dogumlar") or []:
+                if isinstance(dogum, dict):
+                    dogum.pop("hayvan_son_guncelleme", None)
+            return sonuc
+
+        return json.dumps(sade(sunucu_kaydi), sort_keys=True, ensure_ascii=False) == json.dumps(
+            sade(yerel_kayit),
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+
+    def api_bekleyen_tohumlama_silmesini_uygula(self, h_id, veri, onceki_idler):
+        h_id = str(h_id)
+        if h_id not in set(onceki_idler or set()):
+            return None
+
+        yerel = self.hayvan_kayit_tamamla(h_id, veri)
+        yerel_ids = {
+            str(kayit.get("id"))
+            for kayit in (yerel.get("tohumlamalar") or [])
+            if isinstance(kayit, dict) and kayit.get("id")
+        }
+
+        try:
+            sunucu_ham = self.api_istek("GET", f"/api/hayvanlar/{self.api_ref(h_id)}", timeout=20)
+        except ApiHatasi as e:
+            if getattr(e, "status", None) == 404:
+                return None
+            raise
+
+        kayit_id = str((sunucu_ham or {}).get("id") or h_id)
+        sunucu = self.hayvan_kayit_tamamla(kayit_id, sunucu_ham or {})
+        sunucu_tohumlamalar = [
+            kayit for kayit in (sunucu.get("tohumlamalar") or [])
+            if isinstance(kayit, dict) and kayit.get("id")
+        ]
+        sunucu_ids = {str(kayit.get("id")) for kayit in sunucu_tohumlamalar}
+        yerel_fazla = [
+            kayit for kayit in (yerel.get("tohumlamalar") or [])
+            if isinstance(kayit, dict) and kayit.get("id") and str(kayit.get("id")) not in sunucu_ids
+        ]
+        eksik_sunucu_kayitlari = [
+            kayit for kayit in sunucu_tohumlamalar
+            if str(kayit.get("id")) not in yerel_ids
+        ]
+
+        if yerel_fazla or not eksik_sunucu_kayitlari:
+            return None
+        if any(kayit.get("gebe_mi") is not None for kayit in eksik_sunucu_kayitlari):
+            return None
+        if not self.kuyruk_sadece_bekleyen_tohumlama_silmesi_mi(sunucu, yerel):
+            return None
+
+        for kayit in eksik_sunucu_kayitlari:
+            self.api_istek(
+                "DELETE",
+                f"/api/hayvanlar/{self.api_ref(kayit_id)}/tohumlamalar/{self.api_ref(kayit.get('id'))}",
+                timeout=20,
+            )
+
+        guncel = self.api_istek("GET", f"/api/hayvanlar/{self.api_ref(kayit_id)}", timeout=20)
+        tamamlanmis = self.hayvan_kayit_tamamla(kayit_id, guncel or {})
+        yeni_version = tamamlanmis.get("son_guncelleme")
+        if yeni_version:
+            self._api_base_versions.pop(h_id, None)
+            self._api_base_versions[kayit_id] = yeni_version
+        return kayit_id, tamamlanmis
+
     def bekleyen_senkron_gonder(self, sessiz=False, ui_guncelle=True):
         if not getattr(self, "api_modu", False):
             return True
@@ -2867,6 +2951,9 @@ class HayvanTakipSistemi:
             deletes = bekleyen.get("deletes", {}) or {}
             onceki_idler = set(getattr(self, "_api_son_idler", set()))
             atlanan_cakisma = 0
+            kalan_deletes = {}
+            kalan_upserts = {}
+            kalan_hatalar = []
 
             for h_id in sorted(deletes.keys()):
                 delete_info = deletes.get(h_id) or {}
@@ -2887,7 +2974,9 @@ class HayvanTakipSistemi:
                         atlanan_cakisma += 1
                         continue
                     if e.status != 404:
-                        raise
+                        kalan_deletes[h_id] = delete_info
+                        kalan_hatalar.append(e)
+                        continue
                     sonuc = None
                 if isinstance(sonuc, dict) and sonuc.get("status") == "skipped":
                     kayit = self.api_istek("GET", f"/api/hayvanlar/{self.api_ref(h_id)}", timeout=20)
@@ -2901,10 +2990,16 @@ class HayvanTakipSistemi:
 
             for h_id, veri in upserts.items():
                 try:
-                    kayit_id, tamamlanmis = self.api_hayvan_kayit_gonder(h_id, veri, onceki_idler)
+                    kurtarilan = self.api_bekleyen_tohumlama_silmesini_uygula(h_id, veri, onceki_idler)
+                    if kurtarilan is not None:
+                        kayit_id, tamamlanmis = kurtarilan
+                    else:
+                        kayit_id, tamamlanmis = self.api_hayvan_kayit_gonder(h_id, veri, onceki_idler)
                 except ApiHatasi as e:
                     if not self.api_stale_update_hatasi_mi(e):
-                        raise
+                        kalan_upserts[h_id] = veri
+                        kalan_hatalar.append(e)
+                        continue
                     onceki_idler = self.api_hayvan_sunucudan_uzlastir(h_id, onceki_idler)
                     atlanan_cakisma += 1
                     continue
@@ -2919,14 +3014,29 @@ class HayvanTakipSistemi:
                 self.hayvanlar[kayit_id] = tamamlanmis
 
             self._api_son_idler = onceki_idler
-            self.bekleyen_senkron = {"upserts": {}, "deletes": {}, "updated_at": None}
+            self.bekleyen_senkron = {
+                "upserts": kalan_upserts,
+                "deletes": kalan_deletes,
+                "updated_at": None,
+            }
             self.bekleyen_senkron_kaydet()
             self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
-            self.api_cevrimdisi = False
+            self.api_cevrimdisi = bool(
+                kalan_hatalar and all(self.api_ag_hatasi_gecici_mi(hata) for hata in kalan_hatalar)
+            )
             self.api_offline_oturum = False
-            self._api_son_hata = None
+            self._api_son_hata = "\n".join(str(hata) for hata in kalan_hatalar[:3]) if kalan_hatalar else None
             self._son_senkron_atlanan_cakisma = atlanan_cakisma
             self.api_durum_guncelle()
+            if kalan_hatalar:
+                if not sessiz:
+                    mesaj = "Bazı bekleyen değişiklikler API'ye gönderilemedi."
+                    if atlanan_cakisma:
+                        mesaj += f"\n\n{atlanan_cakisma} eski offline değişiklik merkezde daha yeni kayıt olduğu için atlandı."
+                    mesaj += "\n\nBaşarılı olanlar işlendi; kalanlar yerel kuyrukta tutuluyor."
+                    mesaj += f"\n\nİlk hata: {kalan_hatalar[0]}"
+                    messagebox.showwarning("Senkron", mesaj, parent=getattr(self, "root", None))
+                return False
             if not sessiz:
                 mesaj = "Bekleyen degisiklikler API'ye gonderildi."
                 if atlanan_cakisma:
