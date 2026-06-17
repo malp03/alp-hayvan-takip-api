@@ -3022,7 +3022,7 @@ class HayvanTakipSistemi:
             self.bekleyen_senkron_kaydet()
             self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
             self.api_cevrimdisi = bool(
-                kalan_hatalar and all(self.api_ag_hatasi_gecici_mi(hata) for hata in kalan_hatalar)
+                kalan_hatalar and all(self.api_hatasi_yeniden_denebilir_mi(hata) for hata in kalan_hatalar)
             )
             self.api_offline_oturum = False
             self._api_son_hata = "\n".join(str(hata) for hata in kalan_hatalar[:3]) if kalan_hatalar else None
