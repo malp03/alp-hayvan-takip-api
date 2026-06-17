@@ -1555,7 +1555,7 @@ def tohumlama_kurallarini_kontrol(veri: Dict[str, Any], tohumlama: Dict[str, Any
     tohumlama_tarih_kurallarini_kontrol(veri, tohumlama)
     if veri.get("gebe_mi"):
         raise HTTPException(status_code=400, detail="Gebe hayvana yeni tohumlama eklenemez.")
-    son_tohumlama = (veri.get("tohumlamalar") or [None])[-1]
+    son_tohumlama = en_son_tohumlama(veri)
     if son_tohumlama and son_tohumlama.get("gebe_mi") is None:
         raise HTTPException(status_code=400, detail="Önce bekleyen tohumlama sonucunu girin.")
 
@@ -1782,10 +1782,8 @@ def uyarilari_hesapla(hayvanlar: Iterable[Dict[str, Any]]) -> List[Dict[str, Any
         if not hayvan_aktif_mi(veri):
             continue
         kupe = veri.get("ciftlik_kupe_no") or veri.get("resmi_kupe_no") or veri.get("id")
-        tohumlamalar = veri.get("tohumlamalar") or []
-        if tohumlamalar:
-            son = tohumlamalar[-1]
-            if son.get("gebe_mi") is None:
+        son = en_son_tohumlama(veri)
+        if son and son.get("gebe_mi") is None:
                 t_tarihi = parse_tarih_sessiz(son.get("tarih"))
                 if t_tarihi:
                     kontrol = t_tarihi + timedelta(days=21)
