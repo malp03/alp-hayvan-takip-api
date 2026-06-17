@@ -5325,7 +5325,8 @@ class HayvanTakipSistemi:
             }
             for t in h.tohumlamalar
         ]
-        aktif_tohumlama = next((t for t in reversed(tohumlamalar) if t.get('gebe_mi') is True), None)
+        son_tohumlama = self.en_son_tohumlama_listesi(tohumlamalar)
+        aktif_tohumlama = son_tohumlama if son_tohumlama and son_tohumlama.get('gebe_mi') is True else None
         yas_gun = (h.yas_yil or 0) * 365 + (h.yas_ay or 0) * 30
         veri = {
             'kupe_no': h.ciftlik_kupe_no or h.resmi_kupe_no or h.id,
@@ -8108,6 +8109,27 @@ class HayvanTakipSistemi:
         else:
             self.suni_container.grid_remove()
 
+    def tohumlama_sira_anahtari(self, tohumlama, index=0):
+        tarih = datetime.min
+        if isinstance(tohumlama, dict):
+            try:
+                tarih = datetime.strptime(tohumlama.get('tarih') or "", "%d/%m/%Y")
+            except (ValueError, TypeError):
+                pass
+        return tarih, index
+
+    def en_son_tohumlama_listesi(self, tohumlamalar):
+        kayitlar = [kayit for kayit in (tohumlamalar or []) if isinstance(kayit, dict)]
+        if not kayitlar:
+            return None
+        return max(
+            enumerate(kayitlar),
+            key=lambda item: self.tohumlama_sira_anahtari(item[1], item[0]),
+        )[1]
+
+    def en_son_tohumlama(self, hayvan):
+        return self.en_son_tohumlama_listesi((hayvan or {}).get('tohumlamalar') or [])
+
     def sekme_index_bul(self, sekme_adi):
         if not hasattr(self, "notebook"):
             return None
@@ -8136,10 +8158,9 @@ class HayvanTakipSistemi:
     def hayvan_bekleyen_tohumlama(self, hayvan):
         if not hayvan:
             return None
-        tohumlamalar = hayvan.get('tohumlamalar') or []
-        if not tohumlamalar:
+        son_tohumlama = self.en_son_tohumlama(hayvan)
+        if not son_tohumlama:
             return None
-        son_tohumlama = tohumlamalar[-1]
         return son_tohumlama if son_tohumlama.get('gebe_mi') is None else None
 
     def hayvan_tohumlama_sonuclanabilir_mi(self, hayvan):
@@ -8237,19 +8258,18 @@ class HayvanTakipSistemi:
                 continue
             aktif_tohumlama_id = hayvan.get('aktif_tohumlama_id')
 
-            if hayvan.get('tohumlamalar'):
-                son_tohumlama = hayvan['tohumlamalar'][-1]
-                if son_tohumlama.get('gebe_mi') is None:
-                    try:
-                        t_tarihi = datetime.strptime(son_tohumlama['tarih'], "%d/%m/%Y")
-                        kontrol_tarihi = t_tarihi + timedelta(days=21)
-                        kalan_kontrol = (kontrol_tarihi - datetime.now()).days
-                        if kalan_kontrol <= 7:
-                            tohumlama_id = son_tohumlama.get('id') or "bekleyen"
-                            uyari_key = self.uyari_key_olustur(kupe_no, "gebelik_kontrol", tohumlama_id, kalan_kontrol)
-                            if uyari_key:
-                                aktif_uyari_keyleri.append(uyari_key)
-                    except: continue
+            son_tohumlama = self.hayvan_bekleyen_tohumlama(hayvan)
+            if son_tohumlama:
+                try:
+                    t_tarihi = datetime.strptime(son_tohumlama['tarih'], "%d/%m/%Y")
+                    kontrol_tarihi = t_tarihi + timedelta(days=21)
+                    kalan_kontrol = (kontrol_tarihi - datetime.now()).days
+                    if kalan_kontrol <= 7:
+                        tohumlama_id = son_tohumlama.get('id') or "bekleyen"
+                        uyari_key = self.uyari_key_olustur(kupe_no, "gebelik_kontrol", tohumlama_id, kalan_kontrol)
+                        if uyari_key:
+                            aktif_uyari_keyleri.append(uyari_key)
+                except: continue
 
             if aktif_tohumlama_id and hayvan.get('durum') == 'Sağmal İnek' and hayvan.get('gebe_mi', False):
                 try:
@@ -8315,7 +8335,7 @@ class HayvanTakipSistemi:
             if 'KURUYA ALINMALI' in uyari_tipi and aktif_tohumlama_id:
                 uyari_key = self.uyari_key_olustur(hayvan_id, "kuruya_al", aktif_tohumlama_id, kalan_gun)
             elif 'GEBELİK KONTROL' in uyari_tipi and hayvan.get('tohumlamalar'):
-                son_tohumlama = hayvan['tohumlamalar'][-1]
+                son_tohumlama = self.hayvan_bekleyen_tohumlama(hayvan) or self.en_son_tohumlama(hayvan)
                 tohumlama_id = son_tohumlama.get('id') or "bekleyen"
                 uyari_key = self.uyari_key_olustur(hayvan_id, "gebelik_kontrol", tohumlama_id, kalan_gun)
             elif 'AŞI/PROSEDÜR' in uyari_tipi:
@@ -8603,7 +8623,7 @@ class HayvanTakipSistemi:
             return
         
         if hayvan.get('tohumlamalar'):
-            son_tohumlama = hayvan['tohumlamalar'][-1]
+            son_tohumlama = self.en_son_tohumlama(hayvan)
             if son_tohumlama.get('gebe_mi') is None:
                 messagebox.showwarning("Bekleyen Kayıt Var", 
                                      f"'{kupe_no}' küpeli hayvanın son tohumlama kaydının sonucu henüz girilmemiş.\n\n"
@@ -9333,8 +9353,7 @@ class HayvanTakipSistemi:
         hayvan = self.hayvanlar.get(kupe_no)
         if not hayvan:
             return
-        tohumlamalar = hayvan.get('tohumlamalar', [])
-        son_tohumlama = tohumlamalar[-1] if tohumlamalar else None
+        son_tohumlama = self.en_son_tohumlama(hayvan)
         is_male = hayvan.get('cins') in ["Erkek Buzağı", "Dana"]
 
         if son_tohumlama and son_tohumlama.get('gebe_mi') is True and not is_male and not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('arsivli') and not hayvan.get('satildi'):
@@ -10100,7 +10119,7 @@ class HayvanTakipSistemi:
         if self.sagmal_laktasyon_eksik_mi(hayvan):
             uyarilar.append(("Eksik veri", "Laktasyon numarası ve son doğum tarihi tamamlanmalı.", 0))
 
-        son_tohumlama = (hayvan.get("tohumlamalar") or [None])[-1]
+        son_tohumlama = self.en_son_tohumlama(hayvan)
         if son_tohumlama and son_tohumlama.get("gebe_mi") is None:
             try:
                 tarih = datetime.strptime(son_tohumlama.get("tarih", ""), "%d/%m/%Y")
@@ -10464,6 +10483,62 @@ class HayvanTakipSistemi:
         dogum_kart.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(0, 16))
         dog_tree = self.profil_tablo_olustur(dogum_body, ("#", "Tarih", "Yavrular", "Not"), {"#": 45, "Tarih": 120, "Yavrular": 320, "Not": 520}, height=6)
         dogumlar = hayvan.get("dogumlar") or []
+        def profil_secili_tohumlama_index():
+            secim = toh_tree.selection()
+            if not secim:
+                messagebox.showwarning("Tohumlama", "Önce tohumlama geçmişinden bir kayıt seçin.", parent=detay_window)
+                return None
+            values = toh_tree.item(secim[0]).get("values") or []
+            try:
+                index = int(values[0]) - 1
+            except (ValueError, TypeError, IndexError):
+                messagebox.showwarning("Tohumlama", "Seçili satır silinebilir bir tohumlama kaydı değil.", parent=detay_window)
+                return None
+            if index < 0 or index >= len(hayvan.get("tohumlamalar") or []):
+                messagebox.showwarning("Tohumlama", "Seçili tohumlama kaydı bulunamadı.", parent=detay_window)
+                return None
+            return index
+
+        def profil_tohumlama_sil():
+            idx = profil_secili_tohumlama_index()
+            if idx is None:
+                return
+            kayit = hayvan["tohumlamalar"][idx]
+            if self.tohumlama_doguma_bagli_mi(hayvan, kayit):
+                return messagebox.showwarning(
+                    "Tohumlama Silinemez",
+                    "Bu pozitif tohumlama doğum/laktasyon geçmişine bağlı olduğu için silinemez.",
+                    parent=detay_window,
+                )
+            if not messagebox.askyesno("Sil", "Seçili tohumlama kaydı silinsin mi?", parent=detay_window):
+                return
+            self.islem_kaydi_baslat(f"Tohumlama kaydı silindi: {hayvan_id}")
+            hayvan["tohumlamalar"].pop(idx)
+            self.hayvan_gebelik_durumunu_senkronla(hayvan_id)
+            hayvan["son_guncelleme"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            if not self.veri_kaydet(kupe_no=hayvan_id):
+                self.kayit_basarisizsa_ui_yenile()
+                return
+            self.ekranlari_guncelle()
+            messagebox.showinfo("Başarılı", "Tohumlama kaydı silindi.", parent=detay_window)
+            try:
+                detay_window.grab_release()
+                detay_window.destroy()
+            except tk.TclError:
+                pass
+            self._track_after(self.root, 80, lambda h_id=hayvan_id: self.hayvan_detay_penceresi(h_id))
+
+        toh_btn_frame = tk.Frame(tohum_body, bg=self.renkler["kart_arkaplan"])
+        toh_btn_frame.pack(fill="x", pady=(8, 0))
+        self.themed_widgets.append((toh_btn_frame, 'kart'))
+        self.modern_buton(
+            toh_btn_frame,
+            "SEÇİLİ TOHUMLAMAYI SİL",
+            profil_tohumlama_sil,
+            purpose='danger',
+            small=True,
+        ).pack(side="right")
+
         dogum_yavrular_by_row = {}
         if dogumlar:
             for i, dogum in enumerate(dogumlar, 1):
@@ -10675,7 +10750,8 @@ class HayvanTakipSistemi:
 
             son_tohumlama, dogum_tahmini, uyarilar, sagim_gun_str = "Yok", "-", "", "-"
             
-            if hayvan.get('tohumlamalar'): son_tohumlama = hayvan['tohumlamalar'][-1]['tarih']
+            son_tohumlama_kaydi = self.en_son_tohumlama(hayvan)
+            if son_tohumlama_kaydi: son_tohumlama = son_tohumlama_kaydi.get('tarih', 'Yok')
             if hayvan.get('gebe_mi', False) and hayvan.get('gebelik_tarihi'):
                 try:
                     g_tarihi = datetime.strptime(hayvan['gebelik_tarihi'], "%d/%m/%Y")
@@ -10795,7 +10871,7 @@ class HayvanTakipSistemi:
             aktif_tohumlama_id = hayvan.get('aktif_tohumlama_id')
 
             if hayvan.get('tohumlamalar'):
-                son_tohumlama = hayvan['tohumlamalar'][-1]
+                son_tohumlama = self.hayvan_bekleyen_tohumlama(hayvan) or self.en_son_tohumlama(hayvan)
                 if son_tohumlama.get('gebe_mi') is None:
                     try:
                         t_tarihi = datetime.strptime(son_tohumlama['tarih'], "%d/%m/%Y")
