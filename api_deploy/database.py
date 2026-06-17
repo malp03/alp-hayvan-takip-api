@@ -47,14 +47,14 @@ def _normalize_database_url(url):
     return url
 
 
-# Kullanıcı veritabanı bağlantı adresini (URL) çevresel değişkenden alabilir.
-# Yoksa varsayılan olarak kullanıcı veri klasöründeki SQLite veritabanı kullanılır.
+# Kullanici veritabani baglanti adresini (URL) cevresel degiskenden alabilir.
+# Yoksa varsayilan olarak kullanici veri klasorundeki SQLite veritabani kullanilir.
 SQLALCHEMY_DATABASE_URL = _normalize_database_url(os.getenv(
-    "DATABASE_URL", 
+    "DATABASE_URL",
     _default_sqlite_url()
 ))
 
-# PostgreSQL (örneğin Supabase vb.) kullanıldığında pool ayarları değişebilir
+# PostgreSQL (ornegin Supabase vb.) kullanildiginda pool ayarlari degisebilir.
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
@@ -113,11 +113,43 @@ def ensure_sqlite_schema():
 
 
 def ensure_postgres_security():
-    pass
+    if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+        return
+    tables = [
+        "ciftlikler",
+        "kullanicilar",
+        "hayvanlar",
+        "tohumlamalar",
+        "asi_prosedurler",
+        "uyarilar",
+        "islem_gecmisi",
+    ]
+    with engine.begin() as connection:
+        for table in tables:
+            connection.exec_driver_sql(f'ALTER TABLE IF EXISTS public.{table} ENABLE ROW LEVEL SECURITY')
 
 
 def ensure_postgres_schema_updates():
-    pass
+    if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+        return
+    with engine.begin() as connection:
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.hayvanlar ADD COLUMN IF NOT EXISTS ciftlik_id VARCHAR")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_hayvanlar_ciftlik_id ON public.hayvanlar (ciftlik_id)")
+        connection.exec_driver_sql("DROP INDEX IF EXISTS public.ix_hayvanlar_resmi_kupe_no")
+        connection.exec_driver_sql("DROP INDEX IF EXISTS public.ix_hayvanlar_ciftlik_kupe_no")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.hayvanlar DROP CONSTRAINT IF EXISTS hayvanlar_resmi_kupe_no_key")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.hayvanlar DROP CONSTRAINT IF EXISTS hayvanlar_ciftlik_kupe_no_key")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_hayvanlar_resmi_kupe_no ON public.hayvanlar (resmi_kupe_no)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_hayvanlar_ciftlik_kupe_no ON public.hayvanlar (ciftlik_kupe_no)")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS islem_tipi VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS kullanici_id VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS kullanici_adi VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS rol VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS ciftlik_id VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS hedef_tipi VARCHAR")
+        connection.exec_driver_sql("ALTER TABLE IF EXISTS public.islem_gecmisi ADD COLUMN IF NOT EXISTS hedef_id VARCHAR")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_islem_gecmisi_ciftlik_id ON public.islem_gecmisi (ciftlik_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_islem_gecmisi_islem_tipi ON public.islem_gecmisi (islem_tipi)")
 
 
 def get_db():
