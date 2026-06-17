@@ -1657,7 +1657,7 @@ def alt_kayit_tarihlerini_kontrol(veri: Dict[str, Any]) -> None:
         raise HTTPException(status_code=400, detail="Erkek hayvana doğum kaydı eklenemez.")
     for dogum in veri.get("dogumlar") or []:
         tarih = parse_tarih(dogum.get("tarih"), "Doğum tarihi", zorunlu=True)
-        if hayvan_dogum and tarih and tarih < hayvan_dogum:
+        if tarih and hayvan_dogum and tarih < hayvan_dogum:
             raise HTTPException(status_code=400, detail="Doğum tarihi annenin doğum tarihinden önce olamaz.")
         bitis = parse_tarih(dogum.get("laktasyon_bitis_tarihi"), "Laktasyon bitiş tarihi")
         if tarih and bitis and bitis < tarih:
