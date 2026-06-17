@@ -1575,9 +1575,20 @@ def en_son_tohumlama(veri: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     )[1]
 
 
-def tohumlama_sonucunu_isle(veri: Dict[str, Any]) -> None:
+def aktif_gebelik_tohumlamasi(veri: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     tohumlama = en_son_tohumlama(veri)
-    if tohumlama and tohumlama.get("gebe_mi") is True:
+    if (
+        tohumlama
+        and tohumlama.get("gebe_mi") is True
+        and not tohumlama_doguma_bagli_mi(veri, tohumlama)
+    ):
+        return tohumlama
+    return None
+
+
+def tohumlama_sonucunu_isle(veri: Dict[str, Any]) -> None:
+    tohumlama = aktif_gebelik_tohumlamasi(veri)
+    if tohumlama:
         veri["gebe_mi"] = True
         veri["gebelik_tarihi"] = tohumlama.get("tarih")
         veri["aktif_tohumlama_id"] = tohumlama.get("id")
