@@ -40,6 +40,7 @@ PYTHON_FILES = [
     "tools/smoke_admin_panel_logout.py",
     "tools/smoke_login_responsive.py",
     "tools/smoke_render_resilience.py",
+    "tools/smoke_breeding_rules.py",
     "tools/smoke_ui.py",
     "installer/setup_installer.py",
 ]
@@ -75,6 +76,7 @@ def main():
     run_step("Admin panel logout smoke", [sys.executable, str(ROOT / "tools" / "smoke_admin_panel_logout.py")])
     run_step("Login responsiveness smoke", [sys.executable, str(ROOT / "tools" / "smoke_login_responsive.py")])
     run_step("Render sleep resilience smoke", [sys.executable, str(ROOT / "tools" / "smoke_render_resilience.py")])
+    run_step("Breeding rule smoke", [sys.executable, str(ROOT / "tools" / "smoke_breeding_rules.py")])
     run_step("API HTTP smoke", [sys.executable, str(ROOT / "tools" / "smoke_api.py")])
 
     print("\nAll smoke tests passed.", flush=True)
