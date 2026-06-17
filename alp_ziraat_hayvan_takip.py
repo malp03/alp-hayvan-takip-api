@@ -46,7 +46,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.42"
+APP_VERSION = "1.9.43"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -8130,6 +8130,16 @@ class HayvanTakipSistemi:
     def en_son_tohumlama(self, hayvan):
         return self.en_son_tohumlama_listesi((hayvan or {}).get('tohumlamalar') or [])
 
+    def aktif_gebelik_tohumlamasi(self, hayvan):
+        son_tohumlama = self.en_son_tohumlama(hayvan)
+        if (
+            son_tohumlama
+            and son_tohumlama.get('gebe_mi') is True
+            and not self.tohumlama_doguma_bagli_mi(hayvan, son_tohumlama)
+        ):
+            return son_tohumlama
+        return None
+
     def sekme_index_bul(self, sekme_adi):
         if not hasattr(self, "notebook"):
             return None
@@ -8162,6 +8172,69 @@ class HayvanTakipSistemi:
         if not son_tohumlama:
             return None
         return son_tohumlama if son_tohumlama.get('gebe_mi') is None else None
+
+    def tohumlama_kaydi_sil_ve_kaydet(self, kupe_no, hayvan, idx, parent=None):
+        tohumlamalar = hayvan.get('tohumlamalar') or []
+        if idx is None or idx < 0 or idx >= len(tohumlamalar):
+            messagebox.showwarning("Tohumlama", "Seçili tohumlama kaydı bulunamadı.", parent=parent or self.root)
+            return False
+
+        kayit = tohumlamalar[idx]
+        if self.tohumlama_doguma_bagli_mi(hayvan, kayit):
+            messagebox.showwarning(
+                "Tohumlama Silinemez",
+                "Bu pozitif tohumlama doğum/laktasyon geçmişine bağlı olduğu için silinemez.",
+                parent=parent or self.root,
+            )
+            return False
+
+        api_modu = getattr(self, "api_modu", False)
+        online_api_silindi = False
+        api_son_guncelleme = None
+        tohumlama_id = kayit.get('id')
+        if api_modu and not self.offline_modda_mi() and tohumlama_id:
+            try:
+                sonuc = self.api_istek(
+                    "DELETE",
+                    f"/api/hayvanlar/{self.api_ref(kupe_no)}/tohumlamalar/{self.api_ref(tohumlama_id)}",
+                    timeout=20,
+                )
+                online_api_silindi = True
+                if isinstance(sonuc, dict):
+                    api_son_guncelleme = sonuc.get("son_guncelleme")
+            except ApiHatasi as e:
+                if getattr(e, "status", None) == 404:
+                    online_api_silindi = True
+                elif getattr(e, "status", None) == 409:
+                    messagebox.showwarning("Tohumlama Silinemedi", str(e), parent=parent or self.root)
+                    return False
+                else:
+                    self.api_cevrimdisi = True
+                    self._api_son_hata = str(e)
+
+        self.islem_kaydi_baslat(f"Tohumlama kaydı silindi: {kupe_no}")
+        tohumlamalar.pop(idx)
+        self.hayvan_gebelik_durumunu_senkronla(kupe_no)
+        hayvan['son_guncelleme'] = api_son_guncelleme or datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+        if online_api_silindi:
+            if api_son_guncelleme:
+                self._api_base_versions[str(kupe_no)] = api_son_guncelleme
+            upserts = (getattr(self, "bekleyen_senkron", {}) or {}).get("upserts", {}) or {}
+            if str(kupe_no) in upserts:
+                self.bekleyen_senkron_upsert(kupe_no, hayvan)
+                self.bekleyen_senkron_kaydet()
+            self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
+            self.api_cevrimdisi = False
+            self.api_offline_oturum = False
+            self._api_son_hata = None
+            self.api_durum_guncelle()
+            return True
+
+        if not self.veri_kaydet(kupe_no=kupe_no):
+            self.kayit_basarisizsa_ui_yenile()
+            return False
+        return True
 
     def hayvan_tohumlama_sonuclanabilir_mi(self, hayvan):
         if not hayvan:
@@ -9353,10 +9426,10 @@ class HayvanTakipSistemi:
         hayvan = self.hayvanlar.get(kupe_no)
         if not hayvan:
             return
-        son_tohumlama = self.en_son_tohumlama(hayvan)
+        son_tohumlama = self.aktif_gebelik_tohumlamasi(hayvan)
         is_male = hayvan.get('cins') in ["Erkek Buzağı", "Dana"]
 
-        if son_tohumlama and son_tohumlama.get('gebe_mi') is True and not is_male and not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('arsivli') and not hayvan.get('satildi'):
+        if son_tohumlama and not is_male and not hayvan.get('olu') and not hayvan.get('kesildi') and not hayvan.get('arsivli') and not hayvan.get('satildi'):
             hayvan['gebe_mi'] = True
             hayvan['gebelik_tarihi'] = son_tohumlama.get('tarih')
             hayvan['aktif_tohumlama_id'] = son_tohumlama.get('id')
@@ -9738,21 +9811,9 @@ class HayvanTakipSistemi:
             idx = secili_tohumlama_index()
             if idx is None:
                 return
-            kayit = hayvan['tohumlamalar'][idx]
-            if self.tohumlama_doguma_bagli_mi(hayvan, kayit):
-                return messagebox.showwarning(
-                    "Tohumlama Silinemez",
-                    "Bu pozitif tohumlama doğum/laktasyon geçmişine bağlı olduğu için silinemez.",
-                    parent=pencere,
-                )
             if not messagebox.askyesno("Sil", "Seçili tohumlama kaydı silinsin mi?", parent=pencere):
                 return
-            self.islem_kaydi_baslat(f"Tohumlama kaydı silindi: {kupe_no}")
-            hayvan['tohumlamalar'].pop(idx)
-            self.hayvan_gebelik_durumunu_senkronla(kupe_no)
-            hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            if not self.veri_kaydet(kupe_no=kupe_no):
-                self.kayit_basarisizsa_ui_yenile()
+            if not self.tohumlama_kaydi_sil_ve_kaydet(kupe_no, hayvan, idx, parent=pencere):
                 return
             tohumlama_tree_yenile()
             self.ekranlari_guncelle()
@@ -10503,21 +10564,9 @@ class HayvanTakipSistemi:
             idx = profil_secili_tohumlama_index()
             if idx is None:
                 return
-            kayit = hayvan["tohumlamalar"][idx]
-            if self.tohumlama_doguma_bagli_mi(hayvan, kayit):
-                return messagebox.showwarning(
-                    "Tohumlama Silinemez",
-                    "Bu pozitif tohumlama doğum/laktasyon geçmişine bağlı olduğu için silinemez.",
-                    parent=detay_window,
-                )
             if not messagebox.askyesno("Sil", "Seçili tohumlama kaydı silinsin mi?", parent=detay_window):
                 return
-            self.islem_kaydi_baslat(f"Tohumlama kaydı silindi: {hayvan_id}")
-            hayvan["tohumlamalar"].pop(idx)
-            self.hayvan_gebelik_durumunu_senkronla(hayvan_id)
-            hayvan["son_guncelleme"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            if not self.veri_kaydet(kupe_no=hayvan_id):
-                self.kayit_basarisizsa_ui_yenile()
+            if not self.tohumlama_kaydi_sil_ve_kaydet(hayvan_id, hayvan, idx, parent=detay_window):
                 return
             self.ekranlari_guncelle()
             messagebox.showinfo("Başarılı", "Tohumlama kaydı silindi.", parent=detay_window)
