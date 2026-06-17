@@ -1,7 +1,8 @@
 import os
 import shutil
 import sys
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text as sql_text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 def _app_data_dir():
@@ -124,9 +125,26 @@ def ensure_postgres_security():
         "uyarilar",
         "islem_gecmisi",
     ]
-    with engine.begin() as connection:
-        for table in tables:
-            connection.exec_driver_sql(f'ALTER TABLE IF EXISTS public.{table} ENABLE ROW LEVEL SECURITY')
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("SET LOCAL lock_timeout = '3s'")
+            for table in tables:
+                mevcut = connection.execute(
+                    sql_text(
+                        """
+                        SELECT c.relrowsecurity
+                        FROM pg_class c
+                        JOIN pg_namespace n ON n.oid = c.relnamespace
+                        WHERE n.nspname = :schema AND c.relname = :table
+                        """
+                    ),
+                    {"schema": "public", "table": table},
+                ).fetchone()
+                if not mevcut or mevcut[0]:
+                    continue
+                connection.exec_driver_sql(f'ALTER TABLE IF EXISTS public.{table} ENABLE ROW LEVEL SECURITY')
+    except OperationalError as exc:
+        print(f"PostgreSQL RLS check skipped during startup: {exc}", file=sys.stderr)
 
 
 def ensure_postgres_schema_updates():
