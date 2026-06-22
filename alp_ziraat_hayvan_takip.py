@@ -196,12 +196,14 @@ class HayvanTakipSistemi:
             self.otomatik_baglanti_hata_araligi_ms = 60 * 1000
             self.otomatik_baglanti_ilk_gecikme_ms = 30 * 1000
             self.hatirlanan_giris_timeout = 7
+            self._hatirlanan_oturum_cache_ile_acildi = False
             if self.api_modu and self.hatirlanan_giris_kaydi_var_mi():
                 self.baslangic_bekleme_ekrani_goster("Sunucu kontrol ediliyor", "Kayıtlı oturum hazırlanıyor. Sunucu uyuyorsa uygulama çevrimdışı açılır.")
             if self.api_modu and not self.login_akisini_baslat():
                 self.root.destroy()
                 return
             self.baslangic_bekleme_ekrani_kapat()
+            self.ana_pencere_boyutunu_ayarla()
             self.hayvanlar = self.veri_yukle()
             self.geri_al_yigini = []
             if getattr(self, "_veri_migrasyonu_gerekli", False):
@@ -326,8 +328,8 @@ class HayvanTakipSistemi:
             for child in self.root.winfo_children():
                 child.destroy()
             self.root.title("ALP Ziraat - Açılıyor")
-            genislik = 620
-            yukseklik = 360
+            genislik = 660
+            yukseklik = 430
             self.root.geometry(f"{genislik}x{yukseklik}")
             self.root.minsize(genislik, yukseklik)
             self.root.resizable(False, False)
@@ -461,6 +463,18 @@ class HayvanTakipSistemi:
             self.root.deiconify()
             self.root.update_idletasks()
             self.root.update()
+        except tk.TclError:
+            pass
+
+    def ana_pencere_boyutunu_ayarla(self):
+        try:
+            self.root.title("ALP Ziraat - Sürü Takip Sistemi")
+            self.root.geometry("1500x900")
+            self.root.minsize(1000, 700)
+            self.root.resizable(True, True)
+            self.root.configure(bg=self.renkler["arkaplan"])
+            self.root.update_idletasks()
+            self.root.lift()
         except tk.TclError:
             pass
 
@@ -2598,40 +2612,24 @@ class HayvanTakipSistemi:
             return False
 
     def taninan_bilgisayar_giris_baslangicta_dene(self):
-        if not self.hatirlanan_giris_kaydi_var_mi():
+        cache = self.taninan_bilgisayar_yukle()
+        device_token = cache.get("device_token")
+        kullanici = cache.get("kullanici") or {}
+        if not device_token or not kullanici:
             return self.taninan_bilgisayar_giris_dene()
-        sonuc = {"ok": False}
-        tamam = tk.BooleanVar(value=False)
-        sonuc_kuyrugu = queue.Queue()
-
-        def worker():
-            try:
-                sonuc_kuyrugu.put(bool(self.taninan_bilgisayar_giris_dene()))
-            except Exception as e:
-                self.hata_gunlugu_yaz("Hatırlanan oturum başlangıç hatası", e)
-                sonuc_kuyrugu.put(False)
-
-        def poll():
-            try:
-                sonuc["ok"] = bool(sonuc_kuyrugu.get_nowait())
-            except queue.Empty:
-                try:
-                    self.root.after(90, poll)
-                except tk.TclError:
-                    pass
-                return
-            try:
-                tamam.set(True)
-            except tk.TclError:
-                pass
-
-        threading.Thread(target=worker, daemon=True, name="alp-remembered-login").start()
-        try:
-            self.root.after(90, poll)
-            self.root.wait_variable(tamam)
-        except tk.TclError:
+        if cache.get("api_url") and cache.get("api_url") != getattr(self, "api_url", ""):
             return False
-        return sonuc["ok"]
+        self.api_token = None
+        self.api_kullanici = kullanici
+        self.api_offline_oturum = True
+        self._hatirlanan_oturum_cache_ile_acildi = True
+        self.otomatik_baglanti_ilk_gecikme_ms = 1500
+        self.api_baglanti_durumu_ata(
+            "offline",
+            ApiHatasi("Kayıtlı oturum yerel önbellekle açıldı; sunucu arka planda kontrol edilecek."),
+            ui_guncelle=False,
+        )
+        return True
 
     def bekleyen_senkron_yukle(self):
         veri = self.json_dosyasi_yukle(
@@ -4371,7 +4369,10 @@ class HayvanTakipSistemi:
                         messagebox.showerror("Admin Merkezi", f"Yönetim verileri alınamadı:\n{e}", parent=self.root)
                 return False
 
-        verileri_yenile(sessiz=True)
+        if getattr(self, "api_offline_oturum", False):
+            admin_onbellekten_yukle()
+        else:
+            verileri_yenile(sessiz=True)
 
         for child in self.root.winfo_children():
             child.destroy()
