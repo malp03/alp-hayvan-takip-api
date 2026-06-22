@@ -46,7 +46,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.43"
+APP_VERSION = "1.9.44"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -195,9 +195,13 @@ class HayvanTakipSistemi:
             self.otomatik_baglanti_araligi_ms = 8 * 60 * 1000
             self.otomatik_baglanti_hata_araligi_ms = 60 * 1000
             self.otomatik_baglanti_ilk_gecikme_ms = 30 * 1000
+            self.hatirlanan_giris_timeout = 7
+            if self.api_modu and self.hatirlanan_giris_kaydi_var_mi():
+                self.baslangic_bekleme_ekrani_goster("Sunucu kontrol ediliyor", "Kayıtlı oturum hazırlanıyor. Sunucu uyuyorsa uygulama çevrimdışı açılır.")
             if self.api_modu and not self.login_akisini_baslat():
                 self.root.destroy()
                 return
+            self.baslangic_bekleme_ekrani_kapat()
             self.hayvanlar = self.veri_yukle()
             self.geri_al_yigini = []
             if getattr(self, "_veri_migrasyonu_gerekli", False):
@@ -310,6 +314,73 @@ class HayvanTakipSistemi:
         self.root.option_add('*TCombobox*Listbox.foreground', self.renkler["yazi_rengi"])
         self.root.option_add('*TCombobox*Listbox.selectBackground', self.renkler["button_primary_bg"])
         self.root.option_add('*TCombobox*Listbox.selectForeground', '#FFFFFF')
+
+    def hatirlanan_giris_kaydi_var_mi(self):
+        try:
+            return bool(os.path.exists(getattr(self, "remembered_session_file", "")))
+        except Exception:
+            return False
+
+    def baslangic_bekleme_ekrani_goster(self, baslik, aciklama):
+        try:
+            for child in self.root.winfo_children():
+                child.destroy()
+            self.root.title("ALP Ziraat - Açılıyor")
+            self.root.geometry("520x280")
+            self.root.minsize(520, 280)
+            self.root.resizable(False, False)
+            self.root.configure(bg=self.renkler["arkaplan"])
+
+            sayfa = tk.Frame(self.root, bg=self.renkler["arkaplan"])
+            sayfa.pack(fill="both", expand=True)
+            kutu = tk.Frame(
+                sayfa,
+                bg=self.renkler["kart_arkaplan"],
+                padx=30,
+                pady=28,
+                highlightthickness=1,
+                highlightbackground=self.renkler["kenarlik"],
+            )
+            kutu.pack(fill="both", expand=True, padx=28, pady=28)
+            self.themed_widgets.append((kutu, "kart"))
+
+            tk.Label(
+                kutu,
+                text="ALP ZİRAAT",
+                bg=self.renkler["kart_arkaplan"],
+                fg=self.renkler["ana_kirmizi"],
+                font=("Segoe UI", 22, "bold"),
+            ).pack(anchor="w")
+            tk.Label(
+                kutu,
+                text=baslik,
+                bg=self.renkler["kart_arkaplan"],
+                fg=self.renkler["yazi_rengi"],
+                font=("Segoe UI", 14, "bold"),
+            ).pack(anchor="w", pady=(18, 6))
+            tk.Label(
+                kutu,
+                text=aciklama,
+                bg=self.renkler["kart_arkaplan"],
+                fg=self.renkler["muted"],
+                font=("Segoe UI", 10),
+                wraplength=430,
+                justify="left",
+            ).pack(anchor="w", fill="x")
+            self.root.deiconify()
+            self.root.update_idletasks()
+            self.root.update()
+        except tk.TclError:
+            pass
+
+    def baslangic_bekleme_ekrani_kapat(self):
+        try:
+            for child in self.root.winfo_children():
+                child.destroy()
+            self.themed_widgets = []
+            self.themed_buttons = []
+        except tk.TclError:
+            pass
 
     def _hex_to_rgb(self, hex_color):
         hex_color = hex_color.lstrip('#')
@@ -2404,7 +2475,7 @@ class HayvanTakipSistemi:
                 "POST",
                 "/api/auth/device-login",
                 {"device_token": device_token},
-                timeout=25,
+                timeout=getattr(self, "hatirlanan_giris_timeout", 7),
                 auth=False,
             )
             token = (yanit or {}).get("access_token")
