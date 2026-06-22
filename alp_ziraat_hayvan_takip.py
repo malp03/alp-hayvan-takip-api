@@ -202,8 +202,10 @@ class HayvanTakipSistemi:
             if self.api_modu and not self.login_akisini_baslat():
                 self.root.destroy()
                 return
-            self.baslangic_bekleme_ekrani_kapat()
-            self.ana_pencere_boyutunu_ayarla()
+            self.baslangic_bekleme_ekrani_goster(
+                "Uygulama hazırlanıyor",
+                "Yerel önbellek ve ekranlar hazırlanıyor. Ana pencere birazdan açılacak.",
+            )
             self.hayvanlar = self.veri_yukle()
             self.geri_al_yigini = []
             if getattr(self, "_veri_migrasyonu_gerekli", False):
@@ -218,7 +220,10 @@ class HayvanTakipSistemi:
             self._otomatik_baglanti_after_id = None
             self._kapanis_istegi = False
             self._ui_callback_after_id = self.root.after(50, self._ui_callback_kuyrugunu_isle)
+            self.baslangic_bekleme_ekrani_kapat()
+            self.ana_pencere_boyutunu_ayarla(goster=False)
             self.ana_interface_olustur()
+            self.ana_pencereyi_goster()
             self.uyari_sistemi_baslat()
             self._pending_update_notes = self.guncelleme_notu_yukle()
             self._track_after(self.root, 900, self.guncelleme_baslangic_akisi)
@@ -466,15 +471,33 @@ class HayvanTakipSistemi:
         except tk.TclError:
             pass
 
-    def ana_pencere_boyutunu_ayarla(self):
+    def ana_pencere_boyutunu_ayarla(self, goster=True):
         try:
+            if not goster:
+                self.root.withdraw()
             self.root.title("ALP Ziraat - Sürü Takip Sistemi")
-            self.root.geometry("1500x900")
-            self.root.minsize(1000, 700)
+            ekran_w = self.root.winfo_screenwidth()
+            ekran_h = self.root.winfo_screenheight()
+            genislik = min(1500, max(1000, ekran_w - 120))
+            yukseklik = min(900, max(700, ekran_h - 120))
+            x = max(0, (ekran_w - genislik) // 2)
+            y = max(0, (ekran_h - yukseklik) // 2)
+            self.root.geometry(f"{genislik}x{yukseklik}+{x}+{y}")
+            self.root.minsize(min(1000, genislik), min(700, yukseklik))
             self.root.resizable(True, True)
             self.root.configure(bg=self.renkler["arkaplan"])
             self.root.update_idletasks()
+            if goster:
+                self.ana_pencereyi_goster()
+        except tk.TclError:
+            pass
+
+    def ana_pencereyi_goster(self):
+        try:
+            self.root.update_idletasks()
+            self.root.deiconify()
             self.root.lift()
+            self.root.focus_force()
         except tk.TclError:
             pass
 
