@@ -71,6 +71,10 @@ def main():
             assert app._baslatma_tamam is True
             assert login_prompt["count"] == 0, "remembered device login did not happen on startup"
             assert app.api_kullanici and app.api_kullanici.get("rol") == "admin"
+            assert getattr(app, "_hatirlanan_oturum_cache_ile_acildi", False) is True
+            assert getattr(app, "api_offline_oturum", False) is True
+            assert app.root.winfo_width() >= 1000, "remembered startup left app at splash width"
+            assert app.root.winfo_height() >= 700, "remembered startup left app at splash height"
             assert (cfg_dir / "taninan_bilgisayar.json").exists()
             app.oturumu_kapat_ve_login(onay_iste=False)
             assert login_prompt["count"] == 1, "logout should force manual login instead of remembered auto-login"
