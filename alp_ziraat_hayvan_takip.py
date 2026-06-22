@@ -326,47 +326,138 @@ class HayvanTakipSistemi:
             for child in self.root.winfo_children():
                 child.destroy()
             self.root.title("ALP Ziraat - Açılıyor")
-            self.root.geometry("520x280")
-            self.root.minsize(520, 280)
+            genislik = 620
+            yukseklik = 360
+            self.root.geometry(f"{genislik}x{yukseklik}")
+            self.root.minsize(genislik, yukseklik)
             self.root.resizable(False, False)
             self.root.configure(bg=self.renkler["arkaplan"])
 
             sayfa = tk.Frame(self.root, bg=self.renkler["arkaplan"])
             sayfa.pack(fill="both", expand=True)
+            ust_serit = tk.Frame(sayfa, bg=self.renkler["ana_kirmizi"], height=4)
+            ust_serit.pack(fill="x")
+
             kutu = tk.Frame(
                 sayfa,
                 bg=self.renkler["kart_arkaplan"],
-                padx=30,
-                pady=28,
+                padx=34,
+                pady=30,
                 highlightthickness=1,
                 highlightbackground=self.renkler["kenarlik"],
             )
-            kutu.pack(fill="both", expand=True, padx=28, pady=28)
+            kutu.pack(fill="both", expand=True, padx=34, pady=32)
             self.themed_widgets.append((kutu, "kart"))
+
+            ust = tk.Frame(kutu, bg=self.renkler["kart_arkaplan"])
+            ust.pack(fill="x")
+            self.themed_widgets.append((ust, "kart"))
+            logo_gosterildi = False
+            if PIL_AVAILABLE and os.path.exists(getattr(self, "logo_path", "")):
+                try:
+                    logo_img = Image.open(self.logo_path).convert("RGBA")
+                    logo_img.thumbnail((190, 70), Image.Resampling.LANCZOS)
+                    self.splash_logo_gorsel = ImageTk.PhotoImage(logo_img)
+                    tk.Label(ust, image=self.splash_logo_gorsel, bg=self.renkler["kart_arkaplan"]).pack(side="left")
+                    logo_gosterildi = True
+                except Exception:
+                    logo_gosterildi = False
+            if not logo_gosterildi:
+                tk.Label(
+                    ust,
+                    text="ALP ZİRAAT",
+                    bg=self.renkler["kart_arkaplan"],
+                    fg=self.renkler["ana_kirmizi"],
+                    font=("Segoe UI", 23, "bold"),
+                ).pack(side="left")
+
+            tk.Label(
+                ust,
+                text=f"v{APP_VERSION}",
+                bg=self.renkler["kart_arkaplan"],
+                fg=self.renkler["muted"],
+                font=("Segoe UI", 10, "bold"),
+            ).pack(side="right", anchor="n", pady=(6, 0))
 
             tk.Label(
                 kutu,
-                text="ALP ZİRAAT",
+                text="Sürü Takip Sistemi",
                 bg=self.renkler["kart_arkaplan"],
-                fg=self.renkler["ana_kirmizi"],
-                font=("Segoe UI", 22, "bold"),
-            ).pack(anchor="w")
+                fg=self.renkler["muted"],
+                font=("Segoe UI", 10, "bold"),
+            ).pack(anchor="w", pady=(18, 4))
             tk.Label(
                 kutu,
                 text=baslik,
                 bg=self.renkler["kart_arkaplan"],
                 fg=self.renkler["yazi_rengi"],
-                font=("Segoe UI", 14, "bold"),
-            ).pack(anchor="w", pady=(18, 6))
+                font=("Segoe UI", 17, "bold"),
+            ).pack(anchor="w", pady=(0, 8))
             tk.Label(
                 kutu,
                 text=aciklama,
                 bg=self.renkler["kart_arkaplan"],
                 fg=self.renkler["muted"],
-                font=("Segoe UI", 10),
-                wraplength=430,
+                font=("Segoe UI", 10, "bold"),
+                wraplength=500,
                 justify="left",
             ).pack(anchor="w", fill="x")
+
+            durum_satiri = tk.Frame(kutu, bg=self.renkler["kart_arkaplan"])
+            durum_satiri.pack(fill="x", pady=(24, 10))
+            self.themed_widgets.append((durum_satiri, "kart"))
+            durum_noktasi = tk.Canvas(
+                durum_satiri,
+                width=12,
+                height=12,
+                bg=self.renkler["kart_arkaplan"],
+                highlightthickness=0,
+            )
+            durum_noktasi.create_oval(2, 2, 10, 10, fill=self.renkler["uyari"], outline="")
+            durum_noktasi.pack(side="left", padx=(0, 9))
+            tk.Label(
+                durum_satiri,
+                text="Kayıtlı oturum doğrulanıyor",
+                bg=self.renkler["kart_arkaplan"],
+                fg=self.renkler["yazi_rengi"],
+                font=("Segoe UI", 10, "bold"),
+            ).pack(side="left")
+
+            try:
+                style = ttk.Style()
+                style.configure(
+                    "Splash.Horizontal.TProgressbar",
+                    troughcolor=self.renkler["input_bg"],
+                    background=self.renkler["ana_kirmizi"],
+                    bordercolor=self.renkler["kenarlik"],
+                    lightcolor=self.renkler["ana_kirmizi"],
+                    darkcolor=self.renkler["ana_kirmizi"],
+                    thickness=6,
+                )
+                self._splash_progress = ttk.Progressbar(
+                    kutu,
+                    mode="indeterminate",
+                    style="Splash.Horizontal.TProgressbar",
+                    length=500,
+                )
+                self._splash_progress.pack(fill="x", pady=(0, 2))
+                self._splash_progress.start(12)
+            except tk.TclError:
+                self._splash_progress = None
+
+            alt = tk.Label(
+                kutu,
+                text="Sunucu yanıtı gecikirse uygulama yerel önbellekle açılır.",
+                bg=self.renkler["kart_arkaplan"],
+                fg=self.renkler["muted"],
+                font=("Segoe UI", 9),
+            )
+            alt.pack(anchor="w", pady=(12, 0))
+
+            self.root.update_idletasks()
+            x = max(0, (self.root.winfo_screenwidth() - genislik) // 2)
+            y = max(0, (self.root.winfo_screenheight() - yukseklik) // 2)
+            self.root.geometry(f"{genislik}x{yukseklik}+{x}+{y}")
             self.root.deiconify()
             self.root.update_idletasks()
             self.root.update()
@@ -375,6 +466,13 @@ class HayvanTakipSistemi:
 
     def baslangic_bekleme_ekrani_kapat(self):
         try:
+            progress = getattr(self, "_splash_progress", None)
+            if progress is not None:
+                try:
+                    progress.stop()
+                except tk.TclError:
+                    pass
+            self._splash_progress = None
             for child in self.root.winfo_children():
                 child.destroy()
             self.themed_widgets = []
@@ -2499,6 +2597,42 @@ class HayvanTakipSistemi:
             print(f"Tanınan bilgisayar girişi başarısız: {e}")
             return False
 
+    def taninan_bilgisayar_giris_baslangicta_dene(self):
+        if not self.hatirlanan_giris_kaydi_var_mi():
+            return self.taninan_bilgisayar_giris_dene()
+        sonuc = {"ok": False}
+        tamam = tk.BooleanVar(value=False)
+        sonuc_kuyrugu = queue.Queue()
+
+        def worker():
+            try:
+                sonuc_kuyrugu.put(bool(self.taninan_bilgisayar_giris_dene()))
+            except Exception as e:
+                self.hata_gunlugu_yaz("Hatırlanan oturum başlangıç hatası", e)
+                sonuc_kuyrugu.put(False)
+
+        def poll():
+            try:
+                sonuc["ok"] = bool(sonuc_kuyrugu.get_nowait())
+            except queue.Empty:
+                try:
+                    self.root.after(90, poll)
+                except tk.TclError:
+                    pass
+                return
+            try:
+                tamam.set(True)
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, daemon=True, name="alp-remembered-login").start()
+        try:
+            self.root.after(90, poll)
+            self.root.wait_variable(tamam)
+        except tk.TclError:
+            return False
+        return sonuc["ok"]
+
     def bekleyen_senkron_yukle(self):
         veri = self.json_dosyasi_yukle(
             getattr(self, "pending_sync_file", ""),
@@ -3248,7 +3382,7 @@ class HayvanTakipSistemi:
             self.api_oturumu_temizle()
             otomatik_giris_basarili = False
             if otomatik_giris:
-                otomatik_giris_basarili = self.taninan_bilgisayar_giris_dene()
+                otomatik_giris_basarili = self.taninan_bilgisayar_giris_baslangicta_dene()
             if not otomatik_giris_basarili and not self.api_giris_penceresi():
                 return False
             if not self.admin_mi():
