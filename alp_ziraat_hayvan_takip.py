@@ -46,7 +46,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "1.9.45"
+APP_VERSION = "2.0"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -206,6 +206,9 @@ class HayvanTakipSistemi:
             self.geri_al_yigini = []
             self.okunan_uyarilar = set()
             self.islem_gecmisi = []
+            self.api_son_islemler = []
+            self.api_son_islemler_yuklendi = False
+            self._api_son_islemler_yenileniyor = False
             self.uyari_thread_running = False
             self._uyari_after_id = None
             self._saat_after_id = None
@@ -3392,6 +3395,7 @@ class HayvanTakipSistemi:
                 raise ApiHatasi(hata)
             hayvanlar = self.api_hayvanlari_yukle()
         self.hayvanlar = hayvanlar or {}
+        self.api_son_islemleri_yenile(limit=20)
         self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
         if ui_guncelle and hasattr(self, "notebook"):
             self.ekranlari_guncelle()
@@ -3520,6 +3524,8 @@ class HayvanTakipSistemi:
         self.geri_al_yigini = []
         self.okunan_uyarilar = self.okunan_uyarilar_yukle()
         self.islem_gecmisi = self.islem_gecmisi_yukle()
+        self.api_son_islemler = []
+        self.api_son_islemler_yuklendi = False
         self.uyari_thread_running = True
         self._kapanis_istegi = False
         self.ana_interface_olustur()
@@ -3794,6 +3800,64 @@ class HayvanTakipSistemi:
         query = urllib.parse.urlencode(params)
         kayitlar = self.api_istek("GET", f"/api/islem-gecmisi?{query}", timeout=20)
         return kayitlar if isinstance(kayitlar, list) else []
+
+    def api_islem_gecmisi_dashboarda_cevir(self, kayitlar):
+        sonuc = []
+        for kayit in kayitlar if isinstance(kayitlar, list) else []:
+            if not isinstance(kayit, dict):
+                continue
+            zaman = kayit.get("zaman") or "-"
+            aciklama = kayit.get("detay") or kayit.get("aciklama") or ""
+            if not aciklama:
+                islem_tipi = kayit.get("islem_tipi") or "İşlem kaydı"
+                hedef = kayit.get("hedef_id") or kayit.get("hedef_tipi") or ""
+                aciklama = f"{islem_tipi}: {hedef}" if hedef else str(islem_tipi)
+            sonuc.append({"zaman": str(zaman), "aciklama": str(aciklama)})
+        return sonuc
+
+    def api_son_islemleri_yenile(self, limit=20):
+        if not getattr(self, "api_modu", False) or not getattr(self, "api_token", None):
+            return getattr(self, "api_son_islemler", [])
+        try:
+            kayitlar = self.api_islem_gecmisi_yukle(limit)
+        except Exception as e:
+            self.hata_gunlugu_yaz("API son işlemler yenileme hatası", e)
+            return getattr(self, "api_son_islemler", [])
+        self.api_son_islemler = self.api_islem_gecmisi_dashboarda_cevir(kayitlar)[:limit]
+        self.api_son_islemler_yuklendi = True
+        return self.api_son_islemler
+
+    def api_son_islemleri_yenile_async(self, limit=20):
+        if (
+            not getattr(self, "api_modu", False)
+            or not getattr(self, "api_token", None)
+            or getattr(self, "_api_son_islemler_yenileniyor", False)
+        ):
+            return
+        self._api_son_islemler_yenileniyor = True
+
+        def worker():
+            hata = None
+            kayitlar = None
+            try:
+                with self._api_ag_lock:
+                    kayitlar = self.api_islem_gecmisi_yukle(limit)
+            except Exception as e:
+                hata = e
+
+            def tamamla():
+                self._api_son_islemler_yenileniyor = False
+                if hata is not None:
+                    self.hata_gunlugu_yaz("API son işlemler arka plan yenileme hatası", hata)
+                    return
+                self.api_son_islemler = self.api_islem_gecmisi_dashboarda_cevir(kayitlar)[:limit]
+                self.api_son_islemler_yuklendi = True
+                if hasattr(self, "dashboard_son_list"):
+                    self.dashboard_guncelle()
+
+            self.ui_threadinde_calistir(tamamla)
+
+        threading.Thread(target=worker, daemon=True, name="alp-api-son-islemler").start()
 
     def admin_online_yedek_indir(self, parent=None):
         parent = parent or self.root
@@ -5800,6 +5864,24 @@ class HayvanTakipSistemi:
             mevcut_kimlikler.update(kimlikler)
             self._veri_migrasyonu_gerekli = True
 
+    def api_onbellek_hayvanlari_yukle(self):
+        json_veri = self.json_dosyasi_yukle(self.data_file, {}, "hayvan_verileri")
+        if not isinstance(json_veri, dict):
+            json_veri = {}
+
+        hayvanlar_dict = {}
+        mevcut_kimlikler = set()
+        for h_id, veri in json_veri.items():
+            tamamlanmis = self.hayvan_kayit_tamamla(h_id, veri)
+            kimlikler = self.hayvan_kimlikleri(h_id, tamamlanmis)
+            if str(h_id) in hayvanlar_dict or mevcut_kimlikler.intersection(kimlikler):
+                continue
+            hayvanlar_dict[str(h_id)] = tamamlanmis
+            mevcut_kimlikler.update(kimlikler)
+
+        self._api_son_idler = set(hayvanlar_dict.keys())
+        return hayvanlar_dict
+
     def veri_yukle(self, cevrimici_dene=True, hata_mesaji_goster=True, ui_guncelle=True):
         self._veri_migrasyonu_gerekli = False
         if cevrimici_dene and getattr(self, "api_modu", False) and not getattr(self, "api_offline_oturum", False):
@@ -5821,6 +5903,9 @@ class HayvanTakipSistemi:
 
         if getattr(self, "api_modu", False) and getattr(self, "api_offline_oturum", False):
             self.api_cevrimdisi = True
+
+        if getattr(self, "api_modu", False):
+            return self.api_onbellek_hayvanlari_yukle()
 
         hayvanlar_dict = {}
         db = None
@@ -6026,9 +6111,21 @@ class HayvanTakipSistemi:
             db = SessionLocal()
             gecmis = [{'id': g.id, 'zaman': g.zaman, 'aciklama': g.detay} for g in db.query(IslemGecmisi).all()]
             db.close()
-            return gecmis
+            return self.islem_gecmisi_sirala(gecmis)
         except:
             return []
+
+    def islem_gecmisi_sirala(self, kayitlar):
+        def zaman_degeri(kayit):
+            zaman = str((kayit or {}).get("zaman") or "")
+            for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    return datetime.strptime(zaman[:19], fmt)
+                except ValueError:
+                    pass
+            return datetime.min
+
+        return sorted(kayitlar if isinstance(kayitlar, list) else [], key=zaman_degeri, reverse=True)
 
     def islem_kaydi_baslat(self, aciklama, geri_alinabilir=True, geri_alinamaz_neden=None):
         if hasattr(self, "hayvanlar"):
@@ -6872,6 +6969,12 @@ class HayvanTakipSistemi:
         self.dashboard_guncelle()
         self.header_ozet_guncelle()
         self.api_durum_guncelle()
+        if (
+            getattr(self, "api_modu", False)
+            and getattr(self, "api_baglanti_durumu", None) == "online"
+            and not getattr(self, "api_son_islemler_yuklendi", False)
+        ):
+            self.api_son_islemleri_yenile_async(limit=20)
         self.hayvan_listesini_guncelle()
         self.uyarilari_guncelle()
         self.asi_prosedur_listesini_guncelle()
@@ -7171,6 +7274,13 @@ class HayvanTakipSistemi:
         alt_grid.after_idle(alt_yerlesim)
         self.dashboard_guncelle()
 
+    def dashboard_son_islem_kayitlari(self):
+        if getattr(self, "api_modu", False):
+            if getattr(self, "api_son_islemler_yuklendi", False):
+                return (getattr(self, "api_son_islemler", []) or [])[:8], "Merkezde işlem kaydı yok."
+            return [], "Son işlemler API bağlantısı kurulunca güncellenecek."
+        return self.islem_gecmisi_sirala(getattr(self, "islem_gecmisi", []))[:8], "Henüz işlem kaydı yok."
+
     def dashboard_guncelle(self):
         if not hasattr(self, "dashboard_metric_labels"):
             return
@@ -7188,10 +7298,11 @@ class HayvanTakipSistemi:
                 self.dashboard_isler_tree.insert("", "end", values=("Bekleyen iş yok", "-", "-", "-"))
         if hasattr(self, "dashboard_son_list") and self.dashboard_son_list.winfo_exists():
             self.dashboard_son_list.delete(0, tk.END)
-            for kayit in (self.islem_gecmisi[:8] if isinstance(self.islem_gecmisi, list) else []):
+            son_kayitlar, bos_mesaj = self.dashboard_son_islem_kayitlari()
+            for kayit in son_kayitlar:
                 self.dashboard_son_list.insert(tk.END, f"{kayit.get('zaman', '-')}  {kayit.get('aciklama', '-')}")
             if self.dashboard_son_list.size() == 0:
-                self.dashboard_son_list.insert(tk.END, "Henüz işlem kaydı yok.")
+                self.dashboard_son_list.insert(tk.END, bos_mesaj)
         if hasattr(self, "dashboard_ciftlik_label") and self.dashboard_ciftlik_label.winfo_exists():
             kullanici = getattr(self, "api_kullanici", None) or {}
             ciftlik = (
