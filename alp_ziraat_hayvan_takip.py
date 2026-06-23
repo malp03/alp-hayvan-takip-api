@@ -202,17 +202,11 @@ class HayvanTakipSistemi:
             if self.api_modu and not self.login_akisini_baslat():
                 self.root.destroy()
                 return
-            self.baslangic_bekleme_ekrani_goster(
-                "Uygulama hazırlanıyor",
-                "Yerel önbellek ve ekranlar hazırlanıyor. Ana pencere birazdan açılacak.",
-            )
-            self.hayvanlar = self.veri_yukle()
+            self.hayvanlar = {}
             self.geri_al_yigini = []
-            if getattr(self, "_veri_migrasyonu_gerekli", False):
-                self.veri_kaydet()
-            self.okunan_uyarilar = self.okunan_uyarilar_yukle()
-            self.islem_gecmisi = self.islem_gecmisi_yukle()
-            self.uyari_thread_running = True
+            self.okunan_uyarilar = set()
+            self.islem_gecmisi = []
+            self.uyari_thread_running = False
             self._uyari_after_id = None
             self._saat_after_id = None
             self._baslangic_after_id = None
@@ -220,14 +214,15 @@ class HayvanTakipSistemi:
             self._otomatik_baglanti_after_id = None
             self._kapanis_istegi = False
             self._ui_callback_after_id = self.root.after(50, self._ui_callback_kuyrugunu_isle)
-            self.baslangic_bekleme_ekrani_kapat()
-            self.ana_pencere_boyutunu_ayarla(goster=False)
-            self.ana_interface_olustur()
-            self.ana_pencereyi_goster()
-            self.uyari_sistemi_baslat()
-            self._pending_update_notes = self.guncelleme_notu_yukle()
-            self._track_after(self.root, 900, self.guncelleme_baslangic_akisi)
             self._baslatma_tamam = True
+            self._baslangic_hazirligi_tamam = False
+            self.baslangic_bekleme_ekrani_goster(
+                "Uygulama hazırlanıyor",
+                "Yerel önbellek ve ekranlar hazırlanıyor. Ana pencere birazdan açılacak.",
+                durum="Veriler yükleniyor",
+                alt_metin="Bu ekran açık kalırken uygulama arka planda hazırlanır.",
+            )
+            self._baslangic_after_id = self._track_after(self.root, 120, self.baslangic_hazirligini_baslat)
 
         except Exception as e:
             self.hata_gunlugu_yaz("Başlatma hatası", e)
@@ -328,7 +323,13 @@ class HayvanTakipSistemi:
         except Exception:
             return False
 
-    def baslangic_bekleme_ekrani_goster(self, baslik, aciklama):
+    def baslangic_bekleme_ekrani_goster(
+        self,
+        baslik,
+        aciklama,
+        durum="Kayıtlı oturum doğrulanıyor",
+        alt_metin="Sunucu yanıtı gecikirse uygulama yerel önbellekle açılır.",
+    ):
         try:
             for child in self.root.winfo_children():
                 child.destroy()
@@ -424,7 +425,7 @@ class HayvanTakipSistemi:
             durum_noktasi.pack(side="left", padx=(0, 9))
             tk.Label(
                 durum_satiri,
-                text="Kayıtlı oturum doğrulanıyor",
+                text=durum,
                 bg=self.renkler["kart_arkaplan"],
                 fg=self.renkler["yazi_rengi"],
                 font=("Segoe UI", 10, "bold"),
@@ -454,7 +455,7 @@ class HayvanTakipSistemi:
 
             alt = tk.Label(
                 kutu,
-                text="Sunucu yanıtı gecikirse uygulama yerel önbellekle açılır.",
+                text=alt_metin,
                 bg=self.renkler["kart_arkaplan"],
                 fg=self.renkler["muted"],
                 font=("Segoe UI", 9),
@@ -516,6 +517,67 @@ class HayvanTakipSistemi:
             self.themed_buttons = []
         except tk.TclError:
             pass
+
+    def baslangic_hazirligini_baslat(self):
+        if getattr(self, "_kapanis_istegi", False):
+            return
+
+        def worker():
+            sonuc = {}
+            try:
+                sonuc["hayvanlar"] = self.veri_yukle(
+                    cevrimici_dene=False,
+                    hata_mesaji_goster=False,
+                    ui_guncelle=False,
+                )
+                sonuc["veri_migrasyonu_gerekli"] = getattr(self, "_veri_migrasyonu_gerekli", False)
+                sonuc["okunan_uyarilar"] = self.okunan_uyarilar_yukle()
+                sonuc["islem_gecmisi"] = self.islem_gecmisi_yukle()
+                sonuc["pending_update_notes"] = self.guncelleme_notu_yukle()
+            except Exception as e:
+                sonuc["hata"] = e
+                sonuc["traceback"] = traceback.format_exc()
+
+            self.ui_threadinde_calistir(lambda sonuc=sonuc: self.baslangic_hazirligini_tamamla(sonuc))
+
+        threading.Thread(target=worker, daemon=True, name="alp-startup-load").start()
+
+    def baslangic_hazirligini_tamamla(self, sonuc):
+        if getattr(self, "_kapanis_istegi", False):
+            return
+        hata = sonuc.get("hata")
+        if hata is not None:
+            self.hata_gunlugu_yaz("Baslangic hazirligi hatasi", hata)
+            self.baslangic_bekleme_ekrani_kapat()
+            messagebox.showerror("Baslatma Hatasi", f"Uygulama baslatilamadi:\n{hata}", parent=self.root)
+            self.uygulamayi_kapat()
+            return
+
+        self.hayvanlar = sonuc.get("hayvanlar") or {}
+        self.geri_al_yigini = []
+        self.okunan_uyarilar = sonuc.get("okunan_uyarilar") or set()
+        self.islem_gecmisi = sonuc.get("islem_gecmisi") or []
+        self._pending_update_notes = sonuc.get("pending_update_notes")
+
+        if sonuc.get("veri_migrasyonu_gerekli"):
+            if getattr(self, "api_modu", False):
+                self.json_dosyasi_kaydet(
+                    self.data_file,
+                    self.hayvanlar,
+                    "hayvan_verileri",
+                    "API Onbellek Kayit Hatasi",
+                )
+            else:
+                self.veri_kaydet()
+
+        self.uyari_thread_running = True
+        self.baslangic_bekleme_ekrani_kapat()
+        self.ana_pencere_boyutunu_ayarla(goster=False)
+        self.ana_interface_olustur()
+        self.ana_pencereyi_goster()
+        self.uyari_sistemi_baslat()
+        self._track_after(self.root, 900, self.guncelleme_baslangic_akisi)
+        self._baslangic_hazirligi_tamam = True
 
     def _hex_to_rgb(self, hex_color):
         hex_color = hex_color.lstrip('#')
@@ -5720,9 +5782,9 @@ class HayvanTakipSistemi:
             mevcut_kimlikler.update(kimlikler)
             self._veri_migrasyonu_gerekli = True
 
-    def veri_yukle(self):
+    def veri_yukle(self, cevrimici_dene=True, hata_mesaji_goster=True, ui_guncelle=True):
         self._veri_migrasyonu_gerekli = False
-        if getattr(self, "api_modu", False) and not getattr(self, "api_offline_oturum", False):
+        if cevrimici_dene and getattr(self, "api_modu", False) and not getattr(self, "api_offline_oturum", False):
             try:
                 hayvanlar_dict = self.api_hayvanlari_yukle()
                 self.json_dosyasi_kaydet(self.data_file, hayvanlar_dict, "hayvan_verileri", "API Önbellek Kayıt Hatası")
@@ -5731,8 +5793,10 @@ class HayvanTakipSistemi:
                 self.api_cevrimdisi = True
                 self._api_son_hata = str(e)
                 self.bekleyen_senkron_snapshot_guncelle()
-                self.api_durum_guncelle()
-                messagebox.showwarning(
+                if ui_guncelle:
+                    self.api_durum_guncelle()
+                if hata_mesaji_goster:
+                    messagebox.showwarning(
                     "API Bağlantı Hatası",
                     f"Merkezi API'ye bağlanılamadı.\n\n{e}\n\nSon yerel önbellek açılacak; bağlantı düzelince kayıtlar tekrar API'ye gönderilir."
                 )
@@ -11448,6 +11512,7 @@ class HayvanTakipSistemi:
         self._kapanis_istegi = True
         self.uyari_thread_running = False
         self._cancel_tracked_afters()
+        self.baslangic_bekleme_ekrani_kapat()
         for after_attr in (
             "_uyari_after_id",
             "_saat_after_id",
