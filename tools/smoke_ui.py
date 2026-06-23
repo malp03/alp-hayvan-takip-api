@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 import tkinter as tk
 
@@ -84,6 +85,16 @@ def widgets_by_class(widget, cls):
     return bulunan
 
 
+def wait_for_startup(app, timeout=8):
+    start = time.time()
+    while time.time() - start < timeout:
+        app.root.update()
+        if getattr(app, "_baslangic_hazirligi_tamam", False):
+            return
+        time.sleep(0.02)
+    raise AssertionError("startup did not complete")
+
+
 def assert_main_layout(app):
     app.root.geometry("1280x820")
     app.root.update_idletasks()
@@ -131,6 +142,7 @@ def main():
 
     app = appmod.HayvanTakipSistemi()
     try:
+        wait_for_startup(app)
         assert_main_layout(app)
         for entry_name in ("dogum_tarihi_entry", "tohumlama_tarih_entry"):
             entry = getattr(app, entry_name)

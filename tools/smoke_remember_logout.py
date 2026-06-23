@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from smoke_api import request
@@ -38,6 +39,16 @@ def prepare_appdata(base_url, device_token, kullanici):
     return cfg_dir
 
 
+def wait_until(app, predicate, timeout=8):
+    start = time.time()
+    while time.time() - start < timeout:
+        app.root.update()
+        if predicate():
+            return
+        time.sleep(0.02)
+    raise AssertionError("startup did not complete")
+
+
 def main():
     proc, base_url = start_api()
     try:
@@ -68,6 +79,7 @@ def main():
 
         app = appmod.HayvanTakipSistemi()
         try:
+            wait_until(app, lambda: getattr(app, "_baslangic_hazirligi_tamam", False))
             assert app._baslatma_tamam is True
             assert login_prompt["count"] == 0, "remembered device login did not happen on startup"
             assert app.api_kullanici and app.api_kullanici.get("rol") == "admin"
@@ -75,6 +87,12 @@ def main():
             assert getattr(app, "api_offline_oturum", False) is True
             assert app.root.winfo_width() >= 1000, "remembered startup left app at splash width"
             assert app.root.winfo_height() >= 700, "remembered startup left app at splash height"
+            screen_w = app.root.winfo_screenwidth()
+            screen_h = app.root.winfo_screenheight()
+            center_x = app.root.winfo_x() + app.root.winfo_width() / 2
+            center_y = app.root.winfo_y() + app.root.winfo_height() / 2
+            assert abs(center_x - screen_w / 2) <= max(80, screen_w * 0.08), "main window is not horizontally centered"
+            assert abs(center_y - screen_h / 2) <= max(80, screen_h * 0.08), "main window is not vertically centered"
             assert (cfg_dir / "taninan_bilgisayar.json").exists()
             app.oturumu_kapat_ve_login(onay_iste=False)
             assert login_prompt["count"] == 1, "logout should force manual login instead of remembered auto-login"

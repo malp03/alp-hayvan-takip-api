@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
@@ -99,6 +100,16 @@ def assert_main_layout(app):
     assert tab_y < notebook_y, f"tab bar is below content after login: tab_y={tab_y}, notebook_y={notebook_y}"
 
 
+def wait_for_startup(app, timeout=8):
+    start = time.time()
+    while time.time() - start < timeout:
+        app.root.update()
+        if getattr(app, "_baslangic_hazirligi_tamam", False):
+            return
+        time.sleep(0.02)
+    raise AssertionError("startup did not complete")
+
+
 def main():
     proc, base_url = start_api()
     prepare_appdata(base_url)
@@ -167,6 +178,7 @@ def main():
 
         app = appmod.HayvanTakipSistemi()
         try:
+            wait_for_startup(app)
             assert app._baslatma_tamam is True
             assert app.api_kullanici and app.api_kullanici.get("rol") == "admin"
             assert hasattr(app, "hayvan_tree")

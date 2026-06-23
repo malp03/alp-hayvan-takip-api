@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 import tkinter as tk
 
@@ -41,6 +42,16 @@ def close_toplevels(root):
             widget.destroy()
 
 
+def wait_for_startup(app, timeout=8):
+    start = time.time()
+    while time.time() - start < timeout:
+        app.root.update()
+        if getattr(app, "_baslangic_hazirligi_tamam", False):
+            return
+        time.sleep(0.02)
+    raise AssertionError("startup did not complete")
+
+
 def main():
     tmp = prepare_appdata()
     messagebox = patch_dialogs()
@@ -55,6 +66,7 @@ def main():
 
     app = appmod.HayvanTakipSistemi()
     try:
+        wait_for_startup(app)
         app.root.withdraw()
         app.api_kullanici = {"rol": "admin", "kullanici_adi": "admin"}
         app.online_islem_gerekli = lambda *args, **kwargs: True

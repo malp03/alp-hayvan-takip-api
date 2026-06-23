@@ -93,7 +93,7 @@ def main():
     appmod.HayvanTakipSistemi.taninan_bilgisayar_giris_dene = lambda self: False
     appmod.HayvanTakipSistemi.api_giris_yap = fake_api_login
     appmod.HayvanTakipSistemi.api_giris_penceresi = auto_login
-    appmod.HayvanTakipSistemi.veri_yukle = lambda self: {}
+    appmod.HayvanTakipSistemi.veri_yukle = lambda self, *args, **kwargs: {}
 
     app = appmod.HayvanTakipSistemi()
     try:
