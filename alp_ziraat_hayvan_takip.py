@@ -2492,7 +2492,7 @@ class HayvanTakipSistemi:
                     shutil.copy2(kaynak_yol, hedef_yol)
                     return
                 except Exception as e:
-                    messagebox.showwarning("Veri Taşıma Hatası", f"Eski veri dosyası taşınamadı:\n{kaynak_yol}\n\n{e}")
+                    self.mesaj_kutusu_goster("warning", "Veri Taşıma Hatası", f"Eski veri dosyası taşınamadı:\n{kaynak_yol}\n\n{e}")
 
     def yedek_olustur(self, dosya_yolu, etiket):
         if not os.path.exists(dosya_yolu) or os.path.getsize(dosya_yolu) == 0:
@@ -2529,14 +2529,15 @@ class HayvanTakipSistemi:
                 shutil.copy2(dosya_yolu, bozuk_yedek)
             except Exception:
                 bozuk_yedek = "yedek alınamadı"
-            messagebox.showwarning(
+            self.mesaj_kutusu_goster(
+                "warning",
                 "Veri Hatası",
                 f"{os.path.basename(dosya_yolu)} okunamadı ve güvenlik için bozuk kopyası saklandı.\n"
                 f"Yedek: {bozuk_yedek}\n\nHata: {e}"
             )
             return varsayilan
         except Exception as e:
-            messagebox.showwarning("Veri Hatası", f"{os.path.basename(dosya_yolu)} okunurken hata oluştu: {e}")
+            self.mesaj_kutusu_goster("warning", "Veri Hatası", f"{os.path.basename(dosya_yolu)} okunurken hata oluştu: {e}")
             return varsayilan
 
     def json_dosyasi_kaydet(self, dosya_yolu, veri, etiket, hata_basligi):
@@ -2556,7 +2557,7 @@ class HayvanTakipSistemi:
                     os.remove(gecici_yol)
             except Exception:
                 pass
-            messagebox.showerror(hata_basligi, f"Veriler kaydedilemedi: {e}")
+            self.mesaj_kutusu_goster("error", hata_basligi, f"Veriler kaydedilemedi: {e}")
             return False
 
     def yerel_sifre_hashle(self, sifre):
@@ -2823,6 +2824,23 @@ class HayvanTakipSistemi:
         kuyruk = getattr(self, "_ui_callback_kuyrugu", None)
         if kuyruk is not None:
             kuyruk.put(callback)
+
+    def mesaj_kutusu_goster(self, tur, baslik, mesaj, parent=None):
+        def goster():
+            if getattr(self, "_kapanis_istegi", False):
+                return
+            try:
+                hedef_parent = parent if parent is not None else getattr(self, "root", None)
+                if tur == "error":
+                    messagebox.showerror(baslik, mesaj, parent=hedef_parent)
+                elif tur == "info":
+                    messagebox.showinfo(baslik, mesaj, parent=hedef_parent)
+                else:
+                    messagebox.showwarning(baslik, mesaj, parent=hedef_parent)
+            except tk.TclError:
+                pass
+
+        self.ui_threadinde_calistir(goster)
 
     def _ui_callback_kuyrugunu_isle(self):
         self._ui_callback_after_id = None
