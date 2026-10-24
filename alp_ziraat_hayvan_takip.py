@@ -5,6 +5,7 @@ import base64
 import calendar
 import json
 import copy
+import gc
 import hashlib
 import hmac
 import io
@@ -37,6 +38,10 @@ from alp_ziraat_is_kurallari import (
     durum_hesapla as is_durum_hesapla,
     otomatik_cins_guncelle as is_otomatik_cins_guncelle,
     uyari_esigi as is_uyari_esigi,
+    normalize_yasam_dongusu,
+    laktasyon_ozeti,
+    son_dogum_kaydi,
+    laktasyon_kayitlarini_birlestir,
 )
 
 class ApiHatasi(Exception):
@@ -522,6 +527,8 @@ class HayvanTakipSistemi:
             pass
 
     def baslangic_hazirligini_baslat(self):
+        # Dispose of closed login/admin dialog cycles on the Tk thread.
+        gc.collect()
         if getattr(self, "_kapanis_istegi", False):
             return
 
@@ -1135,7 +1142,7 @@ class HayvanTakipSistemi:
                     pass
 
             try:
-                self.root.after(0, finish)
+                self.ui_threadinde_calistir(finish)
             except tk.TclError:
                 pass
 
@@ -2749,7 +2756,23 @@ class HayvanTakipSistemi:
     def bekleyen_senkron_var(self):
         return self.bekleyen_senkron_sayisi() > 0
 
+    def bekleyen_atomik_dogumda_mi(self, h_id):
+        for anne_id, veri in (getattr(self, "bekleyen_senkron", {}).get("upserts") or {}).items():
+            meta = veri.get("_sync_births")
+            if meta and str(h_id) in {str(anne_id), *meta["yavru_idler"]}:
+                return True
+        return False
+
     def bekleyen_senkron_upsert(self, h_id, veri):
+        with self.senkron_kuyruk_kilidi():
+            self._bekleyen_senkron_upsert(h_id, veri)
+
+    def senkron_kuyruk_kilidi(self):
+        if not hasattr(self, "_senkron_kuyruk_kilidi"):
+            self._senkron_kuyruk_kilidi = threading.RLock()
+        return self._senkron_kuyruk_kilidi
+
+    def _bekleyen_senkron_upsert(self, h_id, veri):
         h_id = str(h_id)
         self.bekleyen_senkron.setdefault("deletes", {}).pop(h_id, None)
         onceki = (self.bekleyen_senkron.get("upserts", {}) or {}).get(h_id) or {}
@@ -2758,11 +2781,17 @@ class HayvanTakipSistemi:
         ).get(h_id)
         kayit = copy.deepcopy(self.hayvan_kayit_tamamla(h_id, veri))
         kayit["id"] = h_id
+        if onceki.get("_sync_births"):
+            kayit["_sync_births"] = copy.deepcopy(onceki["_sync_births"])
         if base_version:
             kayit["base_son_guncelleme"] = base_version
         self.bekleyen_senkron.setdefault("upserts", {})[h_id] = kayit
 
     def bekleyen_senkron_delete(self, h_id):
+        with self.senkron_kuyruk_kilidi():
+            self._bekleyen_senkron_delete(h_id)
+
+    def _bekleyen_senkron_delete(self, h_id):
         h_id = str(h_id)
         self.bekleyen_senkron.setdefault("upserts", {}).pop(h_id, None)
         self.bekleyen_senkron.setdefault("deletes", {})[h_id] = {
@@ -2772,6 +2801,10 @@ class HayvanTakipSistemi:
         }
 
     def bekleyen_senkron_snapshot_guncelle(self, hedef_id=None):
+        with self.senkron_kuyruk_kilidi():
+            return self._bekleyen_senkron_snapshot_guncelle(hedef_id)
+
+    def _bekleyen_senkron_snapshot_guncelle(self, hedef_id=None):
         onceki_idler = set(getattr(self, "_api_son_idler", set()))
         if hedef_id is not None:
             h_id = str(hedef_id)
@@ -2870,6 +2903,9 @@ class HayvanTakipSistemi:
         if durum == "online":
             self.api_cevrimdisi = False
             self._api_son_hata = None
+        elif durum == "sync_error":
+            self.api_cevrimdisi = False
+            self._api_son_hata = str(hata) if hata else None
         elif durum in {"checking", "waking", "offline"}:
             self.api_cevrimdisi = True
             if hata:
@@ -2909,7 +2945,8 @@ class HayvanTakipSistemi:
         hata_metni = str(hata or "").lower()
         status = getattr(hata, "status", None)
         return (
-            status in {502, 503, 504}
+            status in {408, 429}
+            or (status is not None and status >= 500)
             or "zaman aşımı" in hata_metni
             or "timed out" in hata_metni
             or "timeout" in hata_metni
@@ -3007,6 +3044,8 @@ class HayvanTakipSistemi:
                         ) from e
                     raise ApiHatasi("API geçersiz bir yanıt döndürdü.") from e
                 self.api_baglanti_durumu_ata("online")
+                if method.upper() != "GET" and path.startswith("/api/hayvanlar"):
+                    self.ui_threadinde_calistir(self.api_son_islemleri_yenile_async)
                 return sonuc
         except ApiHatasi:
             raise
@@ -3114,6 +3153,10 @@ class HayvanTakipSistemi:
         onceki_idler = set(onceki_idler or set())
         payload = self.hayvan_kayit_tamamla(h_id, veri)
         payload["id"] = h_id
+        kullanici = getattr(self, "api_kullanici", None) or {}
+        if (kullanici.get("rol") != "admin" and payload.get("ciftlik_id")
+                and payload["ciftlik_id"] != kullanici.get("ciftlik_id")):
+            raise ApiHatasi("Bekleyen kayıt başka bir çiftliğe ait; o çiftliğin hesabıyla senkronize edin.", status=403)
         base_version = payload.pop("base_son_guncelleme", None) or getattr(
             self, "_api_base_versions", {}
         ).get(h_id)
@@ -3158,6 +3201,9 @@ class HayvanTakipSistemi:
         if yeni_version:
             self._api_base_versions.pop(h_id, None)
             self._api_base_versions[kayit_id] = yeni_version
+            if (getattr(self, "geri_al_yigini", None)
+                    and kayit_id in self.geri_al_yigini[-1].get("etkilenen_idler", [kayit_id])):
+                self.geri_al_yigini[-1].setdefault("sonraki_surumler", {})[kayit_id] = yeni_version
         return kayit_id, self.hayvan_kayit_tamamla(kayit_id, kayit or payload)
 
     def kuyruk_sadece_bekleyen_tohumlama_silmesi_mi(self, sunucu_kaydi, yerel_kayit):
@@ -3207,6 +3253,11 @@ class HayvanTakipSistemi:
             raise
 
         kayit_id = str((sunucu_ham or {}).get("id") or h_id)
+        base_version = veri.get("base_son_guncelleme") or getattr(
+            self, "_api_base_versions", {}
+        ).get(h_id)
+        if not base_version or base_version != (sunucu_ham or {}).get("son_guncelleme"):
+            return None
         sunucu = self.hayvan_kayit_tamamla(kayit_id, sunucu_ham or {})
         sunucu_tohumlamalar = [
             kayit for kayit in (sunucu.get("tohumlamalar") or [])
@@ -3224,17 +3275,26 @@ class HayvanTakipSistemi:
 
         if yerel_fazla or not eksik_sunucu_kayitlari:
             return None
+        def kayit_icerigi(kayit):
+            return {k: v for k, v in kayit.items() if k not in {"hayvan_id", "hayvan_son_guncelleme"}}
+
+        sunucu_kalan = {str(k["id"]): kayit_icerigi(k) for k in sunucu_tohumlamalar if str(k["id"]) in yerel_ids}
+        yerel_kalan = {str(k["id"]): kayit_icerigi(k) for k in yerel.get("tohumlamalar") or [] if k.get("id")}
+        if sunucu_kalan != yerel_kalan:
+            return None
         if any(kayit.get("gebe_mi") is not None for kayit in eksik_sunucu_kayitlari):
             return None
         if not self.kuyruk_sadece_bekleyen_tohumlama_silmesi_mi(sunucu, yerel):
             return None
 
         for kayit in eksik_sunucu_kayitlari:
-            self.api_istek(
+            sonuc = self.api_istek(
                 "DELETE",
-                f"/api/hayvanlar/{self.api_ref(kayit_id)}/tohumlamalar/{self.api_ref(kayit.get('id'))}",
+                f"/api/hayvanlar/{self.api_ref(kayit_id)}/tohumlamalar/{self.api_ref(kayit.get('id'))}"
+                f"?beklenen_son_guncelleme={self.api_ref(base_version)}",
                 timeout=20,
             )
+            base_version = (sonuc or {}).get("son_guncelleme") or base_version
 
         guncel = self.api_istek("GET", f"/api/hayvanlar/{self.api_ref(kayit_id)}", timeout=20)
         tamamlanmis = self.hayvan_kayit_tamamla(kayit_id, guncel or {})
@@ -3255,7 +3315,8 @@ class HayvanTakipSistemi:
 
         try:
             self.api_online_oturum_ac()
-            bekleyen = copy.deepcopy(self.bekleyen_senkron)
+            with self.senkron_kuyruk_kilidi():
+                bekleyen = copy.deepcopy(self.bekleyen_senkron)
             upserts = bekleyen.get("upserts", {}) or {}
             deletes = bekleyen.get("deletes", {}) or {}
             onceki_idler = set(getattr(self, "_api_son_idler", set()))
@@ -3263,6 +3324,21 @@ class HayvanTakipSistemi:
             kalan_deletes = {}
             kalan_upserts = {}
             kalan_hatalar = []
+            basarili_upserts = set()
+
+            dogum_kayitlari = {h_id: veri for h_id, veri in upserts.items() if veri.get("_sync_births")}
+            dogum_cevaplari = {}
+            dogum_idleri = set()
+            for h_id, veri in dogum_kayitlari.items():
+                grup_idler = {h_id, *veri["_sync_births"]["yavru_idler"]}
+                dogum_idleri.update(grup_idler)
+                try:
+                    dogum_cevaplari[h_id] = self.api_dogum_senkron_gonder(h_id, veri, upserts, onceki_idler)
+                    basarili_upserts.update(grup_idler)
+                    onceki_idler.update(grup_idler)
+                except ApiHatasi as hata:
+                    kalan_upserts.update({i: upserts[i] for i in grup_idler if i in upserts})
+                    kalan_hatalar.append(hata)
 
             for h_id in sorted(deletes.keys()):
                 delete_info = deletes.get(h_id) or {}
@@ -3298,6 +3374,8 @@ class HayvanTakipSistemi:
                 self._api_base_versions.pop(str(h_id), None)
 
             for h_id, veri in upserts.items():
+                if h_id in dogum_idleri:
+                    continue
                 try:
                     kurtarilan = self.api_bekleyen_tohumlama_silmesini_uygula(h_id, veri, onceki_idler)
                     if kurtarilan is not None:
@@ -3321,20 +3399,39 @@ class HayvanTakipSistemi:
                 if str(h_id) in self.hayvanlar and str(h_id) != kayit_id:
                     self.hayvanlar.pop(str(h_id), None)
                 self.hayvanlar[kayit_id] = tamamlanmis
+                basarili_upserts.add(str(h_id))
 
             self._api_son_idler = onceki_idler
-            self.bekleyen_senkron = {
-                "upserts": kalan_upserts,
-                "deletes": kalan_deletes,
-                "updated_at": None,
-            }
-            self.bekleyen_senkron_kaydet()
+            with self.senkron_kuyruk_kilidi():
+                # A user may have queued a newer edit while this snapshot was sent.
+                for tur, kalan in (("upserts", kalan_upserts), ("deletes", kalan_deletes)):
+                    guncel = self.bekleyen_senkron.setdefault(tur, {})
+                    for h_id, gonderilen in bekleyen.get(tur, {}).items():
+                        if h_id in kalan:
+                            continue
+                        if guncel.get(h_id) == gonderilen:
+                            guncel.pop(h_id, None)
+                        elif h_id in basarili_upserts and h_id in guncel:
+                            guncel[h_id]["base_son_guncelleme"] = self._api_base_versions.get(str(h_id))
+                            meta = guncel[h_id].get("_sync_births")
+                            eski_meta = gonderilen.get("_sync_births")
+                            if meta and eski_meta:
+                                # A second birth may have been queued while the first was sent.
+                                meta["dogum_idler"] = [i for i in meta["dogum_idler"] if i not in eski_meta["dogum_idler"]]
+                                meta["yavru_idler"] = [i for i in meta["yavru_idler"] if i not in eski_meta["yavru_idler"]]
+                                if meta["dogum_idler"]:
+                                    meta["anne_onceki"] = copy.deepcopy(dogum_cevaplari[h_id][h_id])
+                                else:
+                                    guncel[h_id].pop("_sync_births", None)
+                self.bekleyen_senkronu_hayvanlara_yansit(self.hayvanlar)
+                self.bekleyen_senkron_kaydet()
             self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
             self.api_cevrimdisi = bool(
                 kalan_hatalar and all(self.api_hatasi_yeniden_denebilir_mi(hata) for hata in kalan_hatalar)
             )
             self.api_offline_oturum = False
             self._api_son_hata = "\n".join(str(hata) for hata in kalan_hatalar[:3]) if kalan_hatalar else None
+            self._api_son_hata_status = getattr(kalan_hatalar[0], "status", None) if kalan_hatalar else None
             self._son_senkron_atlanan_cakisma = atlanan_cakisma
             self.api_durum_guncelle()
             if kalan_hatalar:
@@ -3364,15 +3461,30 @@ class HayvanTakipSistemi:
                 )
             return False
 
+    def bekleyen_senkronu_hayvanlara_yansit(self, hayvanlar):
+        with self.senkron_kuyruk_kilidi():
+            bekleyen = getattr(self, "bekleyen_senkron", {}) or {}
+            for h_id, veri in (bekleyen.get("upserts") or {}).items():
+                hayvanlar[str(h_id)] = copy.deepcopy(veri)
+                hayvanlar[str(h_id)].pop("_sync_births", None)
+            for h_id in bekleyen.get("deletes") or {}:
+                hayvanlar.pop(str(h_id), None)
+        return hayvanlar
+
     def bekleyen_senkron_gonder_ui(self):
         return self.api_senkronize_et_ui()
 
-    def api_yazma_kuyruga_alinmali_mi(self):
+    def api_yazma_kuyruga_alinmali_mi(self, hedef_id=None):
+        kuyruk = getattr(self, "bekleyen_senkron", {}) or {}
+        bekleyen_idler = set(kuyruk.get("upserts") or {}) | set(kuyruk.get("deletes") or {})
+        onceki_islem = bool(bekleyen_idler) if hedef_id is None else (
+            str(hedef_id) in bekleyen_idler or self.bekleyen_atomik_dogumda_mi(hedef_id))
         return bool(
             getattr(self, "api_modu", False)
             and (
                 getattr(self, "_api_senkronizasyon_devam_ediyor", False)
                 or getattr(self, "_otomatik_baglanti_kontrol_ediliyor", False)
+                or onceki_islem
             )
         )
 
@@ -3385,16 +3497,16 @@ class HayvanTakipSistemi:
         for _ in range(3):
             if self.bekleyen_senkron_var() and not self.bekleyen_senkron_gonder(sessiz=True):
                 hata = getattr(self, "_api_son_hata", None) or "Bekleyen offline degisiklikler senkronlanamadi."
-                raise ApiHatasi(hata)
+                raise ApiHatasi(hata, status=getattr(self, "_api_son_hata_status", None))
             hayvanlar = self.api_hayvanlari_yukle()
             if not self.bekleyen_senkron_var():
                 break
         if self.bekleyen_senkron_var():
             if not self.bekleyen_senkron_gonder(sessiz=True):
                 hata = getattr(self, "_api_son_hata", None) or "Bekleyen offline degisiklikler senkronlanamadi."
-                raise ApiHatasi(hata)
+                raise ApiHatasi(hata, status=getattr(self, "_api_son_hata_status", None))
             hayvanlar = self.api_hayvanlari_yukle()
-        self.hayvanlar = hayvanlar or {}
+        self.hayvanlar = self.bekleyen_senkronu_hayvanlara_yansit(hayvanlar or {})
         self.api_son_islemleri_yenile(limit=20)
         self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
         if ui_guncelle and hasattr(self, "notebook"):
@@ -3430,10 +3542,12 @@ class HayvanTakipSistemi:
             def tamamla():
                 self._api_senkronizasyon_devam_ediyor = False
                 if hata is not None:
-                    self.api_baglanti_durumu_ata("offline", hata)
+                    reddedildi = isinstance(hata, ApiHatasi) and hata.status in {400, 401, 403, 404, 409, 422}
+                    self.api_baglanti_durumu_ata("sync_error" if reddedildi else "offline", hata)
+                    baslik = "API'ye baglanildi ancak kayit kabul edilmedi" if reddedildi else "API bağlantısı kurulamadı"
                     messagebox.showwarning(
                         "Senkronizasyon",
-                        f"API bağlantısı kurulamadı:\n{hata}\n\nBekleyen değişiklikler yerel kuyrukta tutuluyor.",
+                        f"{baslik}:\n{hata}\n\nBekleyen değişiklikler yerel kuyrukta tutuluyor.",
                         parent=getattr(self, "root", None),
                     )
                     return
@@ -3819,13 +3933,21 @@ class HayvanTakipSistemi:
         if not getattr(self, "api_modu", False) or not getattr(self, "api_token", None):
             return getattr(self, "api_son_islemler", [])
         try:
-            kayitlar = self.api_islem_gecmisi_yukle(limit)
+            kapsam = self.api_son_islemler_kapsami()
+            kayitlar = self.api_islem_gecmisi_yukle(limit, ciftlik_id=kapsam[1])
         except Exception as e:
             self.hata_gunlugu_yaz("API son işlemler yenileme hatası", e)
             return getattr(self, "api_son_islemler", [])
         self.api_son_islemler = self.api_islem_gecmisi_dashboarda_cevir(kayitlar)[:limit]
         self.api_son_islemler_yuklendi = True
+        self._api_son_islemler_kapsami = kapsam
         return self.api_son_islemler
+
+    def api_son_islemler_kapsami(self):
+        return (
+            (getattr(self, "api_kullanici", None) or {}).get("id"),
+            getattr(self, "admin_aktif_ciftlik_id", None),
+        )
 
     def api_son_islemleri_yenile_async(self, limit=20):
         if (
@@ -3835,23 +3957,28 @@ class HayvanTakipSistemi:
         ):
             return
         self._api_son_islemler_yenileniyor = True
+        kapsam = self.api_son_islemler_kapsami()
 
         def worker():
             hata = None
             kayitlar = None
             try:
                 with self._api_ag_lock:
-                    kayitlar = self.api_islem_gecmisi_yukle(limit)
+                    kayitlar = self.api_islem_gecmisi_yukle(limit, ciftlik_id=kapsam[1])
             except Exception as e:
                 hata = e
 
             def tamamla():
                 self._api_son_islemler_yenileniyor = False
+                if kapsam != self.api_son_islemler_kapsami():
+                    self.api_son_islemleri_yenile_async(limit)
+                    return
                 if hata is not None:
                     self.hata_gunlugu_yaz("API son işlemler arka plan yenileme hatası", hata)
                     return
                 self.api_son_islemler = self.api_islem_gecmisi_dashboarda_cevir(kayitlar)[:limit]
                 self.api_son_islemler_yuklendi = True
+                self._api_son_islemler_kapsami = kapsam
                 if hasattr(self, "dashboard_son_list"):
                     self.dashboard_guncelle()
 
@@ -5397,7 +5524,7 @@ class HayvanTakipSistemi:
         self.uyari_sistemi_baslat()
         self.root.protocol("WM_DELETE_WINDOW", self.uygulamayi_kapat)
 
-    def api_hayvanlari_yukle(self):
+    def api_hayvanlari_yukle(self, durum_guncelle=True):
         hayvanlar_dict = {}
         limit = 500
         skip = 0
@@ -5414,6 +5541,8 @@ class HayvanTakipSistemi:
             if len(kayitlar) < limit:
                 break
             skip += limit
+        if not durum_guncelle:
+            return hayvanlar_dict
         self._api_son_idler = set(hayvanlar_dict.keys())
         self._api_base_versions = {
             h_id: veri.get("son_guncelleme")
@@ -5429,6 +5558,8 @@ class HayvanTakipSistemi:
         if not getattr(self, "api_modu", False) or self.offline_modda_mi():
             return str(h_id)
         h_id = str(h_id)
+        if h_id in ((getattr(self, "bekleyen_senkron", {}) or {}).get("upserts") or {}):
+            return h_id
         try:
             kayit = self.api_istek("GET", f"/api/hayvanlar/{self.api_ref(h_id)}", timeout=20)
             if not isinstance(kayit, dict):
@@ -5482,7 +5613,7 @@ class HayvanTakipSistemi:
             raise ApiHatasi("API offline modda; kayitlar yerel senkron kuyruguna alinacak.")
         if self.bekleyen_senkron_var() and not self.bekleyen_senkron_gonder(sessiz=True):
             hata = getattr(self, "_api_son_hata", None) or "Bekleyen offline degisiklikler senkronlanamadi."
-            raise ApiHatasi(f"Bekleyen offline degisiklikler senkronlanamadi.\n\nDetay: {hata}")
+            raise ApiHatasi(f"Bekleyen offline degisiklikler senkronlanamadi.\n\nDetay: {hata}", status=getattr(self, "_api_son_hata_status", None))
 
         onceki_idler = set(getattr(self, "_api_son_idler", set()))
         mevcut_idler = {str(h_id) for h_id in self.hayvanlar.keys()}
@@ -5520,7 +5651,7 @@ class HayvanTakipSistemi:
             raise ApiHatasi("API offline modda; kayit yerel senkron kuyruguna alinacak.")
         if self.bekleyen_senkron_var() and not self.bekleyen_senkron_gonder(sessiz=True, ui_guncelle=ui_guncelle):
             hata = getattr(self, "_api_son_hata", None) or "Bekleyen offline degisiklikler senkronlanamadi."
-            raise ApiHatasi(f"Bekleyen offline degisiklikler senkronlanamadi.\n\nDetay: {hata}")
+            raise ApiHatasi(f"Bekleyen offline degisiklikler senkronlanamadi.\n\nDetay: {hata}", status=getattr(self, "_api_son_hata_status", None))
 
         h_id = str(h_id)
         onceki_idler = set(getattr(self, "_api_son_idler", set()))
@@ -5679,7 +5810,7 @@ class HayvanTakipSistemi:
         veri.setdefault('foto_paths', [])
         self.hayvan_fotograflari_ata(veri, self.hayvan_fotograflari(veri))
         veri.setdefault('son_guncelleme', "")
-        return veri
+        return normalize_yasam_dongusu(veri)
 
     def hayvan_kimlikleri(self, h_id, veri):
         kimlikler = {str(h_id).strip().upper()}
@@ -5856,6 +5987,8 @@ class HayvanTakipSistemi:
             mevcut_kimlikler.update(self.hayvan_kimlikleri(h_id, veri))
 
         for h_id, veri in json_veri.items():
+            if not isinstance(veri, dict):
+                continue
             tamamlanmis = self.hayvan_kayit_tamamla(h_id, veri)
             kimlikler = self.hayvan_kimlikleri(h_id, tamamlanmis)
             if str(h_id) in hayvanlar_dict or mevcut_kimlikler.intersection(kimlikler):
@@ -5871,7 +6004,14 @@ class HayvanTakipSistemi:
 
         hayvanlar_dict = {}
         mevcut_kimlikler = set()
+        kullanici = getattr(self, "api_kullanici", None) or {}
+        hedef_ciftlik = (getattr(self, "admin_aktif_ciftlik_id", None)
+                        if kullanici.get("rol") == "admin" else kullanici.get("ciftlik_id"))
         for h_id, veri in json_veri.items():
+            if not isinstance(veri, dict):
+                continue
+            if hedef_ciftlik and veri.get("ciftlik_id") != hedef_ciftlik:
+                continue
             tamamlanmis = self.hayvan_kayit_tamamla(h_id, veri)
             kimlikler = self.hayvan_kimlikleri(h_id, tamamlanmis)
             if str(h_id) in hayvanlar_dict or mevcut_kimlikler.intersection(kimlikler):
@@ -5880,6 +6020,9 @@ class HayvanTakipSistemi:
             mevcut_kimlikler.update(kimlikler)
 
         self._api_son_idler = set(hayvanlar_dict.keys())
+        self.bekleyen_senkronu_hayvanlara_yansit(hayvanlar_dict)
+        if hedef_ciftlik:
+            hayvanlar_dict = {k: v for k, v in hayvanlar_dict.items() if v.get("ciftlik_id") == hedef_ciftlik}
         return hayvanlar_dict
 
     def veri_yukle(self, cevrimici_dene=True, hata_mesaji_goster=True, ui_guncelle=True):
@@ -5927,9 +6070,11 @@ class HayvanTakipSistemi:
         return hayvanlar_dict
 
     def veri_kaydet(self, kupe_no=None, hata_mesaji_goster=True, ui_guncelle=True):
+        if threading.current_thread() is threading.main_thread():
+            self.geri_al_etkilenenleri_isaretle(kupe_no)
         self._son_kayit_stale_update = False
         if getattr(self, "api_modu", False):
-            if self.offline_modda_mi() or self.api_yazma_kuyruga_alinmali_mi():
+            if self.offline_modda_mi() or self.api_yazma_kuyruga_alinmali_mi(kupe_no):
                 self.bekleyen_senkron_snapshot_guncelle(kupe_no)
                 if ui_guncelle:
                     self.api_durum_guncelle()
@@ -5964,6 +6109,21 @@ class HayvanTakipSistemi:
                     return False
                 self.api_cevrimdisi = True
                 self._api_son_hata = str(e)
+                if e.status is not None and not self.api_hatasi_yeniden_denebilir_mi(e):
+                    self.api_cevrimdisi = False
+                    # Rejected writes must not become successful offline records.
+                    eski = self.json_dosyasi_yukle(self.data_file, {}, "hayvan_verileri")
+                    if kupe_no is None:
+                        self.hayvanlar = eski if isinstance(eski, dict) else {}
+                    elif str(kupe_no) in eski:
+                        self.hayvanlar[str(kupe_no)] = eski[str(kupe_no)]
+                    else:
+                        self.hayvanlar.pop(str(kupe_no), None)
+                    if ui_guncelle:
+                        self.api_durum_guncelle()
+                    if hata_mesaji_goster:
+                        self.mesaj_kutusu_goster("error", "Kayıt Reddedildi", str(e))
+                    return False
                 self.bekleyen_senkron_snapshot_guncelle(kupe_no)
                 if ui_guncelle:
                     self.api_durum_guncelle()
@@ -6136,6 +6296,7 @@ class HayvanTakipSistemi:
                     "geri_alinabilir": bool(geri_alinabilir),
                     "geri_alinamaz_neden": geri_alinamaz_neden or "",
                     "hayvanlar": copy.deepcopy(self.hayvanlar),
+                    "etkilenen_idler": [],
                 })
                 if len(self.geri_al_yigini) > 10:
                     self.geri_al_yigini.pop(0)
@@ -6156,6 +6317,27 @@ class HayvanTakipSistemi:
                 self.islem_gecmisi.pop()
         except:
             pass
+
+    def geri_al_etkilenenleri_isaretle(self, h_id=None):
+        if not getattr(self, "geri_al_yigini", None):
+            return
+        kayit = self.geri_al_yigini[-1]
+        if h_id is None:
+            fark = self.geri_al_farki_hesapla(kayit.get("hayvanlar"), self.hayvanlar)
+            idler = list(fark["geri_yuklenecek"]) + fark["silinecek"]
+        else:
+            idler = [str(h_id)]
+        kayit["etkilenen_idler"] = sorted(set(kayit.get("etkilenen_idler", [])) | set(idler))
+
+    def geri_al_kayit_farki(self, index):
+        kayit = self.geri_al_yigini[index]
+        fark = self.geri_al_farki_hesapla(kayit.get("hayvanlar", {}), self.geri_al_sonraki_durum(index))
+        if "etkilenen_idler" in kayit:
+            idler = set(kayit["etkilenen_idler"])
+            fark["geri_yuklenecek"] = {k: v for k, v in fark["geri_yuklenecek"].items() if k in idler}
+            fark["silinecek"] = [k for k in fark["silinecek"] if k in idler]
+            fark["toplam"] = len(fark["geri_yuklenecek"]) + len(fark["silinecek"])
+        return fark
 
     def geri_al_islemi_uygun_mu(self, kayit):
         if not kayit:
@@ -6198,7 +6380,11 @@ class HayvanTakipSistemi:
             self.bekleyen_senkron_kaydet()
             return True
         try:
-            self.api_istek("DELETE", f"/api/hayvanlar/{self.api_ref(h_id)}?kalici=true", timeout=30)
+            path = f"/api/hayvanlar/{self.api_ref(h_id)}?kalici=true"
+            base_version = getattr(self, "_api_base_versions", {}).get(h_id)
+            if base_version:
+                path += f"&beklenen_son_guncelleme={self.api_ref(base_version)}"
+            self.api_istek("DELETE", path, timeout=30)
             onceki_idler = set(getattr(self, "_api_son_idler", set()))
             onceki_idler.discard(h_id)
             self._api_son_idler = onceki_idler
@@ -6206,10 +6392,79 @@ class HayvanTakipSistemi:
         except ApiHatasi as e:
             if getattr(e, "status", None) == 404:
                 return True
+            if e.status is not None and not self.api_hatasi_yeniden_denebilir_mi(e):
+                self._api_son_hata = str(e)
+                try:
+                    self._api_son_idler = self.api_hayvan_sunucudan_uzlastir(h_id, self._api_son_idler)
+                except ApiHatasi:
+                    eski = self.json_dosyasi_yukle(self.data_file, {}, "hayvan_verileri")
+                    if isinstance(eski, dict) and h_id in eski:
+                        self.hayvanlar[h_id] = eski[h_id]
+                return False
             self.api_cevrimdisi = True
             self._api_son_hata = str(e)
             self.bekleyen_senkron_delete(h_id)
             return bool(self.bekleyen_senkron_kaydet())
+
+    def geri_al_atomik_uygula(self, index, fark, parent=None):
+        kayit = self.geri_al_yigini[index]
+        sonraki = self.geri_al_sonraki_durum(index)
+        surumler = kayit.get("sonraki_surumler", {})
+
+        def beklenen(h_id):
+            return (surumler.get(h_id) or (sonraki.get(h_id) or {}).get("son_guncelleme")
+                    or getattr(self, "_api_base_versions", {}).get(h_id))
+
+        tum_idler = list(fark["geri_yuklenecek"]) + fark["silinecek"]
+        kuyruk = getattr(self, "bekleyen_senkron", {}) or {}
+        bekleyen_idler = set(kuyruk.get("upserts") or {}) | set(kuyruk.get("deletes") or {})
+        if bekleyen_idler.intersection(tum_idler):
+            messagebox.showwarning("Geri Al", "Bu hayvanlarin bekleyen degisikliklerini once senkronize edin.", parent=parent or self.root)
+            return False
+        if any(not beklenen(h_id) for h_id in tum_idler):
+            messagebox.showwarning("Geri Al", "Kayit surumleri eksik; once sunucuyla senkronize edin.", parent=parent or self.root)
+            return False
+        payload = {
+            "guncellemeler": [{"id": h_id, "beklenen_son_guncelleme": beklenen(h_id), "veri": veri}
+                               for h_id, veri in fark["geri_yuklenecek"].items()],
+            "silmeler": [{"id": h_id, "beklenen_son_guncelleme": beklenen(h_id)} for h_id in fark["silinecek"]],
+        }
+        try:
+            sonuc = self.api_istek("POST", "/api/geri-al", payload, timeout=30)
+        except ApiHatasi as hata:
+            self._api_son_hata = str(hata)
+            self.api_cevrimdisi = hata.status is None or self.api_hatasi_yeniden_denebilir_mi(hata)
+            if hata.status == 409:
+                for h_id in tum_idler:
+                    try:
+                        self._api_son_idler = self.api_hayvan_sunucudan_uzlastir(h_id, self._api_son_idler)
+                    except ApiHatasi:
+                        pass
+                self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
+                self.kayit_basarisizsa_ui_yenile()
+            mesaj = "Geri alma dogrulanamadi. Islem kuyruga alinmadi; tekrar denemeden once senkronize edin."
+            if hata.status == 404:
+                mesaj = "Bu geri alma icin API'nin guncellenmesi gerekiyor."
+            messagebox.showwarning("Geri Al", f"{mesaj}\n\n{hata}", parent=parent or self.root)
+            return False
+        for h_id in (sonuc or {}).get("silinen_idler") or []:
+            self.hayvanlar.pop(h_id, None)
+            self._api_son_idler.discard(h_id)
+            self._api_base_versions.pop(h_id, None)
+        for veri in (sonuc or {}).get("hayvanlar") or []:
+            h_id = str(veri["id"])
+            self.hayvanlar[h_id] = self.hayvan_kayit_tamamla(h_id, veri)
+            self._api_son_idler.add(h_id)
+            self._api_base_versions[h_id] = veri.get("son_guncelleme")
+        del self.geri_al_yigini[index:]
+        self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
+        self.ekranlari_guncelle()
+        self.header_ozet_guncelle()
+        self.api_durum_guncelle()
+        messagebox.showinfo("Geri Al", "Secili islem tum kayitlariyla geri alindi.", parent=parent or self.root)
+        if parent is not None:
+            parent.destroy()
+        return True
 
     def geri_al_kaydi_uygula(self, index, parent=None):
         if not (0 <= index < len(getattr(self, "geri_al_yigini", []))):
@@ -6222,9 +6477,17 @@ class HayvanTakipSistemi:
             messagebox.showwarning("Geri Al", neden, parent=parent or self.root)
             return
 
-        fark = self.geri_al_farki_hesapla(kayit.get("hayvanlar", {}), self.geri_al_sonraki_durum(index))
+        fark = self.geri_al_kayit_farki(index)
+        etkilenen = set(fark["geri_yuklenecek"]) | set(fark["silinecek"])
+        if getattr(self, "api_modu", False) and any(self.bekleyen_atomik_dogumda_mi(i) for i in etkilenen):
+            messagebox.showwarning("Geri Al", "Bu kayitlarin bekleyen dogum islemi var. Once senkronizasyonu tamamlayin.", parent=parent or self.root)
+            return
         if fark["toplam"] == 0:
             messagebox.showinfo("Geri Al", "Bu işlem için geri alınacak kayıt farkı bulunamadı.", parent=parent or self.root)
+            return
+
+        if getattr(self, "api_modu", False) and fark["toplam"] > 1 and self.offline_modda_mi():
+            messagebox.showwarning("Geri Al", "Birden fazla kaydi etkileyen geri alma icin internet baglantisi gerekir.", parent=parent or self.root)
             return
 
         aciklama = kayit.get("aciklama", "-")
@@ -6237,6 +6500,9 @@ class HayvanTakipSistemi:
         )
         if not messagebox.askyesno("Geri Al", mesaj, parent=parent or self.root):
             return
+
+        if getattr(self, "api_modu", False) and not self.offline_modda_mi():
+            return self.geri_al_atomik_uygula(index, fark, parent=parent)
 
         hedef = parent or self.root
         try:
@@ -6251,7 +6517,10 @@ class HayvanTakipSistemi:
             for h_id in fark["silinecek"]:
                 self.hayvanlar.pop(h_id, None)
                 if not self.geri_al_api_sil(h_id):
-                    basarili = False
+                    self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
+                    self.kayit_basarisizsa_ui_yenile()
+                    messagebox.showwarning("Geri Al", f"Geri alma tamamlanamadı:\n{self._api_son_hata}", parent=parent or self.root)
+                    return
 
             geri_al_zamani = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             for h_id, veri in fark["geri_yuklenecek"].items():
@@ -6363,7 +6632,7 @@ class HayvanTakipSistemi:
         for index in range(len(self.geri_al_yigini) - 1, baslangic - 1, -1):
             kayit = self.geri_al_yigini[index]
             uygun, neden = self.geri_al_islemi_uygun_mu(kayit)
-            fark = self.geri_al_farki_hesapla(kayit.get("hayvanlar", {}), self.geri_al_sonraki_durum(index))
+            fark = self.geri_al_kayit_farki(index)
             durum = "Geri alınabilir" if uygun else f"Geri alınamaz: {neden}"
             tree.insert(
                 "",
@@ -6850,6 +7119,9 @@ class HayvanTakipSistemi:
             elif baglanti_durumu == "waking":
                 metin = "Render sunucusu uyanıyor"
                 renk = self.renkler["uyari"]
+            elif baglanti_durumu == "sync_error":
+                metin = "Online - Senkron hatasi"
+                renk = self.renkler["uyari"]
             elif getattr(self, "api_cevrimdisi", False):
                 metin = "Offline"
                 renk = self.renkler["uyari"]
@@ -7011,16 +7283,27 @@ class HayvanTakipSistemi:
 
         self._otomatik_baglanti_kontrol_ediliyor = True
         onceki_bekleyen = self.bekleyen_senkron_sayisi()
-        onceki_offline = self.offline_modda_mi()
+        salt_okuma = not onceki_bekleyen and not self.offline_modda_mi()
+        oturum = ((getattr(self, "api_kullanici", None) or {}).get("id"), getattr(self, "admin_aktif_ciftlik_id", None))
+        popup_acik = False
+        try:
+            popup_acik = self.root.grab_current() not in (None, self.root)
+        except (AttributeError, tk.TclError):
+            pass
 
         def worker():
             hata = None
             senkron_yapildi = False
+            yeni_hayvanlar = None
             try:
                 with self._api_ag_lock:
                     self.api_uyandir(maksimum_bekleme=95)
-                    if onceki_offline or onceki_bekleyen or self.bekleyen_senkron_var():
-                        self.api_baglantiyi_yenile_sessiz(ui_guncelle=False)
+                    if not popup_acik:
+                        if salt_okuma and not self.bekleyen_senkron_var():
+                            yeni_hayvanlar = self.api_hayvanlari_yukle(durum_guncelle=False)
+                            self.api_son_islemleri_yenile(limit=20)
+                        else:
+                            self.api_baglantiyi_yenile_sessiz(ui_guncelle=False)
                         senkron_yapildi = True
             except Exception as e:
                 hata = e
@@ -7028,16 +7311,31 @@ class HayvanTakipSistemi:
 
             def tamamla():
                 self._otomatik_baglanti_kontrol_ediliyor = False
+                ertele = popup_acik
+                if oturum != ((getattr(self, "api_kullanici", None) or {}).get("id"), getattr(self, "admin_aktif_ciftlik_id", None)):
+                    return
                 if hata is None:
-                    if senkron_yapildi:
+                    if yeni_hayvanlar is not None:
+                        try:
+                            ertele = ertele or self.root.grab_current() not in (None, self.root)
+                        except (AttributeError, tk.TclError):
+                            pass
+                        ertele = ertele or self.bekleyen_senkron_var()
+                        if not ertele:
+                            self.hayvanlar = yeni_hayvanlar
+                            self._api_son_idler = set(yeni_hayvanlar)
+                            self._api_base_versions = {i: h.get("son_guncelleme") for i, h in yeni_hayvanlar.items() if h.get("son_guncelleme")}
+                            self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
+                    if senkron_yapildi and not ertele:
                         if hasattr(self, "notebook"):
                             self.ekranlari_guncelle()
                             self.header_ozet_guncelle()
                         self.otomatik_baglanti_bildir(onceki_bekleyen)
                     self.api_baglanti_durumu_ata("online")
-                    sonraki = getattr(self, "otomatik_baglanti_araligi_ms", 8 * 60 * 1000)
+                    sonraki = 60 * 1000 if ertele else getattr(self, "otomatik_baglanti_araligi_ms", 8 * 60 * 1000)
                 else:
-                    self.api_baglanti_durumu_ata("offline", hata)
+                    reddedildi = isinstance(hata, ApiHatasi) and hata.status in {400, 401, 403, 404, 409, 422}
+                    self.api_baglanti_durumu_ata("sync_error" if reddedildi else "offline", hata)
                     sonraki = getattr(self, "otomatik_baglanti_hata_araligi_ms", 60 * 1000)
                 self.otomatik_baglanti_kontrol_baslat(sonraki)
 
@@ -7276,7 +7574,9 @@ class HayvanTakipSistemi:
 
     def dashboard_son_islem_kayitlari(self):
         if getattr(self, "api_modu", False):
-            if getattr(self, "api_son_islemler_yuklendi", False):
+            kapsam = self.api_son_islemler_kapsami()
+            if (getattr(self, "api_son_islemler_yuklendi", False)
+                    and getattr(self, "_api_son_islemler_kapsami", kapsam) == kapsam):
                 return (getattr(self, "api_son_islemler", []) or [])[:8], "Merkezde işlem kaydı yok."
             return [], "Son işlemler API bağlantısı kurulunca güncellenecek."
         return self.islem_gecmisi_sirala(getattr(self, "islem_gecmisi", []))[:8], "Henüz işlem kaydı yok."
@@ -8724,11 +9024,15 @@ class HayvanTakipSistemi:
         online_api_silindi = False
         api_son_guncelleme = None
         tohumlama_id = kayit.get('id')
-        if api_modu and not self.offline_modda_mi() and tohumlama_id:
+        if api_modu and not self.offline_modda_mi() and not self.api_yazma_kuyruga_alinmali_mi(kupe_no) and tohumlama_id:
             try:
+                path = f"/api/hayvanlar/{self.api_ref(kupe_no)}/tohumlamalar/{self.api_ref(tohumlama_id)}"
+                base_version = getattr(self, "_api_base_versions", {}).get(str(kupe_no))
+                if base_version:
+                    path += f"?beklenen_son_guncelleme={self.api_ref(base_version)}"
                 sonuc = self.api_istek(
                     "DELETE",
-                    f"/api/hayvanlar/{self.api_ref(kupe_no)}/tohumlamalar/{self.api_ref(tohumlama_id)}",
+                    path,
                     timeout=20,
                 )
                 online_api_silindi = True
@@ -8737,7 +9041,7 @@ class HayvanTakipSistemi:
             except ApiHatasi as e:
                 if getattr(e, "status", None) == 404:
                     online_api_silindi = True
-                elif getattr(e, "status", None) == 409:
+                elif e.status is not None and not self.api_hatasi_yeniden_denebilir_mi(e):
                     messagebox.showwarning("Tohumlama Silinemedi", str(e), parent=parent or self.root)
                     return False
                 else:
@@ -8745,6 +9049,7 @@ class HayvanTakipSistemi:
                     self._api_son_hata = str(e)
 
         self.islem_kaydi_baslat(f"Tohumlama kaydı silindi: {kupe_no}")
+        self.geri_al_etkilenenleri_isaretle(kupe_no)
         tohumlamalar.pop(idx)
         self.hayvan_gebelik_durumunu_senkronla(kupe_no)
         hayvan['son_guncelleme'] = api_son_guncelleme or datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -8752,6 +9057,8 @@ class HayvanTakipSistemi:
         if online_api_silindi:
             if api_son_guncelleme:
                 self._api_base_versions[str(kupe_no)] = api_son_guncelleme
+                if self.geri_al_yigini:
+                    self.geri_al_yigini[-1].setdefault("sonraki_surumler", {})[str(kupe_no)] = api_son_guncelleme
             upserts = (getattr(self, "bekleyen_senkron", {}) or {}).get("upserts", {}) or {}
             if str(kupe_no) in upserts:
                 self.bekleyen_senkron_upsert(kupe_no, hayvan)
@@ -8868,7 +9175,7 @@ class HayvanTakipSistemi:
                 try:
                     t_tarihi = datetime.strptime(son_tohumlama['tarih'], "%d/%m/%Y")
                     kontrol_tarihi = t_tarihi + timedelta(days=21)
-                    kalan_kontrol = (kontrol_tarihi - datetime.now()).days
+                    kalan_kontrol = (kontrol_tarihi.date() - datetime.now().date()).days
                     if kalan_kontrol <= 7:
                         tohumlama_id = son_tohumlama.get('id') or "bekleyen"
                         uyari_key = self.uyari_key_olustur(kupe_no, "gebelik_kontrol", tohumlama_id, kalan_kontrol)
@@ -8879,7 +9186,7 @@ class HayvanTakipSistemi:
             if aktif_tohumlama_id and hayvan.get('durum') == 'Sağmal İnek' and hayvan.get('gebe_mi', False):
                 try:
                     g_tarihi = datetime.strptime(hayvan['gebelik_tarihi'], "%d/%m/%Y")
-                    kalan_gun_doguma = (g_tarihi + timedelta(days=283) - datetime.now()).days
+                    kalan_gun_doguma = ((g_tarihi + timedelta(days=283)).date() - datetime.now().date()).days
                     if kalan_gun_doguma <= 60:
                         uyari_key = self.uyari_key_olustur(kupe_no, "kuruya_al", aktif_tohumlama_id, kalan_gun_doguma)
                         if uyari_key:
@@ -8889,7 +9196,7 @@ class HayvanTakipSistemi:
             if aktif_tohumlama_id and hayvan.get('gebe_mi', False):
                 try:
                     g_tarihi = datetime.strptime(hayvan['gebelik_tarihi'], "%d/%m/%Y")
-                    kalan_gun = (g_tarihi + timedelta(days=283) - datetime.now()).days
+                    kalan_gun = ((g_tarihi + timedelta(days=283)).date() - datetime.now().date()).days
                     uyari_key = self.uyari_key_olustur(kupe_no, "gebelik", aktif_tohumlama_id, kalan_gun)
                     if uyari_key:
                         aktif_uyari_keyleri.append(uyari_key)
@@ -8901,7 +9208,7 @@ class HayvanTakipSistemi:
                     continue
                 try:
                     p_tarihi = datetime.strptime(sonraki_tarih, "%d/%m/%Y")
-                    kalan_prosedur = (p_tarihi - datetime.now()).days
+                    kalan_prosedur = (p_tarihi.date() - datetime.now().date()).days
                     if kalan_prosedur <= 7:
                         prosedur_id = prosedur.get('id') or prosedur.get('ad', 'prosedur')
                         uyari_key = self.uyari_key_olustur(kupe_no, "asi_prosedur", prosedur_id, kalan_prosedur)
@@ -8968,12 +9275,9 @@ class HayvanTakipSistemi:
         dogumlar = hayvan.get('dogumlar') or []
         if not dogumlar:
             return True
-        aktif_dogum = None
-        for dogum in reversed(dogumlar):
-            if dogum.get('laktasyon_bitis_tarihi') is None:
-                aktif_dogum = dogum
-                break
-        son_dogum = aktif_dogum or dogumlar[-1]
+        son_dogum = son_dogum_kaydi(hayvan, sadece_acik=True) or son_dogum_kaydi(hayvan)
+        if son_dogum is None:
+            return True
         tarih = (son_dogum.get('tarih') or '').strip()
         if not tarih or tarih == 'Bilinmiyor':
             return True
@@ -9150,6 +9454,8 @@ class HayvanTakipSistemi:
         self.api_durum_guncelle()
 
     def hayvan_kaydet_arka_planda(self, yeni_id, gorunen_kupe):
+        self.geri_al_etkilenenleri_isaretle(yeni_id)
+        geri_al_kaydi = self.geri_al_yigini[-1] if getattr(self, "geri_al_yigini", None) else None
         self._hayvan_kayit_devam_ediyor = True
         self.hayvan_kaydet_buton_durum(True)
 
@@ -9158,6 +9464,10 @@ class HayvanTakipSistemi:
             try:
                 sonuc["ok"] = bool(self.veri_kaydet(yeni_id, hata_mesaji_goster=False, ui_guncelle=False))
                 sonuc["cevrimdisi"] = self.offline_modda_mi()
+                if sonuc["ok"] and geri_al_kaydi is not None and not sonuc["cevrimdisi"]:
+                    surum = self._api_base_versions.get(str(yeni_id))
+                    if surum:
+                        geri_al_kaydi.setdefault("sonraki_surumler", {})[str(yeni_id)] = surum
             except Exception as e:
                 sonuc["hata"] = e
 
@@ -9172,7 +9482,7 @@ class HayvanTakipSistemi:
                     messagebox.showerror("Kayıt Hatası", f"Hayvan kaydedilemedi:\n{mesaj}")
 
             try:
-                self.root.after(0, tamamla)
+                self.ui_threadinde_calistir(tamamla)
             except tk.TclError:
                 pass
 
@@ -9474,6 +9784,121 @@ class HayvanTakipSistemi:
         parent.wait_window(dialog)
         return result if result.get('cins') is not None else None
 
+    def api_dogum_senkron_gonder(self, anne_id, anne, kayitlar, onceki_idler):
+        meta = anne["_sync_births"]
+        yavru_idler = meta["yavru_idler"]
+        if any(i not in kayitlar for i in yavru_idler):
+            raise ApiHatasi("Dogumun bekleyen yavru kayitlari eksik; islem gonderilmedi.", status=409)
+        if anne_id not in onceki_idler:
+            onceki = copy.deepcopy(meta["anne_onceki"])
+            onceki["id"] = anne_id
+            yeni = self.api_istek("POST", "/api/hayvanlar", onceki)
+            self._api_base_versions[anne_id] = yeni["son_guncelleme"]
+            self._api_son_idler.add(anne_id)
+            onceki_idler.add(anne_id)
+        payload = copy.deepcopy(anne)
+        payload.pop("_sync_births", None)
+        base = payload.pop("base_son_guncelleme", None) or self._api_base_versions.get(anne_id)
+        path = f"/api/hayvanlar/{self.api_ref(anne_id)}/dogum-senkron"
+        if base:
+            path += f"?beklenen_son_guncelleme={self.api_ref(base)}"
+        yavrular = []
+        for kimlik in yavru_idler:
+            yavru = copy.deepcopy(kayitlar[kimlik])
+            yavru.pop("base_son_guncelleme", None)
+            yavru.pop("_sync_births", None)
+            yavrular.append(yavru)
+        sonuc = self.api_istek("POST", path,
+            {"anne": payload, "yavrular": yavrular, "dogum_idler": meta["dogum_idler"]}, timeout=25)
+        cevaplar = {str(h["id"]): h for h in (sonuc or {}).get("hayvanlar", [])}
+        if not {anne_id, *yavru_idler}.issubset(cevaplar):
+            raise ApiHatasi("Dogum isleminin sunucu cevabi eksik; yeniden senkronize edin.")
+        for kimlik, kayit in cevaplar.items():
+            self._api_base_versions[kimlik] = kayit["son_guncelleme"]
+            self.hayvanlar[kimlik] = self.hayvan_kayit_tamamla(kimlik, kayit)
+            if getattr(self, "geri_al_yigini", None):
+                son = self.geri_al_yigini[-1]
+                if kimlik in son.get("etkilenen_idler", []):
+                    son.setdefault("sonraki_surumler", {})[kimlik] = kayit["son_guncelleme"]
+        self._api_son_idler.update(cevaplar)
+        return cevaplar
+
+    def dogum_islemi_kaydet(self, anne_id, tarih, yavru_bilgileri):
+        onceki_anne = copy.deepcopy(self.hayvanlar[anne_id])
+        dogum_id = uuid.uuid4().hex
+        ciftlik_id = onceki_anne.get("ciftlik_id") or (getattr(self, "api_kullanici", None) or {}).get("ciftlik_id")
+        if self.admin_mi():
+            ciftlik_id = ciftlik_id or getattr(self, "admin_aktif_ciftlik_id", None)
+        yeni_yavrular = {}
+        baglantilar = []
+        for bilgi in yavru_bilgileri:
+            kimlik = uuid.uuid4().hex
+            resmi = str(bilgi.get("resmi_kupe_no") or "").strip().upper()
+            ciftlik = str(bilgi.get("ciftlik_kupe_no") or "").strip().upper()
+            kayit = self.hayvan_kayit_tamamla(kimlik, {
+                "id": kimlik, "ciftlik_id": ciftlik_id,
+                "resmi_kupe_no": resmi, "ciftlik_kupe_no": ciftlik,
+                "kupe_no": ciftlik or resmi or kimlik, "cins": bilgi["cins"],
+                "dogum_tarihi": tarih, "anne_kupe": anne_id, "durum": "Buzağı",
+                "kayit_tarihi": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                "son_guncelleme": datetime.now().strftime("%d/%m/%Y %H:%M:%S")})
+            yeni_yavrular[kimlik] = kayit
+            baglantilar.append({"id": kimlik, "hayvan_id": kimlik, "kupe": kayit["kupe_no"],
+                "resmi_kupe_no": resmi, "ciftlik_kupe_no": ciftlik, "cins": bilgi["cins"]})
+        anne = copy.deepcopy(onceki_anne)
+        anne.setdefault("dogumlar", []).append({"id": dogum_id, "tarih": tarih,
+            "yavrular": baglantilar, "laktasyon_bitis_tarihi": None})
+        anne.update(gebe_mi=False, gebelik_tarihi=None, aktif_tohumlama_id=None,
+            cins="Sağmal İnek", durum="Sağmal İnek", durum_notu="Sağmal İnek",
+            son_guncelleme=datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+        self.hayvanlar[anne_id] = anne
+        self.hayvanlar.update(yeni_yavrular)
+        for kimlik in [anne_id, *yeni_yavrular]:
+            self.geri_al_etkilenenleri_isaretle(kimlik)
+        if not getattr(self, "api_modu", False):
+            if self.veri_kaydet():
+                return baglantilar
+            self.hayvanlar[anne_id] = onceki_anne
+            for kimlik in yeni_yavrular:
+                self.hayvanlar.pop(kimlik, None)
+            return None
+        eski_meta = copy.deepcopy((self.bekleyen_senkron.get("upserts", {}).get(anne_id) or {}).get("_sync_births"))
+        meta = eski_meta or {"dogum_idler": [], "yavru_idler": [], "anne_onceki": onceki_anne}
+        meta["dogum_idler"].append(dogum_id)
+        meta["yavru_idler"].extend(yeni_yavrular)
+        kayitlar = {anne_id: copy.deepcopy(anne), **yeni_yavrular}
+        kayitlar[anne_id]["_sync_births"] = meta
+        hemen_gonder = not self.offline_modda_mi() and not self.bekleyen_senkron_var() and not self.api_yazma_kuyruga_alinmali_mi(anne_id)
+        if hemen_gonder:
+            try:
+                self.api_dogum_senkron_gonder(anne_id, kayitlar[anne_id], kayitlar, set(self._api_son_idler))
+                self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Hatasi")
+                return baglantilar
+            except ApiHatasi as hata:
+                if hata.status is not None and not self.api_hatasi_yeniden_denebilir_mi(hata):
+                    self.hayvanlar[anne_id] = onceki_anne
+                    for kimlik in yeni_yavrular:
+                        self.hayvanlar.pop(kimlik, None)
+                    self.mesaj_kutusu_goster("error", "Dogum Kaydi Reddedildi", str(hata))
+                    return None
+                self.api_cevrimdisi = True
+        with self.senkron_kuyruk_kilidi():
+            onceki_kuyruk = copy.deepcopy(self.bekleyen_senkron)
+            self.bekleyen_senkron_upsert(anne_id, anne)
+            self.bekleyen_senkron["upserts"][anne_id]["_sync_births"] = meta
+            for kimlik, yavru in yeni_yavrular.items():
+                self.bekleyen_senkron_upsert(kimlik, yavru)
+            if not self.bekleyen_senkron_kaydet():
+                self.bekleyen_senkron = onceki_kuyruk
+                self.hayvanlar[anne_id] = onceki_anne
+                for kimlik in yeni_yavrular:
+                    self.hayvanlar.pop(kimlik, None)
+                self.mesaj_kutusu_goster("error", "Dogum Kaydedilemedi", "Bekleyen dogum diske yazilamadi. Disk erisimini kontrol edip yeniden deneyin.")
+                return None
+        self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "Dogum Onbellek Hatasi")
+        self.api_durum_guncelle()
+        return baglantilar
+
     def dogum_kayit_olustur(self, anne_kupe, detay_pencere):
         if detay_pencere:
             detay_pencere.destroy()
@@ -9579,8 +10004,7 @@ class HayvanTakipSistemi:
                     alanlar = ('resmi_kupe_no', 'ciftlik_kupe_no')
                     if not any(str(yavru.get(alan) or "").strip() for alan in alanlar):
                         alanlar = ('kupe',)
-                    for alan in alanlar:
-                        deger = str(yavru.get(alan) or "").strip().upper()
+                    for deger in {str(yavru.get(alan) or "").strip().upper() for alan in alanlar}:
                         if deger:
                             temp_kupe_list.append(deger)
                 if len(temp_kupe_list) != len(set(temp_kupe_list)):
@@ -9593,55 +10017,13 @@ class HayvanTakipSistemi:
                             return messagebox.showerror("Hata", f"Yavru küpe numarası '{kupe}' zaten başka bir hayvana kayıtlı!", parent=dogum_window)
 
                 self.islem_kaydi_baslat(f"Doğum kaydı oluşturuldu: {anne_kupe}")
-                kaydedilen_yavrular_bilgi = []
-                degisen_hayvan_idleri = [anne_kupe]
-                for i, yavru_data in enumerate(yavrular_data):
-                    yeni_yavru_id = uuid.uuid4().hex
-                    degisen_hayvan_idleri.append(yeni_yavru_id)
-                    yavru_resmi = str(yavru_data.get('resmi_kupe_no') or "").strip().upper()
-                    yavru_ciftlik = str(yavru_data.get('ciftlik_kupe_no') or "").strip().upper()
-                    yavru_gorunen = yavru_ciftlik or yavru_resmi
-                    self.hayvanlar[yeni_yavru_id] = {
-                        'kupe_no': yavru_gorunen or yeni_yavru_id,
-                        'resmi_kupe_no': yavru_resmi,
-                        'ciftlik_kupe_no': yavru_ciftlik,
-                        'dogum_tarihi': dogum_tarihi, 'cins': yavru_data['cins'], 'anne_kupe': anne_kupe,
-                        'kayit_tarihi': datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'yas_gun': (datetime.now() - dogum_dt).days, 'tohumlamalar': [], 'dogumlar': [],
-                        'durum': 'Buzağı', 'gebe_mi': False, 'gebelik_tarihi': None, 'aktif_tohumlama_id': None, 'olu': False, 'olum_tarihi': None,
-                        'kesildi': False, 'kesim_bilgisi': None, 'satildi': False, 'satis_tarihi': None, 'satis_bilgisi': None,
-                        'asi_prosedurler': [], 'arsivli': False, 'arsiv_tarihi': None, 'foto_data': None, 'son_guncelleme': datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                    }
-                    kaydedilen_yavrular_bilgi.append({
-                        'kupe': yavru_gorunen or yeni_yavru_id,
-                        'resmi_kupe_no': yavru_resmi,
-                        'ciftlik_kupe_no': yavru_ciftlik,
-                        'cins': yavru_data['cins'],
-                    })
-                
-                dogum_bilgisi = {
-                    'tarih': dogum_tarihi,
-                    'yavrular': kaydedilen_yavrular_bilgi,
-                    'laktasyon_bitis_tarihi': None
-                }
-                if 'dogumlar' not in anne_hayvan:
-                    anne_hayvan['dogumlar'] = []
-                anne_hayvan['dogumlar'].append(dogum_bilgisi)
-
-                if not anne_hayvan.get('olu', False):
-                    anne_hayvan.update({
-                        'gebe_mi': False, 
-                        'gebelik_tarihi': None, 
-                        'aktif_tohumlama_id': None, 
-                        'cins': 'Sağmal İnek', 
-                        'durum': 'Sağmal İnek',
-                    })
-                anne_hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                
-                if not self.veri_kaydet_coklu(degisen_hayvan_idleri):
+                kaydedilen_yavrular_bilgi = self.dogum_islemi_kaydet(anne_kupe, dogum_tarihi, yavrular_data)
+                if kaydedilen_yavrular_bilgi is None:
                     self.kayit_basarisizsa_ui_yenile()
                     return
                 kaydedilen_kupeler = [y['kupe'] for y in kaydedilen_yavrular_bilgi]
-                messagebox.showinfo("Başarılı", f"Doğum kaydı başarılı!\nKaydedilen Yavrular: {', '.join(kaydedilen_kupeler)}")
+                ek = "\nYerel kayit korundu; bekleyen dogum internet baglantisinda birlikte gonderilecek." if self.bekleyen_senkron_var() else ""
+                messagebox.showinfo("Başarılı", f"Doğum kaydı başarılı!\nKaydedilen Yavrular: {', '.join(kaydedilen_kupeler)}{ek}")
                 dogum_window.destroy()
                 self.hayvan_listesini_guncelle()
                 self.raporlari_guncelle()
@@ -9658,11 +10040,9 @@ class HayvanTakipSistemi:
         hayvan = self.hayvanlar[kupe_no]
         self.islem_kaydi_baslat(f"Kuruya ayrıldı: {kupe_no}")
 
-        if 'dogumlar' in hayvan and hayvan['dogumlar']:
-            for dogum in reversed(hayvan['dogumlar']):
-                if dogum.get('laktasyon_bitis_tarihi') is None:
-                    dogum['laktasyon_bitis_tarihi'] = datetime.now().strftime("%d/%m/%Y")
-                    break
+        dogum = son_dogum_kaydi(hayvan, sadece_acik=True)
+        if dogum is not None:
+            dogum['laktasyon_bitis_tarihi'] = datetime.now().strftime("%d/%m/%Y")
         
         hayvan.update({
             'durum': 'Kuru İnek', 'cins': 'Kuru İnek',
@@ -9906,11 +10286,12 @@ class HayvanTakipSistemi:
     def hayvan_kalici_sil(self, kupe_no, pencere):
         if kupe_no not in self.hayvanlar:
             return
+        if self.bekleyen_atomik_dogumda_mi(kupe_no):
+            return messagebox.showwarning("Bekleyen Dogum", "Once anne ve yavrularin bekleyen dogum kaydini senkronize edin.", parent=pencere)
         uyari = f"DİKKAT!\n\n{kupe_no} küpeli arşivli hayvan kalıcı olarak silinecek.\n\nBu işlem geri alınamaz."
         if not messagebox.askyesno("Kalıcı Silme Onayı", uyari, parent=pencere):
             return
         silinen_hayvan = copy.deepcopy(self.hayvanlar.get(kupe_no) or {})
-        degisen_anne_idleri, temizlenen_yavru_sayisi = self.silinen_hayvan_dogum_referanslarini_temizle(kupe_no, silinen_hayvan)
         self.islem_kaydi_baslat(
             f"Arşivli hayvan kalıcı silindi: {kupe_no}",
             geri_alinabilir=False,
@@ -9919,21 +10300,29 @@ class HayvanTakipSistemi:
         api_modu = getattr(self, "api_modu", False)
         offline_senkron_gerekiyor = False
         if api_modu:
-            if self.offline_modda_mi() or self.api_yazma_kuyruga_alinmali_mi():
+            if self.offline_modda_mi() or self.api_yazma_kuyruga_alinmali_mi(kupe_no):
                 self.bekleyen_senkron_delete(kupe_no)
                 offline_senkron_gerekiyor = True
             else:
                 try:
-                    self.api_istek("DELETE", f"/api/hayvanlar/{self.api_ref(kupe_no)}?kalici=true", timeout=30)
+                    path = f"/api/hayvanlar/{self.api_ref(kupe_no)}?kalici=true"
+                    base = getattr(self, "_api_base_versions", {}).get(str(kupe_no))
+                    if base:
+                        path += f"&beklenen_son_guncelleme={self.api_ref(base)}"
+                    self.api_istek("DELETE", path, timeout=30)
                     onceki_idler = set(getattr(self, "_api_son_idler", set()))
                     onceki_idler.discard(str(kupe_no))
                     self._api_son_idler = onceki_idler
                 except ApiHatasi as e:
                     if getattr(e, "status", None) != 404:
+                        if e.status is not None and not self.api_hatasi_yeniden_denebilir_mi(e):
+                            self.mesaj_kutusu_goster("error", "Silme Reddedildi", str(e), parent=pencere)
+                            return
                         self.api_cevrimdisi = True
                         self._api_son_hata = str(e)
                         self.bekleyen_senkron_delete(kupe_no)
                         offline_senkron_gerekiyor = True
+        degisen_anne_idleri, temizlenen_yavru_sayisi = self.silinen_hayvan_dogum_referanslarini_temizle(kupe_no, silinen_hayvan)
         del self.hayvanlar[kupe_no]
         if api_modu:
             if offline_senkron_gerekiyor:
@@ -10069,12 +10458,8 @@ class HayvanTakipSistemi:
         def mevcut_laktasyon_bilgisi():
             dogumlar = hayvan.get('dogumlar') or []
             laktasyon_no = str(len(dogumlar)) if dogumlar else ""
-            son_dogum = ""
-            for dogum in reversed(dogumlar):
-                tarih = (dogum.get('tarih') or '').strip()
-                if tarih and tarih != "Bilinmiyor":
-                    son_dogum = tarih
-                    break
+            son = son_dogum_kaydi(hayvan)
+            son_dogum = son.get('tarih') if son else ""
             return laktasyon_no, son_dogum
 
         for row, (label_text, widget) in enumerate([
@@ -10187,7 +10572,10 @@ class HayvanTakipSistemi:
             if yeni_cins in ["Sağmal İnek", "Kuru İnek"]:
                 laktasyon_no_str = laktasyon_no_edit_entry.get().strip()
                 son_dogum_tarihi = son_dogum_edit_entry.get().strip()
-                if laktasyon_no_str or son_dogum_tarihi:
+                laktasyon_degisti = (laktasyon_no_str, son_dogum_tarihi) != (mevcut_laktasyon_no, mevcut_son_dogum)
+                if laktasyon_degisti and not laktasyon_no_str and not son_dogum_tarihi and hayvan.get('dogumlar'):
+                    return messagebox.showerror("Hata", "Dogum gecmisi bu alanlar bosaltilarak silinemez.", parent=pencere)
+                if laktasyon_degisti and (laktasyon_no_str or son_dogum_tarihi):
                     yeni_dogumlar = self.laktasyon_dogumlari_olustur(
                         yeni_cins,
                         laktasyon_no_str,
@@ -10198,6 +10586,15 @@ class HayvanTakipSistemi:
                     )
                     if yeni_dogumlar is None:
                         return
+                    try:
+                        yeni_dogumlar = laktasyon_kayitlarini_birlestir(hayvan.get('dogumlar') or [], yeni_dogumlar)
+                    except ValueError as hata:
+                        return messagebox.showerror("Hata", str(hata), parent=pencere)
+                if yeni_cins == "Kuru İnek" and hayvan.get('cins') != "Kuru İnek":
+                    yeni_dogumlar = copy.deepcopy(yeni_dogumlar if yeni_dogumlar is not None else hayvan.get('dogumlar') or [])
+                    acik = son_dogum_kaydi({'dogumlar': yeni_dogumlar}, sadece_acik=True)
+                    if acik:
+                        acik['laktasyon_bitis_tarihi'] = datetime.now().strftime("%d/%m/%Y")
 
             self.islem_kaydi_baslat(f"Genel bilgiler düzenlendi: {kupe_no}")
             hayvan['resmi_kupe_no'] = yeni_resmi
@@ -10482,12 +10879,8 @@ class HayvanTakipSistemi:
             alan = tk.Frame(dialog, bg=self.renkler["arkaplan"], padx=22, pady=22)
             alan.pack(fill='both', expand=True)
             mevcut_dogumlar = hayvan.get('dogumlar') or []
-            son_bilinen = ""
-            for dogum in reversed(mevcut_dogumlar):
-                tarih = (dogum.get('tarih') or '').strip()
-                if tarih and tarih != "Bilinmiyor":
-                    son_bilinen = tarih
-                    break
+            son = son_dogum_kaydi(hayvan)
+            son_bilinen = son.get('tarih') if son else ""
 
             laktasyon_entry = ttk.Entry(alan, style='TEntry')
             laktasyon_entry.insert(0, str(len(mevcut_dogumlar)) if mevcut_dogumlar else "")
@@ -10527,6 +10920,10 @@ class HayvanTakipSistemi:
                 )
                 if yeni_dogumlar is None:
                     return
+                try:
+                    yeni_dogumlar = laktasyon_kayitlarini_birlestir(mevcut_dogumlar, yeni_dogumlar)
+                except ValueError as hata:
+                    return messagebox.showerror("Hata", str(hata), parent=dialog)
                 if mevcut_dogumlar and not messagebox.askyesno(
                     "Laktasyon Bilgisi",
                     "Mevcut doğum/laktasyon kayıtları bu bilgiyle yeniden düzenlenecek. Devam edilsin mi?",
@@ -10662,36 +11059,7 @@ class HayvanTakipSistemi:
         return hayvan.get("durum") or "Hayatta"
 
     def profil_laktasyon_ozeti(self, hayvan):
-        dogumlar = hayvan.get("dogumlar") or []
-        toplam_sagim = 0
-        aktif_sagim = "-"
-        son_dogum = "-"
-        for index, dogum in enumerate(dogumlar):
-            tarih = dogum.get("tarih")
-            if not tarih or tarih == "Bilinmiyor":
-                continue
-            try:
-                baslangic = datetime.strptime(tarih, "%d/%m/%Y")
-            except (ValueError, TypeError):
-                continue
-            son_dogum = tarih
-            bitis = None
-            if dogum.get("laktasyon_bitis_tarihi") and dogum.get("laktasyon_bitis_tarihi") != "Bilinmiyor":
-                try:
-                    bitis = datetime.strptime(dogum["laktasyon_bitis_tarihi"], "%d/%m/%Y")
-                except (ValueError, TypeError):
-                    bitis = None
-            elif index == len(dogumlar) - 1 and hayvan.get("durum") == "Sağmal İnek":
-                bitis = datetime.now()
-                aktif_sagim = f"{max((bitis - baslangic).days, 0)} gün"
-            if bitis:
-                toplam_sagim += max((bitis - baslangic).days, 0)
-        return {
-            "laktasyon_sayisi": len(dogumlar),
-            "toplam_sagim": toplam_sagim,
-            "aktif_sagim": aktif_sagim,
-            "son_dogum": son_dogum,
-        }
+        return laktasyon_ozeti(hayvan)
 
     def profil_dogum_tahmini(self, hayvan):
         if not hayvan.get("gebe_mi") or not hayvan.get("gebelik_tarihi"):
@@ -10699,7 +11067,7 @@ class HayvanTakipSistemi:
         try:
             gebelik = datetime.strptime(hayvan["gebelik_tarihi"], "%d/%m/%Y")
             dogum = gebelik + timedelta(days=283)
-            return dogum.strftime("%d/%m/%Y"), (dogum - datetime.now()).days
+            return dogum.strftime("%d/%m/%Y"), (dogum.date() - datetime.now().date()).days
         except (ValueError, TypeError):
             return "Tarih hatası", None
 
@@ -10717,7 +11085,7 @@ class HayvanTakipSistemi:
             try:
                 tarih = datetime.strptime(son_tohumlama.get("tarih", ""), "%d/%m/%Y")
                 kontrol = tarih + timedelta(days=21)
-                kalan = (kontrol - datetime.now()).days
+                kalan = (kontrol.date() - datetime.now().date()).days
                 if kalan <= 7:
                     uyarilar.append(("Gebelik kontrol", f"{gorunen} için kontrol tarihi yaklaştı.", kalan))
             except (ValueError, TypeError):
@@ -10736,7 +11104,7 @@ class HayvanTakipSistemi:
                 continue
             try:
                 tarih = datetime.strptime(sonraki, "%d/%m/%Y")
-                kalan = (tarih - datetime.now()).days
+                kalan = (tarih.date() - datetime.now().date()).days
                 if kalan <= 30:
                     uyarilar.append((prosedur.get("ad") or "Aşı/Prosedür", f"Sonraki tarih: {sonraki}", kalan))
             except (ValueError, TypeError):
@@ -11336,24 +11704,22 @@ class HayvanTakipSistemi:
             if hayvan.get('gebe_mi', False) and hayvan.get('gebelik_tarihi'):
                 try:
                     g_tarihi = datetime.strptime(hayvan['gebelik_tarihi'], "%d/%m/%Y")
-                    d_tarihi = g_tarihi + timedelta(days=283); kalan_gun = (d_tarihi - datetime.now()).days
+                    d_tarihi = g_tarihi + timedelta(days=283); kalan_gun = (d_tarihi.date() - datetime.now().date()).days
                     dogum_tahmini = d_tarihi.strftime("%d/%m/%Y")
                     if kalan_gun <= 60: uyarilar += f"Doğuma {kalan_gun} gün! " if kalan_gun > 0 else "DOĞUM VAKTİ!"
                 except: dogum_tahmini = "Hata"
             
-            if hayvan.get('durum') == 'Sağmal İnek':
+            if hayvan.get('cins') in ('Sağmal İnek', 'Kuru İnek') or hayvan.get('durum') in ('Sağmal İnek', 'Kuru İnek'):
                 try:
                     dogumlar = hayvan.get('dogumlar', [])
                     if self.sagmal_laktasyon_eksik_mi(hayvan):
                         uyarilar += "Eksik veri: laktasyon/son doğum! "
                         sagim_gun_str = "Eksik"
                     elif dogumlar:
-                        son_dogum = dogumlar[-1]
-                        if son_dogum.get('laktasyon_bitis_tarihi') is None and son_dogum.get('tarih') != 'Bilinmiyor':
-                            s_tarihi = datetime.strptime(son_dogum['tarih'], "%d/%m/%Y")
-                            sagim_gun = (datetime.now() - s_tarihi).days
-                            sagim_gun_str = f"{sagim_gun} gün"
-                            if sagim_gun > 305: uyarilar += "Uzun sağım! "
+                        ozet = self.profil_laktasyon_ozeti(hayvan)
+                        sagim_gun_str = ozet['son_sagim']
+                        if (ozet['aktif_sagim_gun'] or 0) > 305:
+                            uyarilar += "Uzun sağım! "
                 except Exception as e: 
                     sagim_gun_str = f"Hata: {e}"
             
@@ -11370,7 +11736,7 @@ class HayvanTakipSistemi:
                 tag = "warning"
             elif hayvan.get('gebe_mi', False) and dogum_tahmini != "-":
                 try:
-                    kalan_gun = (datetime.strptime(dogum_tahmini, "%d/%m/%Y") - datetime.now()).days
+                    kalan_gun = (datetime.strptime(dogum_tahmini, "%d/%m/%Y").date() - datetime.now().date()).days
                     if kalan_gun <= 7: tag = "critical"
                     elif kalan_gun <= 30: tag = "urgent"
                     elif kalan_gun <= 60: tag = "warning"
@@ -11420,24 +11786,13 @@ class HayvanTakipSistemi:
 
     def tum_hayvanlari_guncelle(self):
         is_changed = False
-        degisen_idler = set()
         for kupe_no, hayvan in list(self.hayvanlar.items()):
-            if hayvan.get('olu', False) or hayvan.get('kesildi', False) or hayvan.get('arsivli', False) or hayvan.get('satildi', False): continue
-            
             try:
-                dogum_tarihi = datetime.strptime(hayvan['dogum_tarihi'], "%d/%m/%Y")
-                yeni_yas_gun = (datetime.now() - dogum_tarihi).days
-                if hayvan.get('yas_gun') != yeni_yas_gun:
-                    hayvan['yas_gun'] = yeni_yas_gun; is_changed = True; degisen_idler.add(str(kupe_no))
-                
-                if not hayvan.get('gebe_mi', False) and hayvan.get('durum') not in ['Sağmal İnek', 'Kuru İnek']:
-                    yeni_cins = self.otomatik_cins_guncelle(hayvan['cins'], yeni_yas_gun)
-                    if yeni_cins != hayvan['cins']:
-                        hayvan['cins'] = yeni_cins
-                        hayvan['durum'] = self.durum_hesapla(yeni_cins, yeni_yas_gun)
-                        is_changed = True
-                        degisen_idler.add(str(kupe_no))
-            
+                yeni = normalize_yasam_dongusu(hayvan)
+                if yeni != hayvan:
+                    hayvan.clear()
+                    hayvan.update(yeni)
+                    is_changed = True
             except Exception as e:
                 print(f"Hayvan güncellenirken hata ({kupe_no}): {e}")
                 continue
@@ -11457,7 +11812,7 @@ class HayvanTakipSistemi:
                     try:
                         t_tarihi = datetime.strptime(son_tohumlama['tarih'], "%d/%m/%Y")
                         kontrol_tarihi = t_tarihi + timedelta(days=21)
-                        kalan_kontrol = (kontrol_tarihi - datetime.now()).days
+                        kalan_kontrol = (kontrol_tarihi.date() - datetime.now().date()).days
                         if kalan_kontrol <= 7:
                             tohumlama_id = son_tohumlama.get('id') or "bekleyen"
                             uyari_key = self.uyari_key_olustur(kupe_no, "gebelik_kontrol", tohumlama_id, kalan_kontrol)
@@ -11483,7 +11838,7 @@ class HayvanTakipSistemi:
             if aktif_tohumlama_id and hayvan.get('durum') == 'Sağmal İnek' and hayvan.get('gebe_mi', False):
                 try:
                     g_tarihi = datetime.strptime(hayvan['gebelik_tarihi'], "%d/%m/%Y")
-                    kalan_gun_doguma = (g_tarihi + timedelta(days=283) - datetime.now()).days
+                    kalan_gun_doguma = ((g_tarihi + timedelta(days=283)).date() - datetime.now().date()).days
                     uyari_key = (
                         self.uyari_key_olustur(kupe_no, "kuruya_al", aktif_tohumlama_id, kalan_gun_doguma)
                         if kalan_gun_doguma <= 60
@@ -11505,7 +11860,7 @@ class HayvanTakipSistemi:
             if aktif_tohumlama_id and hayvan.get('gebe_mi', False):
                 try:
                     g_tarihi = datetime.strptime(hayvan['gebelik_tarihi'], "%d/%m/%Y")
-                    kalan_gun = (g_tarihi + timedelta(days=283) - datetime.now()).days
+                    kalan_gun = ((g_tarihi + timedelta(days=283)).date() - datetime.now().date()).days
                     uyari_key = self.uyari_key_olustur(kupe_no, "gebelik", aktif_tohumlama_id, kalan_gun)
                     if uyari_key:
                         okundu_mu = uyari_key in self.okunan_uyarilar
@@ -11528,7 +11883,7 @@ class HayvanTakipSistemi:
                     continue
                 try:
                     p_tarihi = datetime.strptime(sonraki_tarih, "%d/%m/%Y")
-                    kalan_prosedur = (p_tarihi - datetime.now()).days
+                    kalan_prosedur = (p_tarihi.date() - datetime.now().date()).days
                     if kalan_prosedur <= 7:
                         prosedur_id = prosedur.get('id') or prosedur.get('ad', 'prosedur')
                         uyari_key = self.uyari_key_olustur(kupe_no, "asi_prosedur", prosedur_id, kalan_prosedur)
