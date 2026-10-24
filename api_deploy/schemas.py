@@ -330,6 +330,29 @@ class RaporOzetResponse(AlpModel):
     acik_uyari: int = 0
 
 
+class GeriAlKayit(AlpModel):
+    id: str
+    beklenen_son_guncelleme: str
+    veri: Optional[HayvanUpdate] = None
+
+
+class GeriAlRequest(AlpModel):
+    guncellemeler: List[GeriAlKayit] = Field(default_factory=list, max_length=1000)
+    silmeler: List[GeriAlKayit] = Field(default_factory=list, max_length=1000)
+
+
+class GeriAlResponse(AlpModel):
+    status: str = "ok"
+    hayvanlar: List[HayvanResponse] = Field(default_factory=list)
+    silinen_idler: List[str] = Field(default_factory=list)
+
+
+class DogumSenkronRequest(AlpModel):
+    anne: HayvanUpdate
+    yavrular: List[HayvanCreate] = Field(default_factory=list, max_length=100)
+    dogum_idler: List[str] = Field(min_length=1, max_length=100)
+
+
 class IslemSonucResponse(AlpModel):
     status: str = "ok"
     message: str
