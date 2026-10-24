@@ -48,14 +48,13 @@ def _normalize_database_url(url):
     return url
 
 
-# Kullanıcı veritabanı bağlantı adresini (URL) çevresel değişkenden alabilir.
-# Yoksa varsayılan olarak kullanıcı veri klasöründeki SQLite veritabanı kullanılır.
-SQLALCHEMY_DATABASE_URL = _normalize_database_url(os.getenv(
-    "DATABASE_URL", 
-    _default_sqlite_url()
-))
+# Kullanici veritabani baglanti adresini (URL) cevresel degiskenden alabilir.
+# Yoksa varsayilan olarak kullanici veri klasorundeki SQLite veritabani kullanilir.
+SQLALCHEMY_DATABASE_URL = _normalize_database_url(
+    os.getenv("DATABASE_URL") or _default_sqlite_url()
+)
 
-# PostgreSQL (örneğin Supabase vb.) kullanıldığında pool ayarları değişebilir
+# PostgreSQL (ornegin Supabase vb.) kullanildiginda pool ayarlari degisebilir.
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
@@ -68,7 +67,11 @@ else:
     connect_args["prepare_threshold"] = None
     if "supabase.com" in SQLALCHEMY_DATABASE_URL and "sslmode=" not in SQLALCHEMY_DATABASE_URL:
         connect_args["sslmode"] = "require"
-    engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=connect_args)
+    connect_args["connect_timeout"] = 10
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL, connect_args=connect_args,
+        pool_pre_ping=True, pool_recycle=300,
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
