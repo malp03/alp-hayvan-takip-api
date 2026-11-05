@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 import base64
 import hashlib
 import hmac
@@ -19,6 +20,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, 
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageOps
 from sqlalchemy import or_, text as sql_text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import uvicorn
 
@@ -1022,6 +1024,7 @@ def normalize_tohumlama(veri: Dict[str, Any], *, yeni: bool = False) -> Dict[str
         raise HTTPException(status_code=400, detail="Tohumlama tarihi gelecekte olamaz.")
     sonuc["sekil"] = metin(sonuc.get("sekil")) or None
     sonuc["suni_isim"] = metin(sonuc.get("suni_isim")) or ""
+    sonuc["veteriner"] = bos_yoksa_none(sonuc.get("veteriner"))
     if sonuc.get("kontrol_tarihi"):
         parse_tarih(sonuc.get("kontrol_tarihi"), "Kontrol tarihi")
     sonuc["kontrol_tarihi"] = bos_yoksa_none(sonuc.get("kontrol_tarihi"))
@@ -2075,6 +2078,7 @@ def delete_ciftlik(
     silinen_tohumlama = 0
     silinen_asi = 0
     silinen_uyari = 0
+    ciftlik_ek_kayitlarini_sil(db, ciftlik_id)
     if hayvan_idleri:
         silinen_tohumlama = db.query(models.Tohumlama).filter(
             models.Tohumlama.hayvan_id.in_(hayvan_idleri)
@@ -3092,6 +3096,10 @@ def geri_al(
             raise HTTPException(status_code=400, detail="Geri alma icin kayit surumu zorunludur.")
         alt_kayit_cakisma_kontrol(hayvan, kayit.beklenen_son_guncelleme)
 
+    silme_idler = [kayit.id for kayit in istek.silmeler]
+    if silme_idler and db.query(models.HayvanOlay.id).filter(models.HayvanOlay.hayvan_id.in_(silme_idler)).first():
+        raise HTTPException(409, "Olay kaydı bulunan hayvan geri alma ile silinemez.")
+
     guncellenenler = []
     for kayit in istek.guncellemeler:
         if kayit.veri is None:
@@ -3644,6 +3652,8 @@ def test_verilerini_sifirla(
         "islem_gecmisi": db.query(models.IslemGecmisi).count(),
     }
 
+    for model in (models.HayvanOlay, models.SutKaydi, models.TohumlamaSecenegi):
+        db.query(model).delete(synchronize_session=False)
     db.query(models.Tohumlama).delete(synchronize_session=False)
     db.query(models.AsiProsedur).delete(synchronize_session=False)
     db.query(models.Uyari).delete(synchronize_session=False)
@@ -3701,6 +3711,7 @@ def canli_temizlik(
         ).all()
         for ciftlik in legacy_ciftlikler:
             ciftlik_id = ciftlik.id
+            ciftlik_ek_kayitlarini_sil(db, ciftlik_id)
             for hayvan in db.query(models.Hayvan).filter(models.Hayvan.ciftlik_id == ciftlik_id).all():
                 paths, _, _ = foto_referanslarini_topla(db_hayvandan_payload(hayvan, include_photo_urls=False))
                 silinecek_fotograflar.extend(paths)
@@ -3819,6 +3830,227 @@ def clear_islem_gecmisi(
     }
 
 
+def ciftlik_ek_kayitlarini_sil(db: Session, ciftlik_id: str) -> None:
+    hayvanlar = db.query(models.Hayvan.id).filter(models.Hayvan.ciftlik_id == ciftlik_id)
+    db.query(models.HayvanOlay).filter(models.HayvanOlay.hayvan_id.in_(hayvanlar)).delete(synchronize_session=False)
+    for model in (models.TohumlamaSecenegi, models.SutKaydi):
+        db.query(model).filter(model.ciftlik_id == ciftlik_id).delete(synchronize_session=False)
+
+
+def ek_kayit_ciftligi(db: Session, kullanici: models.Kullanici, ciftlik_id: str) -> None:
+    ciftlik_erisim_kontrol(kullanici, ciftlik_id)
+    ciftlik_bul(db, ciftlik_id)
+
+
+@app.get("/api/ciftlikler/{ciftlik_id}/tohumlama-secenekleri")
+def get_tohumlama_secenekleri(ciftlik_id: str, db: Session = Depends(get_db),
+                               kullanici: models.Kullanici = Depends(get_current_user)):
+    ek_kayit_ciftligi(db, kullanici, ciftlik_id)
+    sonuc = {"suni": [], "veteriner": []}
+    for kayit in db.query(models.TohumlamaSecenegi).filter_by(ciftlik_id=ciftlik_id).order_by(models.TohumlamaSecenegi.ad_anahtari):
+        sonuc[kayit.tur].append(kayit.ad)
+    return sonuc
+
+
+@app.post("/api/ciftlikler/{ciftlik_id}/tohumlama-secenekleri", status_code=201)
+def create_tohumlama_secenegi(ciftlik_id: str, istek: schemas.TohumlamaSecenekCreate,
+                              db: Session = Depends(get_db), kullanici: models.Kullanici = Depends(get_current_user)):
+    ek_kayit_ciftligi(db, kullanici, ciftlik_id)
+    ad = " ".join(istek.ad.split())
+    if not ad:
+        raise HTTPException(400, "İsim boş olamaz.")
+    sorgu = db.query(models.TohumlamaSecenegi).filter_by(ciftlik_id=ciftlik_id, tur=istek.tur, ad_anahtari=ad.casefold())
+    mevcut = sorgu.first()
+    if mevcut:
+        return {"ad": mevcut.ad, "tur": mevcut.tur}
+    db.add(models.TohumlamaSecenegi(ciftlik_id=ciftlik_id, tur=istek.tur, ad=ad, ad_anahtari=ad.casefold()))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        mevcut = sorgu.first()
+        if not mevcut:
+            raise
+        ad = mevcut.ad
+    return {"ad": ad, "tur": istek.tur}
+
+
+def olay_payload(kayit: models.HayvanOlay) -> dict:
+    return {k: getattr(kayit, k) for k in ("id", "hayvan_id", "tarih", "baslik", "aciklama", "surum")}
+
+
+def ek_kayit_surum_kontrol(kayit, surum: str) -> None:
+    if not kayit:
+        raise HTTPException(404, "Kayıt bulunamadı.")
+    if kayit.surum != surum:
+        raise HTTPException(409, "Kayıt başka bir cihazda değişti. Listeyi yenileyin.")
+
+
+def olay_alanlarini_yaz(kayit: models.HayvanOlay, istek: schemas.HayvanOlayYaz) -> None:
+    baslik = istek.baslik.strip()
+    if not baslik or istek.tarih > bugun_tarih():
+        raise HTTPException(400, "Olay başlığı gerekli ve tarih gelecekte olamaz.")
+    kayit.tarih, kayit.baslik, kayit.aciklama = istek.tarih, baslik, istek.aciklama.strip()
+
+
+@app.get("/api/hayvanlar/{hayvan_ref}/olaylar")
+def get_hayvan_olaylari(hayvan_ref: str, db: Session = Depends(get_db),
+                       kullanici: models.Kullanici = Depends(get_current_user)):
+    hayvan = hayvan_bul(db, hayvan_ref, kullanici)
+    kayitlar = db.query(models.HayvanOlay).filter_by(hayvan_id=hayvan.id).order_by(
+        models.HayvanOlay.tarih.desc(), models.HayvanOlay.id,
+    )
+    return [olay_payload(kayit) for kayit in kayitlar]
+
+
+@app.post("/api/hayvanlar/{hayvan_ref}/olaylar", status_code=201)
+def create_hayvan_olayi(hayvan_ref: str, istek: schemas.HayvanOlayYaz, db: Session = Depends(get_db),
+                       kullanici: models.Kullanici = Depends(get_current_user)):
+    hayvan = hayvan_bul(db, hayvan_ref, kullanici, yazma=True)
+    kayit = models.HayvanOlay(hayvan_id=hayvan.id)
+    olay_alanlarini_yaz(kayit, istek)
+    db.add(kayit)
+    audit_kaydi(db, kullanici, "hayvan_olay_ekle", "Hayvan olay kaydı eklendi.",
+                ciftlik_id=hayvan.ciftlik_id, hedef_tipi="hayvan", hedef_id=hayvan.id)
+    db.commit()
+    return olay_payload(kayit)
+
+
+@app.patch("/api/hayvanlar/{hayvan_ref}/olaylar/{olay_id}")
+def update_hayvan_olayi(hayvan_ref: str, olay_id: str, istek: schemas.HayvanOlayYaz, surum: str,
+                       db: Session = Depends(get_db), kullanici: models.Kullanici = Depends(get_current_user)):
+    hayvan = hayvan_bul(db, hayvan_ref, kullanici, yazma=True)
+    kayit = db.query(models.HayvanOlay).filter_by(id=olay_id, hayvan_id=hayvan.id).with_for_update().first()
+    ek_kayit_surum_kontrol(kayit, surum)
+    olay_alanlarini_yaz(kayit, istek)
+    kayit.surum = yeni_id()
+    audit_kaydi(db, kullanici, "hayvan_olay_duzenle", "Hayvan olay kaydı düzenlendi.",
+                ciftlik_id=hayvan.ciftlik_id, hedef_tipi="hayvan", hedef_id=hayvan.id)
+    db.commit()
+    return olay_payload(kayit)
+
+
+@app.delete("/api/hayvanlar/{hayvan_ref}/olaylar/{olay_id}")
+def delete_hayvan_olayi(hayvan_ref: str, olay_id: str, surum: str, db: Session = Depends(get_db),
+                       kullanici: models.Kullanici = Depends(get_current_user)):
+    hayvan = hayvan_bul(db, hayvan_ref, kullanici, yazma=True)
+    kayit = db.query(models.HayvanOlay).filter_by(id=olay_id, hayvan_id=hayvan.id).with_for_update().first()
+    ek_kayit_surum_kontrol(kayit, surum)
+    db.delete(kayit)
+    audit_kaydi(db, kullanici, "hayvan_olay_sil", "Hayvan olay kaydı silindi.",
+                ciftlik_id=hayvan.ciftlik_id, hedef_tipi="hayvan", hedef_id=hayvan.id)
+    db.commit()
+    return {"status": "ok"}
+
+
+def sut_kaydi_payload(kayit: models.SutKaydi) -> dict:
+    return {
+        "id": kayit.id, "ciftlik_id": kayit.ciftlik_id, "tarih": kayit.tarih, "litre": float(kayit.litre),
+        "sagmal_sayisi": kayit.sagmal_sayisi, "surum": kayit.surum,
+        "verim": float(kayit.litre / kayit.sagmal_sayisi) if kayit.sagmal_sayisi else None,
+    }
+
+
+def aktif_sagmal_sayisi(db: Session, ciftlik_id: str) -> int:
+    sayi = 0
+    for kayit in db.query(models.Hayvan).filter_by(ciftlik_id=ciftlik_id):
+        hayvan = db_hayvandan_payload(kayit, include_photo_urls=False)
+        if hayvan_aktif_mi(hayvan) and hayvan.get("cins") == "Sağmal İnek":
+            sayi += 1
+    return sayi
+
+
+@app.get("/api/ciftlikler/{ciftlik_id}/sut-kayitlari")
+def get_sut_kayitlari(ciftlik_id: str, ay: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+                      db: Session = Depends(get_db), kullanici: models.Kullanici = Depends(get_current_user)):
+    ek_kayit_ciftligi(db, kullanici, ciftlik_id)
+    ay = ay or bugun_tarih().strftime("%Y-%m")
+    try:
+        ilk = date.fromisoformat(ay + "-01")
+        sonraki = date(ilk.year + (ilk.month == 12), ilk.month % 12 + 1, 1)
+    except ValueError as hata:
+        raise HTTPException(400, "Geçerli bir ay seçin.") from hata
+    model = models.SutKaydi
+    kayitlar = db.query(model).filter(model.ciftlik_id == ciftlik_id, model.tarih >= ilk,
+                                     model.tarih < sonraki).order_by(model.tarih).all()
+    toplam, sagmal_gun = Decimal(0), 0
+    sonuc = []
+    for kayit in kayitlar:
+        veri = sut_kaydi_payload(kayit)
+        karsilastirma = toplam / sagmal_gun if sagmal_gun else None
+        sapma = None
+        if karsilastirma and kayit.sagmal_sayisi:
+            sapma = (kayit.litre / kayit.sagmal_sayisi / karsilastirma - 1) * 100
+        veri["sapma_yuzde"] = float(sapma) if sapma is not None else None
+        veri["uyari"] = sapma is not None and (
+            abs(kayit.litre * sagmal_gun - toplam * kayit.sagmal_sayisi) * 10
+            >= toplam * kayit.sagmal_sayisi
+        )
+        sonuc.append(veri)
+        toplam += kayit.litre
+        sagmal_gun += kayit.sagmal_sayisi
+    return {"ay": ay, "bugun": bugun_tarih(), "guncel_sagmal_sayisi": aktif_sagmal_sayisi(db, ciftlik_id),
+            "toplam_litre": float(toplam), "ortalama_verim": float(toplam / sagmal_gun) if sagmal_gun else None,
+            "kayitlar": list(reversed(sonuc))}
+
+
+def sut_alanlarini_yaz(kayit: models.SutKaydi, litre: Decimal, sagmal: int) -> None:
+    if litre > 0 and sagmal == 0:
+        raise HTTPException(400, "Pozitif süt kaydı için sağmal hayvan sayısı sıfır olamaz.")
+    kayit.litre, kayit.sagmal_sayisi = litre, sagmal
+
+
+@app.post("/api/ciftlikler/{ciftlik_id}/sut-kayitlari", status_code=201)
+def create_sut_kaydi(ciftlik_id: str, istek: schemas.SutKaydiCreate, db: Session = Depends(get_db),
+                    kullanici: models.Kullanici = Depends(get_current_user)):
+    ek_kayit_ciftligi(db, kullanici, ciftlik_id)
+    bugun = bugun_tarih()
+    if istek.tarih > bugun or (istek.tarih < bugun and istek.sagmal_sayisi is None):
+        raise HTTPException(400, "Tarih gelecekte olamaz. Geçmiş gün için sağmal sayısını girin.")
+    sagmal = istek.sagmal_sayisi if istek.sagmal_sayisi is not None else aktif_sagmal_sayisi(db, ciftlik_id)
+    kayit = models.SutKaydi(ciftlik_id=ciftlik_id, tarih=istek.tarih)
+    sut_alanlarini_yaz(kayit, istek.litre, sagmal)
+    db.add(kayit)
+    try:
+        db.flush()
+    except IntegrityError as hata:
+        db.rollback()
+        if db.query(models.SutKaydi).filter_by(ciftlik_id=ciftlik_id, tarih=istek.tarih).first():
+            raise HTTPException(409, "Bu gün için süt kaydı var. Mevcut kaydı düzenleyin.") from hata
+        raise
+    audit_kaydi(db, kullanici, "sut_kaydi_ekle", "Günlük süt kaydı eklendi.",
+                ciftlik_id=ciftlik_id, hedef_tipi="sut_kaydi", hedef_id=kayit.id)
+    db.commit()
+    return sut_kaydi_payload(kayit)
+
+
+@app.patch("/api/ciftlikler/{ciftlik_id}/sut-kayitlari/{kayit_id}")
+def update_sut_kaydi(ciftlik_id: str, kayit_id: str, istek: schemas.SutKaydiUpdate, surum: str,
+                    db: Session = Depends(get_db), kullanici: models.Kullanici = Depends(get_current_user)):
+    ek_kayit_ciftligi(db, kullanici, ciftlik_id)
+    kayit = db.query(models.SutKaydi).filter_by(ciftlik_id=ciftlik_id, id=kayit_id).with_for_update().first()
+    ek_kayit_surum_kontrol(kayit, surum)
+    sut_alanlarini_yaz(kayit, istek.litre, istek.sagmal_sayisi if istek.sagmal_sayisi is not None else kayit.sagmal_sayisi)
+    kayit.surum = yeni_id()
+    audit_kaydi(db, kullanici, "sut_kaydi_duzenle", "Günlük süt kaydı düzenlendi.",
+                ciftlik_id=ciftlik_id, hedef_tipi="sut_kaydi", hedef_id=kayit.id)
+    db.commit()
+    return sut_kaydi_payload(kayit)
+
+
+@app.delete("/api/ciftlikler/{ciftlik_id}/sut-kayitlari/{kayit_id}")
+def delete_sut_kaydi(ciftlik_id: str, kayit_id: str, surum: str, db: Session = Depends(get_db),
+                    kullanici: models.Kullanici = Depends(get_current_user)):
+    ek_kayit_ciftligi(db, kullanici, ciftlik_id)
+    kayit = db.query(models.SutKaydi).filter_by(ciftlik_id=ciftlik_id, id=kayit_id).with_for_update().first()
+    ek_kayit_surum_kontrol(kayit, surum)
+    db.delete(kayit)
+    audit_kaydi(db, kullanici, "sut_kaydi_sil", "Günlük süt kaydı silindi.",
+                ciftlik_id=ciftlik_id, hedef_tipi="sut_kaydi", hedef_id=kayit.id)
+    db.commit()
+    return {"status": "ok"}
+
+
 @app.get("/api/yedek", response_model=schemas.YedekResponse)
 def get_yedek(
     db: Session = Depends(get_db),
@@ -3837,6 +4069,10 @@ def get_yedek(
     kullanicilar = [kullanici_payload(k) for k in db.query(models.Kullanici).order_by(models.Kullanici.kullanici_adi).all()]
     hayvanlar = [db_hayvandan_payload(h, include_photo_urls=False) for h in db.query(models.Hayvan).order_by(models.Hayvan.id).all()]
     gecmis = db.query(models.IslemGecmisi).order_by(models.IslemGecmisi.zaman.desc()).limit(500).all()
+    secenekler = [{k: getattr(row, k) for k in ("id", "ciftlik_id", "tur", "ad")}
+                  for row in db.query(models.TohumlamaSecenegi)]
+    olaylar = [olay_payload(row) for row in db.query(models.HayvanOlay)]
+    sut = [sut_kaydi_payload(row) for row in db.query(models.SutKaydi)]
     audit_kaydi(
         db,
         admin,
@@ -3851,6 +4087,9 @@ def get_yedek(
         "kullanicilar": kullanicilar,
         "hayvanlar": hayvanlar,
         "islem_gecmisi": [islem_payload(kayit) for kayit in gecmis],
+        "tohumlama_secenekleri": secenekler,
+        "hayvan_olaylari": olaylar,
+        "sut_kayitlari": sut,
     }
 
 

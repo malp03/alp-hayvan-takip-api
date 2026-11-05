@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Text, Date, Numeric, UniqueConstraint, DDL, event
 from sqlalchemy.orm import relationship
 from database import Base
 import uuid
@@ -40,6 +40,7 @@ class Hayvan(Base):
     tohumlamalar = relationship("Tohumlama", back_populates="hayvan", cascade="all, delete-orphan")
     asi_prosedurler = relationship("AsiProsedur", back_populates="hayvan", cascade="all, delete-orphan")
     uyarilar = relationship("Uyari", back_populates="hayvan", cascade="all, delete-orphan")
+    olaylar = relationship("HayvanOlay", cascade="all, delete-orphan")
 
 
 class Ciftlik(Base):
@@ -123,3 +124,44 @@ class IslemGecmisi(Base):
     ciftlik_id = Column(String, index=True, nullable=True)
     hedef_tipi = Column(String, nullable=True)
     hedef_id = Column(String, nullable=True)
+
+
+class TohumlamaSecenegi(Base):
+    __tablename__ = "tohumlama_secenekleri"
+    __table_args__ = (UniqueConstraint("ciftlik_id", "tur", "ad_anahtari"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    ciftlik_id = Column(String, ForeignKey("ciftlikler.id", ondelete="CASCADE"), nullable=False)
+    tur = Column(String(16), nullable=False)
+    ad = Column(String(100), nullable=False)
+    ad_anahtari = Column(String(200), nullable=False)
+
+
+class HayvanOlay(Base):
+    __tablename__ = "hayvan_olaylari"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    hayvan_id = Column(String, ForeignKey("hayvanlar.id", ondelete="CASCADE"), nullable=False, index=True)
+    tarih = Column(Date, nullable=False)
+    baslik = Column(String(120), nullable=False)
+    aciklama = Column(Text, nullable=False)
+    surum = Column(String, nullable=False, default=generate_uuid)
+
+
+class SutKaydi(Base):
+    __tablename__ = "sut_kayitlari"
+    __table_args__ = (UniqueConstraint("ciftlik_id", "tarih"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    ciftlik_id = Column(String, ForeignKey("ciftlikler.id", ondelete="CASCADE"), nullable=False)
+    tarih = Column(Date, nullable=False)
+    litre = Column(Numeric(12, 3), nullable=False)
+    sagmal_sayisi = Column(Integer, nullable=False)
+    surum = Column(String, nullable=False, default=generate_uuid)
+
+
+for model in (TohumlamaSecenegi, HayvanOlay, SutKaydi):
+    event.listen(
+        model.__table__, "after_create",
+        DDL("ALTER TABLE %(fullname)s ENABLE ROW LEVEL SECURITY").execute_if(dialect="postgresql"),
+    )
