@@ -1,4 +1,6 @@
-from typing import Any, Dict, List, Optional
+from datetime import date
+from decimal import Decimal
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -97,6 +99,7 @@ class TohumlamaBase(AlpModel):
     tarih: str
     sekil: Optional[str] = None
     suni_isim: Optional[str] = None
+    veteriner: Optional[str] = Field(default=None, max_length=100)
     gebe_mi: Optional[bool] = None
     kontrol_tarihi: Optional[str] = None
     gebelik_suresi: int = 283
@@ -110,6 +113,7 @@ class TohumlamaUpdate(AlpModel):
     tarih: Optional[str] = None
     sekil: Optional[str] = None
     suni_isim: Optional[str] = None
+    veteriner: Optional[str] = Field(default=None, max_length=100)
     gebe_mi: Optional[bool] = None
     kontrol_tarihi: Optional[str] = None
     gebelik_suresi: Optional[int] = None
@@ -379,3 +383,28 @@ class YedekResponse(AlpModel):
     kullanicilar: List[Dict[str, Any]] = Field(default_factory=list)
     hayvanlar: List[Dict[str, Any]] = Field(default_factory=list)
     islem_gecmisi: List[IslemGecmisiResponse] = Field(default_factory=list)
+    tohumlama_secenekleri: List[Dict[str, Any]] = Field(default_factory=list)
+    hayvan_olaylari: List[Dict[str, Any]] = Field(default_factory=list)
+    sut_kayitlari: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class TohumlamaSecenekCreate(AlpModel):
+    tur: Literal["suni", "veteriner"]
+    ad: str = Field(min_length=1, max_length=100)
+
+
+class HayvanOlayYaz(AlpModel):
+    tarih: date
+    baslik: str = Field(min_length=1, max_length=120)
+    aciklama: str = Field(default="", max_length=4000)
+
+
+class SutKaydiCreate(AlpModel):
+    tarih: date
+    litre: Decimal = Field(ge=0, max_digits=12, decimal_places=3, allow_inf_nan=False)
+    sagmal_sayisi: Optional[int] = Field(default=None, ge=0, le=1000000)
+
+
+class SutKaydiUpdate(AlpModel):
+    litre: Decimal = Field(ge=0, max_digits=12, decimal_places=3, allow_inf_nan=False)
+    sagmal_sayisi: Optional[int] = Field(default=None, ge=0, le=1000000)

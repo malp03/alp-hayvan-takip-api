@@ -127,6 +127,9 @@ def ensure_postgres_security():
         "asi_prosedurler",
         "uyarilar",
         "islem_gecmisi",
+        "tohumlama_secenekleri",
+        "hayvan_olaylari",
+        "sut_kayitlari",
     ]
     try:
         with engine.begin() as connection:

@@ -34,6 +34,7 @@ except ImportError:
 import sys
 
 from alp_ziraat_export import export_rows_to_excel, export_rows_to_pdf
+from alp_ziraat_ciftlik_ekranlari import CiftlikEkEkranlari
 from alp_ziraat_is_kurallari import (
     durum_hesapla as is_durum_hesapla,
     otomatik_cins_guncelle as is_otomatik_cins_guncelle,
@@ -51,7 +52,7 @@ class ApiHatasi(Exception):
 
 
 VARSAYILAN_API_URL = "https://alp-hayvan-takip-api.onrender.com"
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 GITHUB_REPO = "malp03/alp-hayvan-takip-api"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 UPDATE_SETUP_ASSET = "ALP_Ziraat_Suru_Takip_Setup.exe"
@@ -83,7 +84,7 @@ def resource_path(relative_path):
 
 
 # --- Sınıf Tanımlaması ---
-class HayvanTakipSistemi:
+class HayvanTakipSistemi(CiftlikEkEkranlari):
     def __init__(self):
         self._baslatma_tamam = False
         try:
@@ -1414,17 +1415,10 @@ class HayvanTakipSistemi:
         return None
 
     def dogum_gorunur_yavrular(self, dogum):
-        gorunur = []
-        for yavru in (dogum or {}).get('yavrular') or []:
-            if self.yavru_hayvan_id_bul(yavru):
-                gorunur.append(yavru)
-        return gorunur
-
-    def dogum_gecmisi_gosterilmeli_mi(self, dogum):
-        yavrular = (dogum or {}).get('yavrular') or []
-        if yavrular and not self.dogum_gorunur_yavrular(dogum) and self.dogum_kaydi_otomatik_yavru_baglantisi_mi(dogum):
-            return False
-        return True
+        return [
+            yavru for yavru in (dogum or {}).get('yavrular') or []
+            if isinstance(yavru, dict) and self.yavru_referans_anahtarlari(yavru)
+        ]
 
     def hayvan_referans_anahtarlari(self, h_id, hayvan):
         anahtarlar = {self.kupe_arama_temizle(h_id)}
@@ -5554,53 +5548,18 @@ class HayvanTakipSistemi:
         self._api_son_hata = None
         return hayvanlar_dict
 
-    def api_hayvan_detayini_yukle(self, h_id, hata_yukselt=False):
-        if not getattr(self, "api_modu", False) or self.offline_modda_mi():
-            return str(h_id)
-        h_id = str(h_id)
-        if h_id in ((getattr(self, "bekleyen_senkron", {}) or {}).get("upserts") or {}):
-            return h_id
-        try:
-            kayit = self.api_istek("GET", f"/api/hayvanlar/{self.api_ref(h_id)}", timeout=20)
-            if not isinstance(kayit, dict):
-                return h_id
-            kayit_id = str(kayit.get("id") or h_id)
-            tamamlanmis = self.hayvan_kayit_tamamla(kayit_id, kayit)
-            if kayit_id != h_id:
-                self.hayvanlar.pop(h_id, None)
-            self.hayvanlar[kayit_id] = tamamlanmis
-            onceki_idler = set(getattr(self, "_api_son_idler", set()))
-            onceki_idler.discard(h_id)
-            onceki_idler.add(kayit_id)
-            self._api_son_idler = onceki_idler
-            self._api_base_versions.pop(h_id, None)
-            if tamamlanmis.get("son_guncelleme"):
-                self._api_base_versions[kayit_id] = tamamlanmis["son_guncelleme"]
-            self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi")
-            return kayit_id
-        except ApiHatasi as e:
-            self._api_son_hata = str(e)
-            if hata_yukselt:
-                raise
-            return h_id
-
     def api_hayvan_detayini_arka_planda_yukle(self, h_id, tamam_callback):
-        if not getattr(self, "api_modu", False):
-            return
-        h_id = str(h_id)
-
         def worker():
-            yeni_id = h_id
-            hata = None
+            kayit = None
             try:
-                with self._api_ag_lock:
-                    self.api_uyandir(maksimum_bekleme=95)
-                    yeni_id = self.api_hayvan_detayini_yukle(h_id, hata_yukselt=True)
+                kayit = self.api_istek(
+                    "GET", f"/api/hayvanlar/{self.api_ref(h_id)}",
+                    timeout=4, oturum_yenile=False,
+                )
             except Exception as e:
-                hata = e
                 self.hata_gunlugu_yaz(f"Hayvan detayı yenileme hatası: {h_id}", e)
 
-            self.ui_threadinde_calistir(lambda: tamam_callback(yeni_id, hata))
+            self.ui_threadinde_calistir(lambda: tamam_callback(kayit))
 
         threading.Thread(
             target=worker,
@@ -6684,14 +6643,15 @@ class HayvanTakipSistemi:
 
     def gorunen_hayvan_satirlari(self):
         columns = list(self.hayvan_tree["columns"])
-        rows = [self.hayvan_tree.item(item, "values") for item in self.hayvan_tree.get_children()]
-        if columns and columns[0] == "ID":
-            columns = columns[1:]
-            rows = [tuple(row[1:]) for row in rows]
-        if columns and columns[0] == "Seç":
-            columns = columns[1:]
-            rows = [tuple(row[1:]) for row in rows]
-        return columns, rows
+        gorunen = self.hayvan_tree["displaycolumns"]
+        gorunen = columns if gorunen == ("#all",) else gorunen
+        secili = [kolon for kolon in gorunen if kolon in columns and kolon not in {"ID", "Seç"}]
+        indeksler = [columns.index(kolon) for kolon in secili]
+        rows = []
+        for item in self.hayvan_tree.get_children():
+            degerler = self.hayvan_tree.item(item, "values")
+            rows.append(tuple(degerler[i] if i < len(degerler) else "" for i in indeksler))
+        return secili, rows
 
     def export_metadata_olustur(self, kayit_tipi=None):
         kullanici = (getattr(self, "api_kullanici", None) or {}).get("kullanici_adi") or "-"
@@ -7011,6 +6971,7 @@ class HayvanTakipSistemi:
         self.raporlama_sekmesi()
         self.asi_prosedur_sekmesi()
         self.uyari_sekmesi()
+        self.sut_kaydi_sekmesi()
         
         # Sekmeleri (native tabs) gizle ve özel sekme butonları oluştur
         style = ttk.Style()
@@ -7054,7 +7015,7 @@ class HayvanTakipSistemi:
         self.custom_tab_bar.bind("<Configure>", tablari_yerlestir)
         self._track_after(self.root, 50, tablari_yerlestir)
             
-        self.notebook.bind('<<NotebookTabChanged>>', self._update_custom_tabs)
+        self.notebook.bind('<<NotebookTabChanged>>', self._update_custom_tabs, add='+')
         self._update_custom_tabs() # Başlangıçta ilk sekmeyi renklendir
 
         self._baslangic_after_id = self.root.after(500, self.baslangic_guncellemesi)
@@ -7907,7 +7868,16 @@ class HayvanTakipSistemi:
         self.suni_container.grid(row=1, column=0, sticky='ew', padx=0, pady=0)
         self.suni_container.columnconfigure(0, weight=1)
         self.themed_widgets.append((self.suni_container, 'kart'))
-        self.suni_entry = self.modern_form_satir(self.suni_container, "Suni Tohumlama İsmi", ttk.Entry, row=0, col=0, font=('Segoe UI', 11), style='TEntry')
+        self.suni_entry = self.modern_form_satir(self.suni_container, "Suni Tohumlama İsmi", ttk.Combobox, row=0, col=0, font=('Segoe UI', 11), style='TCombobox')
+        self.tohumlama_veteriner_combo = self.modern_form_satir(
+            form_frame, "Uygulayan Veteriner", ttk.Combobox, row=2, col=0,
+            font=('Segoe UI', 11), style='TCombobox',
+        )
+        def secenekleri_yukle(_=None):
+            self.tohumlama_secenekleri_yukle(self.suni_entry, self.tohumlama_veteriner_combo)
+        tohumlama_frame.bind("<Map>", secenekleri_yukle)
+        self.suni_entry.configure(postcommand=secenekleri_yukle)
+        self.tohumlama_veteriner_combo.configure(postcommand=secenekleri_yukle)
         
         self.tohumlama_tarih_entry = self.modern_form_satir(form_frame, "Tohumlama Tarihi (GG/AA/YYYY)", ttk.Entry, row=1, col=1, font=('Segoe UI', 11), style='TEntry')
         self.tohumlama_tarih_entry.insert(0, datetime.now().strftime("%d/%m/%Y"))
@@ -7915,7 +7885,7 @@ class HayvanTakipSistemi:
 
         # Buton Container
         btn_frame = tk.Frame(form_frame, bg=self.renkler["kart_arkaplan"])
-        btn_frame.grid(row=2, column=0, columnspan=2, pady=(28, 4), sticky='e')
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=(28, 4), sticky='ew')
         self.themed_widgets.append((btn_frame, 'kart'))
 
         self.modern_buton(btn_frame, "TOHUMLAMA KAYDET", self.tohumlama_kaydet, purpose='primary', width=22).pack(side='left', padx=(0, 10))
@@ -7929,6 +7899,12 @@ class HayvanTakipSistemi:
         )
         sonuc_notu.pack(side='left', padx=(10, 0))
         self.themed_widgets.append((sonuc_notu, 'muted_label'))
+        secenek_bar = ttk.Frame(form_frame)
+        secenek_bar.grid(row=4, column=0, columnspan=2, sticky="w", pady=(14, 0))
+        self.modern_buton(secenek_bar, "Suni Tohumlama Çeşidi Ekle",
+                         lambda: self.tohumlama_secenegi_ekle("suni"), small=True).pack(side="left", padx=(0, 8))
+        self.modern_buton(secenek_bar, "Veteriner Ekle",
+                         lambda: self.tohumlama_secenegi_ekle("veteriner"), small=True).pack(side="left")
 
 
     def hayvan_listesi_sekmesi(self):
@@ -7989,6 +7965,7 @@ class HayvanTakipSistemi:
             [
                 ("Temizle", self.filtreleri_temizle, "danger"),
                 ("Yenile", self.api_verilerini_yenile, "success"),
+                ("Liste Görünümü", self.hayvan_kolonlarini_duzenle, "default"),
             ],
             align="left",
         )
@@ -8034,7 +8011,9 @@ class HayvanTakipSistemi:
         tree_frame.pack(fill='both', expand=True)
         self.themed_widgets.append((tree_frame, 'kart'))
 
-        columns = ('ID', 'Seç', 'Resmi Küpe', 'Çiftlik Küpesi', 'Irk', 'Yaş', 'Cinsi', 'Durum', 'Son Tohumlama', 'Doğum Tahmini', 'Sağım Günü', 'Uyarılar')
+        columns = ('ID', 'Seç', 'Resmi Küpe', 'Çiftlik Küpesi', 'Irk', 'Yaş', 'Laktasyon', 'Cinsi', 'Durum',
+                   'Son Tohumlama', 'Doğum Tahmini', 'Sağım Günü', 'Uyarılar',
+                   'Gebelik Günü', 'Son Doğum', 'Doğum Tarihi', 'Anne Küpesi', 'Ad')
         self.hayvan_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', style='Modern.Treeview')
         col_widths = {
             'ID': 0, 'Seç': 58, 'Resmi Küpe': 145, 'Çiftlik Küpesi': 120, 'Irk': 110, 'Yaş': 90, 'Cinsi': 140, 'Durum': 130,
@@ -8047,6 +8026,7 @@ class HayvanTakipSistemi:
             self.hayvan_tree.heading(col, text=col)
             min_width = 46 if col == 'Seç' else 80
             self.hayvan_tree.column(col, width=col_widths.get(col, 120), anchor='center', minwidth=min_width, stretch=(col != 'Seç'))
+        self.hayvan_kolonlarini_uygula()
 
         sb_v = ttk.Scrollbar(tree_frame, orient='vertical', command=self.hayvan_tree.yview)
         sb_h = ttk.Scrollbar(tree_frame, orient='horizontal', command=self.hayvan_tree.xview)
@@ -8068,7 +8048,7 @@ class HayvanTakipSistemi:
         try:
             if tree.identify("region", event.x, event.y) != "cell":
                 return
-            if tree.identify_column(event.x) != "#2":
+            if tree.identify_column(event.x) != "#1":
                 return
             satir = tree.identify_row(event.y)
             if not satir:
@@ -9546,10 +9526,13 @@ class HayvanTakipSistemi:
                 return
             
         suni_isim = self.suni_entry.get().strip() if sekil == "Suni" else ""
+        veteriner = self.tohumlama_veteriner_combo.get().strip()
         if sekil == "Suni" and not suni_isim: return messagebox.showerror("Hata", "Suni tohumlama ismi girilmelidir!")
+        if len(veteriner) > 100:
+            return messagebox.showerror("Hata", "Veteriner adı en fazla 100 karakter olabilir.")
         
         tohumlama_id = uuid.uuid4().hex[:12]
-        tohumlama_bilgi = {'id': tohumlama_id, 'tarih': tarih, 'sekil': sekil, 'suni_isim': suni_isim, 'gebe_mi': None, 'kontrol_tarihi': None, 'gebelik_suresi': 283}
+        tohumlama_bilgi = {'id': tohumlama_id, 'tarih': tarih, 'sekil': sekil, 'suni_isim': suni_isim, 'veteriner': veteriner or None, 'gebe_mi': None, 'kontrol_tarihi': None, 'gebelik_suresi': 283}
         
         self.islem_kaydi_baslat(f"Tohumlama kaydı eklendi: {kupe_no}")
         self.hayvanlar[kupe_no]['tohumlamalar'].append(tohumlama_bilgi)
@@ -9559,6 +9542,7 @@ class HayvanTakipSistemi:
             return
         self.tohumlama_hayvan_combo.set('')
         self.suni_entry.delete(0, tk.END)
+        self.tohumlama_veteriner_combo.set('')
         self.tohumlama_sekli_combo.set('')
         self.hayvan_listesini_guncelle()
         self.api_durum_guncelle()
@@ -9686,6 +9670,7 @@ class HayvanTakipSistemi:
             ("Tohumlama Tarihi", bekleyen.get('tarih') or "-"),
             ("Şekil", bekleyen.get('sekil') or "-"),
             ("Boğa/Sperma", bekleyen.get('suni_isim') or "-"),
+            ("Veteriner", bekleyen.get('veteriner') or "-"),
         ]
         for idx, (etiket, deger) in enumerate(satirlar):
             tk.Label(bilgi, text=etiket, bg=self.renkler["kart_ikincil"], fg=self.renkler["muted"], font=('Segoe UI', 9, 'bold')).grid(row=idx, column=0, sticky='w', pady=4, padx=(0, 16))
@@ -10382,6 +10367,94 @@ class HayvanTakipSistemi:
                 return True
         return False
 
+    def dogum_kaydi_sil_ve_kaydet(self, h_id, secilen, parent):
+        hayvan = self.hayvanlar.get(h_id) or {}
+        dogumlar = hayvan.get("dogumlar") or []
+        indeksler = [i for i, kayit in enumerate(dogumlar) if kayit is secilen]
+        if not indeksler:
+            indeksler = [i for i, kayit in enumerate(dogumlar) if kayit == secilen]
+        if len(indeksler) != 1:
+            messagebox.showwarning(
+                "Doğum Kaydı", "Seçili kayıt değişti. Profili yenileyip tekrar seçin.", parent=parent,
+            )
+            return False
+        if self.bekleyen_atomik_dogumda_mi(h_id):
+            messagebox.showwarning(
+                "Bekleyen Doğum", "Önce anne ve yavruların bekleyen doğum kaydını senkronize edin.", parent=parent,
+            )
+            return False
+        if not messagebox.askyesno(
+            "Doğum Kaydını Sil",
+            "Seçili doğum/laktasyon kaydı silinsin mi? Yavru hayvan kayıtları silinmez.",
+            parent=parent,
+        ):
+            return False
+        if self.hayvanlar.get(h_id) is not hayvan:
+            messagebox.showwarning(
+                "Doğum Kaydı", "Hayvan kaydı değişti. Profili yenileyip tekrar seçin.", parent=parent,
+            )
+            return False
+
+        idx = indeksler[0]
+        api_modu = getattr(self, "api_modu", False)
+        kayit_id = dogumlar[idx].get("id")
+        sunucu_surumu = None
+        if (
+            api_modu and not self.offline_modda_mi()
+            and not self.api_yazma_kuyruga_alinmali_mi(h_id)
+            and h_id in self._api_son_idler and kayit_id
+        ):
+            base = self._api_base_versions.get(h_id)
+            if not base:
+                messagebox.showwarning("Doğum Kaydı", "Önce profili yenileyin.", parent=parent)
+                return False
+            yol = (
+                f"/api/hayvanlar/{self.api_ref(h_id)}/dogumlar/{self.api_ref(kayit_id)}"
+                f"?beklenen_son_guncelleme={self.api_ref(base)}"
+            )
+            try:
+                sonuc = self.api_istek("DELETE", yol, timeout=12)
+                sunucu_surumu = (sonuc or {}).get("son_guncelleme")
+                if not sunucu_surumu:
+                    raise ApiHatasi("Sunucu silme sonucunu doğrulamadı. Profili yenileyin.", status=409)
+            except ApiHatasi as hata:
+                if hata.status is not None and not self.api_hatasi_yeniden_denebilir_mi(hata):
+                    messagebox.showwarning("Doğum Kaydı Silinemedi", str(hata), parent=parent)
+                    return False
+                self.api_baglanti_durumu_ata("offline", hata)
+
+        self.islem_kaydi_baslat(f"Doğum kaydı silindi: {self.hayvan_gorunen_kupe(h_id, hayvan)}")
+        self.geri_al_etkilenenleri_isaretle(h_id)
+        yeni_hayvan = {
+            **hayvan,
+            "dogumlar": dogumlar[:idx] + dogumlar[idx + 1:],
+            "son_guncelleme": sunucu_surumu or datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        }
+        self.hayvanlar[h_id] = yeni_hayvan
+        if sunucu_surumu:
+            self._api_base_versions[h_id] = sunucu_surumu
+            if self.geri_al_yigini:
+                self.geri_al_yigini[-1].setdefault("sonraki_surumler", {})[h_id] = sunucu_surumu
+        elif api_modu:
+            with self.senkron_kuyruk_kilidi():
+                onceki_kuyruk = copy.deepcopy(self.bekleyen_senkron)
+                if not self._bekleyen_senkron_snapshot_guncelle(h_id):
+                    self.bekleyen_senkron = onceki_kuyruk
+                    self.hayvanlar[h_id] = hayvan
+                    if self.geri_al_yigini:
+                        self.geri_al_yigini.pop()
+                    return False
+        elif not self.veri_kaydet(kupe_no=h_id):
+            if self.hayvanlar.get(h_id) is yeni_hayvan:
+                self.hayvanlar[h_id] = hayvan
+            self.kayit_basarisizsa_ui_yenile()
+            return False
+        if api_modu:
+            self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
+            self.api_durum_guncelle()
+        self.ekranlari_guncelle()
+        return True
+
     def hayvan_duzenle_penceresi(self, kupe_no, detay_pencere=None):
         if kupe_no not in self.hayvanlar:
             return
@@ -10625,7 +10698,7 @@ class HayvanTakipSistemi:
         toh_kart = self.modern_kart(tohumlama_frame)
         toh_kart.pack(fill='both', expand=True, padx=15, pady=15)
 
-        toh_cols = ("#", "Tarih", "Şekil", "Suni İsim", "Sonuç")
+        toh_cols = ("#", "Tarih", "Şekil", "Suni İsim", "Veteriner", "Sonuç")
         toh_tree = ttk.Treeview(toh_kart, columns=toh_cols, show='headings', style='Modern.Treeview')
         for col in toh_cols:
             toh_tree.heading(col, text=col)
@@ -10641,7 +10714,7 @@ class HayvanTakipSistemi:
                     sonuc = "Pozitif"
                 elif tohumlama.get('gebe_mi') is False:
                     sonuc = "Negatif"
-                toh_tree.insert('', 'end', iid=str(idx), values=(idx + 1, tohumlama.get('tarih', ''), tohumlama.get('sekil', ''), tohumlama.get('suni_isim', ''), sonuc))
+                toh_tree.insert('', 'end', iid=str(idx), values=(idx + 1, tohumlama.get('tarih', ''), tohumlama.get('sekil', ''), tohumlama.get('suni_isim', ''), tohumlama.get('veteriner') or '-', sonuc))
 
         def secili_tohumlama_index():
             secim = toh_tree.selection()
@@ -10669,12 +10742,15 @@ class HayvanTakipSistemi:
             tarih_entry.bind('<KeyRelease>', self.tarih_formatlama)
             sekil_combo = ttk.Combobox(alan, values=["Suni", "Boğa"], style='TCombobox')
             sekil_combo.set(kayit.get('sekil', ''))
-            suni_entry = ttk.Entry(alan, style='TEntry')
+            suni_entry = ttk.Combobox(alan, style='TCombobox')
             suni_entry.insert(0, kayit.get('suni_isim', ''))
+            veteriner_entry = ttk.Combobox(alan, style='TCombobox')
+            veteriner_entry.set(kayit.get('veteriner') or "")
+            self.tohumlama_secenekleri_yukle(suni_entry, veteriner_entry, ciftlik_id=hayvan.get("ciftlik_id"))
             sonuc_combo = ttk.Combobox(alan, values=["Beklemede", "Pozitif", "Negatif"], style='TCombobox')
             sonuc_combo.set("Pozitif" if kayit.get('gebe_mi') is True else "Negatif" if kayit.get('gebe_mi') is False else "Beklemede")
 
-            for row, (label_text, widget) in enumerate([("Tarih", tarih_entry), ("Şekil", sekil_combo), ("Suni İsim", suni_entry), ("Sonuç", sonuc_combo)]):
+            for row, (label_text, widget) in enumerate([("Tarih", tarih_entry), ("Şekil", sekil_combo), ("Suni İsim", suni_entry), ("Veteriner", veteriner_entry), ("Sonuç", sonuc_combo)]):
                 tk.Label(alan, text=label_text, bg=self.renkler["arkaplan"], fg=self.renkler["yazi_rengi"], font=('Segoe UI', 11, 'bold')).grid(row=row, column=0, sticky='w', pady=8)
                 widget.grid(row=row, column=1, sticky='ew', pady=8, padx=(12, 0))
             alan.columnconfigure(1, weight=1)
@@ -10698,6 +10774,8 @@ class HayvanTakipSistemi:
                 sekil = sekil_combo.get().strip()
                 if sekil == "Suni" and not suni_entry.get().strip():
                     return messagebox.showerror("Hata", "Suni tohumlama ismi zorunludur.", parent=dialog)
+                if len(veteriner_entry.get().strip()) > 100:
+                    return messagebox.showerror("Hata", "Veteriner adı en fazla 100 karakter olabilir.", parent=dialog)
                 sonuc = sonuc_combo.get()
                 if self.tohumlama_doguma_bagli_mi(hayvan, kayit) and (
                     sonuc != "Pozitif" or tarih != (kayit.get('tarih') or "")
@@ -10712,6 +10790,7 @@ class HayvanTakipSistemi:
                 kayit['tarih'] = tarih
                 kayit['sekil'] = sekil
                 kayit['suni_isim'] = suni_entry.get().strip() if sekil == "Suni" else ""
+                kayit['veteriner'] = veteriner_entry.get().strip() or None
                 onceki_gebe_mi = kayit.get('gebe_mi')
                 onceki_kontrol_tarihi = kayit.get('kontrol_tarihi')
                 yeni_gebe_mi = True if sonuc == "Pozitif" else False if sonuc == "Negatif" else None
@@ -10768,8 +10847,6 @@ class HayvanTakipSistemi:
             for item in dogum_tree.get_children():
                 dogum_tree.delete(item)
             for idx, dogum in enumerate(hayvan.get('dogumlar', [])):
-                if not self.dogum_gecmisi_gosterilmeli_mi(dogum):
-                    continue
                 yavrular = ", ".join([self.yavru_gorunen_kupe(y) for y in self.dogum_gorunur_yavrular(dogum)]) or "-"
                 dogum_tree.insert('', 'end', iid=str(idx), values=(idx + 1, dogum.get('tarih', ''), yavrular, dogum.get('laktasyon_bitis_tarihi') or "Devam ediyor"))
 
@@ -10852,19 +10929,21 @@ class HayvanTakipSistemi:
             self.modern_buton(alan, "KAYDET", kaydet, purpose='success').grid(row=3, column=0, columnspan=2, pady=18)
 
         def dogum_sil():
+            nonlocal hayvan
             idx = secili_dogum_index()
             if idx is None:
                 return
-            if not messagebox.askyesno("Sil", "Seçili doğum/laktasyon kaydı silinsin mi? Yavru hayvan kayıtları silinmez.", parent=pencere):
+            if not 0 <= idx < len(hayvan.get('dogumlar') or []):
+                dogum_tree_yenile()
                 return
-            self.islem_kaydi_baslat(f"Doğum kaydı silindi: {kupe_no}")
-            hayvan['dogumlar'].pop(idx)
-            hayvan['son_guncelleme'] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            if not self.veri_kaydet(kupe_no=kupe_no):
-                self.kayit_basarisizsa_ui_yenile()
+            silindi = self.dogum_kaydi_sil_ve_kaydet(kupe_no, hayvan['dogumlar'][idx], pencere)
+            hayvan = self.hayvanlar.get(kupe_no) or {}
+            if silindi and detay_pencere is not None and detay_pencere.winfo_exists():
+                pencere.destroy()
+                detay_pencere.destroy()
+                self._hayvan_detayini_goster(kupe_no)
                 return
             dogum_tree_yenile()
-            self.ekranlari_guncelle()
 
         def laktasyon_bilgisi_tamamla():
             if hayvan.get('cins') not in ["Sağmal İnek", "Kuru İnek"] and hayvan.get('durum') not in ["Sağmal İnek", "Kuru İnek"]:
@@ -11113,21 +11192,63 @@ class HayvanTakipSistemi:
 
     def hayvan_detay_penceresi(self, kupe_no):
         hayvan_id = self.hayvan_id_bul(kupe_no) or kupe_no
-        if hayvan_id not in self.hayvanlar:
+        mevcut = self.hayvanlar.get(hayvan_id)
+        if mevcut is None:
             return
-        mevcut = self.hayvanlar.get(hayvan_id, {})
-        foto_detayi_yenilenecek = bool(
-            getattr(self, "api_modu", False)
-            and mevcut.get("foto_paths")
-            and not mevcut.get("foto_urls")
-            and not mevcut.get("foto_datas")
-            and not mevcut.get("foto_data")
-        )
-        hayvan = self.hayvanlar[hayvan_id]
+        if (
+            not getattr(self, "api_modu", False)
+            or not getattr(self, "api_token", None)
+            or self.offline_modda_mi()
+            or self.api_yazma_kuyruga_alinmali_mi(hayvan_id)
+        ):
+            return self._hayvan_detayini_goster(hayvan_id)
+
+        kapsam = (self.api_url, self.api_son_islemler_kapsami())
+        surum = mevcut.get("son_guncelleme")
+        pencere, kart = self.modern_popup("Hayvan Profili", 380, 125)
+        tk.Label(
+            kart, text="Hayvan profili yükleniyor…",
+            bg=self.renkler["kart_arkaplan"], fg=self.renkler["yazi_rengi"],
+        ).pack(expand=True)
+        self.pencere_ortala(pencere, self.root)
+        pencere.grab_set()
+
+        def tamamla(kayit=None):
+            if not pencere.winfo_exists():
+                return
+            pencere.destroy()
+            if kapsam != (self.api_url, self.api_son_islemler_kapsami()):
+                return
+            # A late read must not replace a newer local edit or its base version.
+            if (
+                isinstance(kayit, dict) and str(kayit.get("id")) == str(hayvan_id)
+                and (not mevcut.get("ciftlik_id") or kayit.get("ciftlik_id") == mevcut["ciftlik_id"])
+                and self.hayvanlar.get(hayvan_id) is mevcut
+                and mevcut.get("son_guncelleme") == surum
+                and not self.api_yazma_kuyruga_alinmali_mi(hayvan_id)
+            ):
+                guncel = self.hayvan_kayit_tamamla(hayvan_id, kayit)
+                self.hayvanlar[hayvan_id] = guncel
+                self._api_son_idler.add(hayvan_id)
+                if guncel.get("son_guncelleme"):
+                    self._api_base_versions[hayvan_id] = guncel["son_guncelleme"]
+                self.json_dosyasi_kaydet(
+                    self.data_file, self.hayvanlar, "hayvan_verileri", "API Onbellek Kayit Hatasi",
+                )
+            self._hayvan_detayini_goster(hayvan_id)
+
+        self._track_after(self.root, 5000, tamamla)
+        self.api_hayvan_detayini_arka_planda_yukle(hayvan_id, tamamla)
+
+    def _hayvan_detayini_goster(self, hayvan_id):
+        hayvan = self.hayvanlar.get(hayvan_id)
+        if hayvan is None:
+            return
         cins = hayvan.get("cins", "")
         is_male = cins in ["Erkek Buzağı", "Dana"]
         gorunen_kupe = self.hayvan_gorunen_kupe(hayvan_id, hayvan)
         durum = self.profil_durum_metni(hayvan)
+        gebelik_gunu = self.gebelik_gunu(hayvan)
         yas_gun = max(int(hayvan.get("yas_gun", 0) or 0), 0)
         yas_metin = f"{yas_gun // 365} yıl {(yas_gun % 365) // 30} ay"
         laktasyon = self.profil_laktasyon_ozeti(hayvan)
@@ -11263,10 +11384,12 @@ class HayvanTakipSistemi:
             return deger_label
 
         header_rozet("Yaş", yas_metin)
+        if gebelik_gunu is not None:
+            header_rozet("Gebelik", f"{gebelik_gunu} gün")
         header_rozet("Durum", durum,
                      self.renkler["button_success_bg"] if durum not in {"Arşivli", "Ölü", "Kesildi", "Satıldı"}
                      else self.renkler["uyari"])
-        header_foto_rozet = header_rozet("Fotoğraf", f"{len(fotograflar)}/3")
+        header_rozet("Fotoğraf", f"{len(fotograflar)}/3")
 
 
         sayfa = self.kaydirilabilir_sayfa(detay_window, padx=22, pady=18)
@@ -11283,7 +11406,6 @@ class HayvanTakipSistemi:
         foto_grid.pack(fill="both", expand=True)
         for col in range(3):
             foto_grid.grid_columnconfigure(col, weight=1)
-        foto_canvaslari = []
         for idx in range(3):
             slot = tk.Frame(
                 foto_grid,
@@ -11304,7 +11426,6 @@ class HayvanTakipSistemi:
                 bd=0,
             )
             foto_canvas.pack(fill="both", expand=True)
-            foto_canvaslari.append(foto_canvas)
             if idx < len(fotograflar):
                 self.foto_slot_canvas_ciz(
                     foto_canvas,
@@ -11427,7 +11548,7 @@ class HayvanTakipSistemi:
 
         tohum_kart, tohum_body = self.profil_kart_olustur(alt, "Tohumlama Geçmişi", accent=self.renkler["button_primary_bg"])
         tohum_kart.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(0, 16))
-        toh_tree = self.profil_tablo_olustur(tohum_body, ("#", "Tarih", "Şekil", "Suni İsim", "Sonuç"), {"#": 45, "Tarih": 110, "Şekil": 90, "Suni İsim": 150, "Sonuç": 110}, height=6)
+        toh_tree = self.profil_tablo_olustur(tohum_body, ("#", "Tarih", "Şekil", "Suni İsim", "Veteriner", "Sonuç"), {"#": 45, "Tarih": 110, "Şekil": 90, "Suni İsim": 150, "Veteriner": 150, "Sonuç": 110}, height=6)
         tohumlamalar = hayvan.get("tohumlamalar") or []
         if tohumlamalar:
             for i, tohumlama in enumerate(reversed(tohumlamalar), 1):
@@ -11436,9 +11557,9 @@ class HayvanTakipSistemi:
                     sonuc = "Başarılı"
                 elif tohumlama.get("gebe_mi") is False:
                     sonuc = "Başarısız"
-                toh_tree.insert("", "end", values=(len(tohumlamalar) - i + 1, tohumlama.get("tarih", "-"), tohumlama.get("sekil", "-"), tohumlama.get("suni_isim", "-"), sonuc))
+                toh_tree.insert("", "end", values=(len(tohumlamalar) - i + 1, tohumlama.get("tarih", "-"), tohumlama.get("sekil", "-"), tohumlama.get("suni_isim", "-"), tohumlama.get("veteriner") or "-", sonuc))
         else:
-            toh_tree.insert("", "end", values=("-", "-", "-", "-", "Kayıt yok"))
+            toh_tree.insert("", "end", values=("-", "-", "-", "-", "-", "Kayıt yok"))
 
         dogum_kart, dogum_body = self.profil_kart_olustur(alt, "Doğum ve Yavru Geçmişi", accent=self.renkler["button_success_bg"])
         dogum_kart.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(0, 16))
@@ -11488,17 +11609,13 @@ class HayvanTakipSistemi:
             small=True,
         ).pack(side="right")
 
-        dogum_yavrular_by_row = {}
+        dogumlar_by_row = {}
         if dogumlar:
             for i, dogum in enumerate(dogumlar, 1):
-                if not self.dogum_gecmisi_gosterilmeli_mi(dogum):
-                    continue
                 yavrular = self.dogum_gorunur_yavrular(dogum)
                 yavru_metin = ", ".join([f"{y.get('cins', '-')}: {self.yavru_gorunen_kupe(y)}" for y in yavrular]) or "Yavru bilgisi yok"
                 row_id = dog_tree.insert("", "end", values=(i, dogum.get("tarih", "-"), yavru_metin, dogum.get("not", "")))
-                dogum_yavrular_by_row[row_id] = yavrular
-            if not dogum_yavrular_by_row:
-                dog_tree.insert("", "end", values=("-", "-", "Kayıt yok", ""))
+                dogumlar_by_row[row_id] = dogum
         else:
             dog_tree.insert("", "end", values=("-", "-", "Kayıt yok", ""))
 
@@ -11507,7 +11624,7 @@ class HayvanTakipSistemi:
             if not row_id:
                 secim = dog_tree.selection()
                 row_id = secim[0] if secim else ""
-            yavrular = dogum_yavrular_by_row.get(row_id) or []
+            yavrular = self.dogum_gorunur_yavrular(dogumlar_by_row.get(row_id))
             adaylar = []
             for yavru in yavrular:
                 yavru_id = self.yavru_hayvan_id_bul(yavru)
@@ -11559,6 +11676,23 @@ class HayvanTakipSistemi:
 
         dog_tree.bind("<Double-Button-1>", dogum_yavru_profili_ac)
 
+        def profil_dogum_sil():
+            secim = dog_tree.selection()
+            dogum = dogumlar_by_row.get(secim[0]) if secim else None
+            if dogum is None:
+                messagebox.showwarning("Doğum Kaydı", "Önce bir doğum kaydı seçin.", parent=detay_window)
+                return
+            silindi = self.dogum_kaydi_sil_ve_kaydet(hayvan_id, dogum, detay_window)
+            if silindi or self.hayvanlar.get(hayvan_id) is not hayvan:
+                kapat()
+                self._hayvan_detayini_goster(hayvan_id)
+
+        if dogumlar:
+            self.modern_buton(
+                dogum_body, "Seçili Doğum Kaydını Sil", profil_dogum_sil,
+                purpose='danger', small=True,
+            ).pack(anchor="e", pady=(8, 0))
+
         asi_kart, asi_body = self.profil_kart_olustur(alt, "Aşı ve Prosedürler", accent=self.renkler["uyari"])
         asi_kart.grid(row=2, column=0, sticky="nsew", padx=(0, 8))
         asi_tree = self.profil_tablo_olustur(asi_body, ("#", "Ad", "Tarih", "Sonraki", "Not"), {"#": 45, "Ad": 160, "Tarih": 110, "Sonraki": 110, "Not": 220}, height=6)
@@ -11571,6 +11705,10 @@ class HayvanTakipSistemi:
 
         not_kart, not_body = self.profil_kart_olustur(alt, "Notlar ve Son İşlemler", accent=self.renkler["button_default_bg"])
         not_kart.grid(row=2, column=1, sticky="nsew", padx=(8, 0))
+        self.modern_buton(
+            not_body, "Hayvan Olayları", lambda: self.hayvan_olaylari_penceresi(hayvan_id, detay_window),
+            purpose="default", small=True,
+        ).pack(anchor="w", pady=(0, 8))
         if hayvan.get("ek_notlar"):
             tk.Label(not_body, text=hayvan.get("ek_notlar"), bg=self.renkler["kart_ikincil"], fg=self.renkler["yazi_rengi"], justify="left", wraplength=560, padx=10, pady=8).pack(fill="x", pady=(0, 10))
         kimlikler = {str(hayvan_id), str(gorunen_kupe), str(hayvan.get("resmi_kupe_no") or ""), str(hayvan.get("ciftlik_kupe_no") or "")}
@@ -11614,40 +11752,6 @@ class HayvanTakipSistemi:
 
         alt.bind("<Configure>", profil_alt_yerlesim)
         alt.after_idle(profil_alt_yerlesim)
-
-        if foto_detayi_yenilenecek:
-            def foto_detayi_tamamlandi(yeni_id, hata):
-                if hata is not None:
-                    return
-                try:
-                    if not detay_window.winfo_exists():
-                        return
-                    guncel_hayvan = self.hayvanlar.get(yeni_id) or self.hayvanlar.get(hayvan_id) or {}
-                    yeni_fotograflar = list(guncel_hayvan.get("foto_urls") or [])
-                    if not yeni_fotograflar:
-                        yeni_fotograflar = self.hayvan_fotograflari(guncel_hayvan)
-                    yeni_fotograflar = yeni_fotograflar[:3]
-                    header_foto_rozet.config(text=f"{len(yeni_fotograflar)}/3")
-                    foto_sayisi_label.config(text=f"{len(yeni_fotograflar)}/3 fotoğraf")
-                    for idx, canvas in enumerate(foto_canvaslari):
-                        foto = yeni_fotograflar[idx] if idx < len(yeni_fotograflar) else None
-                        self.foto_slot_canvas_ciz(
-                            canvas,
-                            foto,
-                            idx + 1,
-                            max_size=(150, 92),
-                            open_callback=(
-                                lambda f=foto, i=idx: self.fotograf_buyut_penceresi(
-                                    f,
-                                    f"{gorunen_kupe} - {i + 1}. Fotoğraf",
-                                    detay_window,
-                                )
-                            ) if foto else None,
-                        )
-                except tk.TclError:
-                    pass
-
-            self.api_hayvan_detayini_arka_planda_yukle(hayvan_id, foto_detayi_tamamlandi)
 
         detay_window.lift(self.root)
         detay_window.focus_force()
@@ -11752,7 +11856,14 @@ class HayvanTakipSistemi:
             irk = hayvan.get('irk', '-') or '-'
             mevcut_idler.add(str(kupe_no))
             secim = "☑" if str(kupe_no) in getattr(self, "hayvan_secimleri", set()) else "☐"
-            self.hayvan_tree.insert('', 'end', values=(kupe_no, secim, resmi, ciftlik, irk, yas_str, hayvan['cins'], mevcut_durum, son_tohumlama, dogum_tahmini, sagim_gun_str, uyarilar), tags=tuple(final_tags))
+            gebelik_gunu = self.gebelik_gunu(hayvan)
+            son_dogum = son_dogum_kaydi(hayvan)
+            self.hayvan_tree.insert('', 'end', values=(
+                kupe_no, secim, resmi, ciftlik, irk, yas_str, len(hayvan.get("dogumlar") or []),
+                hayvan['cins'], mevcut_durum, son_tohumlama, dogum_tahmini, sagim_gun_str, uyarilar,
+                gebelik_gunu if gebelik_gunu is not None else "-", (son_dogum or {}).get("tarih") or "-",
+                hayvan.get("dogum_tarihi") or "-", hayvan.get("anne_kupe") or "-", hayvan.get("ad") or "-",
+            ), tags=tuple(final_tags))
             row_idx += 1
         self.hayvan_secimleri = set(getattr(self, "hayvan_secimleri", set())) & mevcut_idler
 
