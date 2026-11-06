@@ -10742,9 +10742,9 @@ class HayvanTakipSistemi(CiftlikEkEkranlari):
             tarih_entry.bind('<KeyRelease>', self.tarih_formatlama)
             sekil_combo = ttk.Combobox(alan, values=["Suni", "Boğa"], style='TCombobox')
             sekil_combo.set(kayit.get('sekil', ''))
-            suni_entry = ttk.Combobox(alan, style='TCombobox')
-            suni_entry.insert(0, kayit.get('suni_isim', ''))
-            veteriner_entry = ttk.Combobox(alan, style='TCombobox')
+            suni_entry = ttk.Combobox(alan, style='TCombobox', state='readonly')
+            suni_entry.set(kayit.get('suni_isim') or "")
+            veteriner_entry = ttk.Combobox(alan, style='TCombobox', state='readonly')
             veteriner_entry.set(kayit.get('veteriner') or "")
             self.tohumlama_secenekleri_yukle(suni_entry, veteriner_entry, ciftlik_id=hayvan.get("ciftlik_id"))
             sonuc_combo = ttk.Combobox(alan, values=["Beklemede", "Pozitif", "Negatif"], style='TCombobox')
@@ -11598,9 +11598,23 @@ class HayvanTakipSistemi(CiftlikEkEkranlari):
                 pass
             self._track_after(self.root, 80, lambda h_id=hayvan_id: self.hayvan_detay_penceresi(h_id))
 
+        def profil_tohumlama_duzenle():
+            idx = profil_secili_tohumlama_index()
+            if idx is None:
+                return
+            kayit = hayvan["tohumlamalar"][idx]
+            satir = toh_tree.selection()[0]
+
+            def yenile():
+                toh_tree.set(satir, "Suni İsim", kayit.get("suni_isim") or "-")
+                toh_tree.set(satir, "Veteriner", kayit.get("veteriner") or "-")
+
+            self.tohumlama_kayit_seceneklerini_duzenle(hayvan_id, hayvan, kayit, detay_window, yenile)
+
         toh_btn_frame = tk.Frame(tohum_body, bg=self.renkler["kart_arkaplan"])
         toh_btn_frame.pack(fill="x", pady=(8, 0))
         self.themed_widgets.append((toh_btn_frame, 'kart'))
+        self.modern_buton(toh_btn_frame, "Düzenle", profil_tohumlama_duzenle, small=True).pack(side="left")
         self.modern_buton(
             toh_btn_frame,
             "SEÇİLİ TOHUMLAMAYI SİL",
@@ -11858,8 +11872,11 @@ class HayvanTakipSistemi(CiftlikEkEkranlari):
             secim = "☑" if str(kupe_no) in getattr(self, "hayvan_secimleri", set()) else "☐"
             gebelik_gunu = self.gebelik_gunu(hayvan)
             son_dogum = son_dogum_kaydi(hayvan)
+            laktasyon_sayisi = "-"
+            if hayvan.get("cins") in ("Düve", "Sağmal İnek", "Kuru İnek", "İnek"):
+                laktasyon_sayisi = len(hayvan.get("dogumlar") or [])
             self.hayvan_tree.insert('', 'end', values=(
-                kupe_no, secim, resmi, ciftlik, irk, yas_str, len(hayvan.get("dogumlar") or []),
+                kupe_no, secim, resmi, ciftlik, irk, yas_str, laktasyon_sayisi,
                 hayvan['cins'], mevcut_durum, son_tohumlama, dogum_tahmini, sagim_gun_str, uyarilar,
                 gebelik_gunu if gebelik_gunu is not None else "-", (son_dogum or {}).get("tarih") or "-",
                 hayvan.get("dogum_tarihi") or "-", hayvan.get("anne_kupe") or "-", hayvan.get("ad") or "-",

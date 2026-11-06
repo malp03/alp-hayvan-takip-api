@@ -1,5 +1,6 @@
 import threading
 import tkinter as tk
+from urllib.parse import urlencode
 from datetime import date, datetime
 from tkinter import messagebox, simpledialog, ttk
 
@@ -60,20 +61,186 @@ class CiftlikEkEkranlari:
         yol = self.tohumlama_secenek_yolu()
         if not yol:
             return messagebox.showwarning("Tohumlama", "Önce bir çiftlik seçin.", parent=self.root)
-        if not self.online_islem_gerekli("Tohumlama seçeneği ekleme", self.root):
+        if not getattr(self, "api_token", None):
+            return messagebox.showwarning("Tohumlama", "Kayıtlı seçenekleri yönetmek için çevrimiçi giriş yapın.", parent=self.root)
+        if not self.online_islem_gerekli("Tohumlama seçeneklerini yönetme", self.root):
             return
-        baslik = "Suni tohumlama çeşidi" if tur == "suni" else "Veteriner"
-        ad = simpledialog.askstring(baslik + " ekle", baslik + " adı:", parent=self.root)
-        if not ad or not ad.strip():
-            return
+        baslik = "Suni Tohumlama Çeşitleri" if tur == "suni" else "Veterinerler"
         combo = self.suni_entry if tur == "suni" else self.tohumlama_veteriner_combo
+        pencere, kart = self.modern_popup(baslik, 500, 380)
+        # Reserve the footer before the expandable table requests space.
+        bar = self.popup_buton_bar(kart)
+        bilgi = ttk.Label(kart)
+        bilgi.pack(anchor="w", padx=12, pady=(10, 0))
+        tablo = self.profil_tablo_olustur(kart, ("Ad",), {"Ad": 405}, height=6)
+        bekliyor = False
 
-        def tamamla(veri):
-            secilen = veri["ad"]
-            combo.configure(values=tuple(dict.fromkeys([*combo["values"], secilen])))
-            combo.set(secilen)
+        def hata(mesaj):
+            nonlocal bekliyor
+            bekliyor = False
+            bilgi.configure(text="Liste yenilenemedi." if not tablo.get_children() else "")
+            messagebox.showerror("Tohumlama Seçenekleri", mesaj, parent=pencere)
 
-        self.ek_kayit_istegi(combo, "POST", yol, tamamla, veri={"tur": tur, "ad": ad.strip()})
+        def yenile():
+            nonlocal bekliyor
+            bekliyor = True
+            bilgi.configure(text="Yükleniyor…")
+
+            def goster(veri):
+                nonlocal bekliyor
+                adlar = veri.get(tur) or ()
+                tablo.delete(*tablo.get_children())
+                for ad in adlar:
+                    tablo.insert("", "end", values=(ad,))
+                combo.configure(values=adlar)
+                bilgi.configure(text="" if adlar else "Henüz kayıtlı seçenek yok.")
+                bekliyor = False
+
+            self.ek_kayit_istegi(pencere, "GET", yol, goster, hata=hata)
+
+        def secili():
+            secim = tablo.selection()
+            if secim:
+                return str(tablo.item(secim[0], "values")[0])
+            messagebox.showwarning(baslik, "Önce listeden bir kayıt seçin.", parent=pencere)
+
+        def kaydet(duzenle=False):
+            nonlocal bekliyor
+            if bekliyor:
+                return
+            eski = secili() if duzenle else None
+            if duzenle and not eski:
+                return
+            ad = simpledialog.askstring("Düzenle" if duzenle else "Ekle", "Ad:",
+                                        initialvalue=eski or "", parent=pencere)
+            if not ad or not ad.strip():
+                return
+            bekliyor = True
+
+            def tamamla(veri):
+                if eski is None or combo.get() == eski:
+                    combo.set(veri["ad"])
+                yenile()
+
+            hedef = f"{yol}?{urlencode({'eski_ad': eski})}" if duzenle else yol
+            self.ek_kayit_istegi(pencere, "PATCH" if duzenle else "POST", hedef, tamamla,
+                                 veri={"tur": tur, "ad": ad.strip()}, hata=hata)
+
+        def sil():
+            nonlocal bekliyor
+            if bekliyor:
+                return
+            ad = secili()
+            if not ad or not messagebox.askyesno("Seçeneği Sil", f"{ad} seçim listesinden silinsin mi?", parent=pencere):
+                return
+            bekliyor = True
+
+            def tamamla(_):
+                if combo.get() == ad:
+                    combo.set("")
+                yenile()
+
+            self.ek_kayit_istegi(pencere, "DELETE", f"{yol}?{urlencode({'tur': tur, 'ad': ad})}", tamamla, hata=hata)
+
+        for ad, komut, stil in [("Ekle", kaydet, "primary"), ("Düzenle", lambda: kaydet(True), "default"),
+                               ("Sil", sil, "danger"), ("Kapat", pencere.destroy, "default")]:
+            self.modern_buton(bar, ad, komut, purpose=stil, small=True).pack(side="left", padx=(0, 8))
+        self.pencere_ortala(pencere, self.root)
+        pencere.grab_set()
+        yenile()
+
+    def tohumlama_kayit_seceneklerini_duzenle(self, h_id, hayvan, kayit, parent, yenile):
+        yol = self.tohumlama_secenek_yolu(hayvan.get("ciftlik_id"))
+        if not yol or not getattr(self, "api_token", None):
+            return messagebox.showwarning("Tohumlama", "Kayıtlı seçeneklere erişmek için çevrimiçi giriş yapın.", parent=parent)
+        if not self.online_islem_gerekli("Tohumlama bilgisi düzenleme", parent):
+            return
+        if not kayit.get("id") or self.api_yazma_kuyruga_alinmali_mi(h_id):
+            return messagebox.showwarning("Tohumlama", "Önce bekleyen hayvan kayıtlarını senkronize edin.", parent=parent)
+        pencere, kart = self.modern_popup("Tohumlama Bilgilerini Düzenle", 480, 340, parent)
+        bilgi = ttk.Label(kart, text="Seçenekler yükleniyor…")
+        bilgi.pack(anchor="w", padx=14, pady=(12, 0))
+        alanlar = {}
+        for alan, tur, baslik in [("suni_isim", "suni", "Suni Tohumlama Çeşidi"),
+                                  ("veteriner", "veteriner", "Uygulayan Veteriner")]:
+            if tur == "suni" and kayit.get("sekil") != "Suni":
+                continue
+            ttk.Label(kart, text=baslik).pack(anchor="w", padx=14, pady=(12, 4))
+            girdi = ttk.Combobox(kart, state="disabled")
+            girdi.set(kayit.get(alan) or "")
+            girdi.pack(fill="x", padx=14)
+            alanlar[alan] = (tur, girdi)
+        hazir = False
+        kaydediliyor = False
+
+        def kapat():
+            if kaydediliyor:
+                return
+            pencere.destroy()
+            if parent.winfo_exists():
+                parent.grab_set()
+
+        def secenekleri_goster(veri):
+            nonlocal hazir
+            var = False
+            for tur, girdi in alanlar.values():
+                adlar = veri.get(tur) or ()
+                girdi.configure(values=adlar, state="readonly" if adlar else "disabled")
+                var = var or bool(adlar)
+            bilgi.configure(text="" if var else "Bu çiftlikte kayıtlı seçenek yok.")
+            hazir = var
+
+        def kaydet():
+            nonlocal kaydediliyor
+            if not hazir or kaydediliyor:
+                return
+            veri = {alan: girdi.get() for alan, (_, girdi) in alanlar.items()
+                    if girdi.get() != (kayit.get(alan) or "")}
+            if not veri:
+                kapat()
+                return
+            if self.api_yazma_kuyruga_alinmali_mi(h_id):
+                return messagebox.showwarning("Tohumlama", "Önce bekleyen hayvan kayıtlarını senkronize edin.", parent=pencere)
+            sorgu = {"kayitli_secenekler": "true"}
+            surum = hayvan.get("son_guncelleme")
+            if surum:
+                sorgu["beklenen_son_guncelleme"] = surum
+            hedef = f"/api/hayvanlar/{self.api_ref(h_id)}/tohumlamalar/{self.api_ref(kayit['id'])}?{urlencode(sorgu)}"
+            kaydediliyor = True
+
+            def hata(mesaj):
+                nonlocal kaydediliyor
+                kaydediliyor = False
+                messagebox.showerror("Tohumlama Kaydedilemedi", mesaj, parent=pencere)
+
+            def tamamla(sonuc):
+                nonlocal kaydediliyor
+                kaydediliyor = False
+                degisen = {alan: sonuc.get(alan) for alan in veri}
+                kayit.update(degisen)
+                yeni_surum = sonuc.get("hayvan_son_guncelleme")
+                guncel = self.hayvanlar.get(h_id)
+                if guncel is not None and guncel.get("son_guncelleme") == surum:
+                    for tohumlama in guncel.get("tohumlamalar") or []:
+                        if tohumlama.get("id") == kayit["id"]:
+                            tohumlama.update(degisen)
+                    if yeni_surum:
+                        guncel["son_guncelleme"] = yeni_surum
+                        self._api_base_versions[str(h_id)] = yeni_surum
+                    self.json_dosyasi_kaydet(self.data_file, self.hayvanlar, "hayvan_verileri", "API Önbellek Kayıt Hatası")
+                kapat()
+                yenile()
+
+            self.ek_kayit_istegi(pencere, "PATCH", hedef, tamamla, veri=veri, hata=hata)
+
+        bar = self.popup_buton_bar(kart)
+        self.modern_buton(bar, "Kaydet", kaydet, purpose="primary", small=True).pack(side="left", padx=(0, 8))
+        self.modern_buton(bar, "Vazgeç", kapat, small=True).pack(side="left")
+        pencere.protocol("WM_DELETE_WINDOW", kapat)
+        self.pencere_ortala(pencere, parent)
+        pencere.grab_set()
+        self.ek_kayit_istegi(pencere, "GET", yol, secenekleri_goster,
+                             hata=lambda mesaj: bilgi.configure(text="Seçenekler yüklenemedi."))
 
     def hayvan_kolonlarini_uygula(self):
         kullanici = (getattr(self, "api_kullanici", None) or {}).get("id") or "yerel"
