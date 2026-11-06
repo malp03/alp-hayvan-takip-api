@@ -9,7 +9,7 @@ import os
 import re
 import secrets
 import time
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Literal, Optional
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -2766,6 +2766,7 @@ def update_tohumlama(
     tohumlama_ref: str,
     tohumlama: schemas.TohumlamaUpdate,
     beklenen_son_guncelleme: Optional[str] = Query(default=None),
+    kayitli_secenekler: bool = Query(default=False),
     db: Session = Depends(get_db),
     kullanici: models.Kullanici = Depends(get_current_user),
 ):
@@ -2774,16 +2775,34 @@ def update_tohumlama(
     veri = db_hayvandan_payload(db_hayvan, include_photo_urls=False)
     mevcut_kayit = nested_kayit_bul(veri.setdefault("tohumlamalar", []), tohumlama_ref, "Tohumlama")
     kayit = dict(mevcut_kayit)
-    kayit.update(model_verisi(tohumlama, exclude_unset=True))
+    degisiklik = model_verisi(tohumlama, exclude_unset=True)
+    kayit.update(degisiklik)
     kayit = normalize_tohumlama(kayit)
-    doguma_bagli_tohumlama_duzenleme_kontrolu(veri, mevcut_kayit, kayit)
-    tohumlama_tarih_kurallarini_kontrol(veri, kayit)
+    alanlar = {alan for alan in degisiklik if kayit.get(alan) != mevcut_kayit.get(alan)}
+    if kayitli_secenekler is True:
+        for alan, tur in (("suni_isim", "suni"), ("veteriner", "veteriner")):
+            kontrol = alan in alanlar or (tur == "suni" and "sekil" in alanlar)
+            if not kontrol or (tur == "suni" and kayit.get("sekil") == "Boğa"):
+                continue
+            deger = metin(kayit.get(alan))
+            if not deger and tur == "veteriner":
+                continue
+            secenek = tohumlama_secenegi_sorgusu(db, db_hayvan.ciftlik_id, tur, deger).first()
+            if not secenek:
+                raise HTTPException(409, "Seçenek çiftlik listesinde yok. Listeyi yenileyip yeniden seçin.")
+            kayit[alan] = secenek.ad
+    ureme_degisti = bool(alanlar - {"suni_isim", "veteriner"})
+    if ureme_degisti:
+        doguma_bagli_tohumlama_duzenleme_kontrolu(veri, mevcut_kayit, kayit)
+        tohumlama_tarih_kurallarini_kontrol(veri, kayit)
     for index, mevcut in enumerate(veri["tohumlamalar"]):
         if mevcut.get("id") == kayit.get("id"):
             veri["tohumlamalar"][index] = kayit
             break
-    eski_tohumlama_pozitif_olamaz(veri, kayit)
-    tohumlama_sonucunu_isle(veri)
+    if ureme_degisti:
+        if alanlar & {"gebe_mi", "tarih"}:
+            eski_tohumlama_pozitif_olamaz(veri, kayit)
+        tohumlama_sonucunu_isle(veri)
     audit_kaydi(
         db, kullanici, "tohumlama_guncelle", "Tohumlama kaydı güncellendi.",
         ciftlik_id=veri.get("ciftlik_id"), hedef_tipi="hayvan", hedef_id=db_hayvan.id,
@@ -3842,6 +3861,12 @@ def ek_kayit_ciftligi(db: Session, kullanici: models.Kullanici, ciftlik_id: str)
     ciftlik_bul(db, ciftlik_id)
 
 
+def tohumlama_secenegi_sorgusu(db, ciftlik_id, tur, ad):
+    return db.query(models.TohumlamaSecenegi).filter_by(
+        ciftlik_id=ciftlik_id, tur=tur, ad_anahtari=" ".join(ad.split()).casefold(),
+    )
+
+
 @app.get("/api/ciftlikler/{ciftlik_id}/tohumlama-secenekleri")
 def get_tohumlama_secenekleri(ciftlik_id: str, db: Session = Depends(get_db),
                                kullanici: models.Kullanici = Depends(get_current_user)):
@@ -3859,7 +3884,7 @@ def create_tohumlama_secenegi(ciftlik_id: str, istek: schemas.TohumlamaSecenekCr
     ad = " ".join(istek.ad.split())
     if not ad:
         raise HTTPException(400, "İsim boş olamaz.")
-    sorgu = db.query(models.TohumlamaSecenegi).filter_by(ciftlik_id=ciftlik_id, tur=istek.tur, ad_anahtari=ad.casefold())
+    sorgu = tohumlama_secenegi_sorgusu(db, ciftlik_id, istek.tur, ad)
     mevcut = sorgu.first()
     if mevcut:
         return {"ad": mevcut.ad, "tur": mevcut.tur}
@@ -3873,6 +3898,36 @@ def create_tohumlama_secenegi(ciftlik_id: str, istek: schemas.TohumlamaSecenekCr
             raise
         ad = mevcut.ad
     return {"ad": ad, "tur": istek.tur}
+
+
+@app.patch("/api/ciftlikler/{ciftlik_id}/tohumlama-secenekleri")
+def update_tohumlama_secenegi(ciftlik_id: str, istek: schemas.TohumlamaSecenekCreate,
+                              eski_ad: str = Query(min_length=1, max_length=100),
+                              db: Session = Depends(get_db), kullanici: models.Kullanici = Depends(get_current_user)):
+    ek_kayit_ciftligi(db, kullanici, ciftlik_id)
+    ad = " ".join(istek.ad.split())
+    if not ad:
+        raise HTTPException(400, "İsim boş olamaz.")
+    kayit = tohumlama_secenegi_sorgusu(db, ciftlik_id, istek.tur, eski_ad).with_for_update().first()
+    if not kayit:
+        raise HTTPException(404, "Seçenek bulunamadı. Listeyi yenileyin.")
+    kayit.ad, kayit.ad_anahtari = ad, ad.casefold()
+    try:
+        db.commit()
+    except IntegrityError as hata:
+        db.rollback()
+        raise HTTPException(409, "Bu isim seçim listesinde zaten var.") from hata
+    return {"ad": ad, "tur": istek.tur}
+
+
+@app.delete("/api/ciftlikler/{ciftlik_id}/tohumlama-secenekleri")
+def delete_tohumlama_secenegi(ciftlik_id: str, tur: Literal["suni", "veteriner"],
+                              ad: str = Query(min_length=1, max_length=100),
+                              db: Session = Depends(get_db), kullanici: models.Kullanici = Depends(get_current_user)):
+    ek_kayit_ciftligi(db, kullanici, ciftlik_id)
+    tohumlama_secenegi_sorgusu(db, ciftlik_id, tur, ad).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "ok"}
 
 
 def olay_payload(kayit: models.HayvanOlay) -> dict:
